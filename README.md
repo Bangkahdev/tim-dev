@@ -21,3 +21,5 @@ Server hanya bind ke `127.0.0.1`. Percakapan dengan manager memakai model manage
 - **Quality Assurance**: pemeriksaan dan laporan QA.
 
 Papan tugas dan linimasa membaca status `.factory/state.json` serta `logs/factory.log`, diperbarui otomatis. Untuk sekarang server menerima satu pekerjaan berjalan pada satu waktu; riwayat chat disimpan selama server hidup.
+
+Karakter kantor memakai animasi CSS untuk mengetik saat tugas aktif dan mengambil jeda kopi saat idle, dengan gerakan dihentikan bila perangkat meminta reduced motion. Ruang Kesehatan AI menyimpan nama, role, model, aktivitas, jumlah tugas, durasi kerja, serta penggunaan token per karyawan di `logs/employee_health.json`. Token ditampilkan hanya jika CrewAI/provider melaporkan metriknya; bila tidak, UI menyebutnya belum tersedia alih-alih menampilkan estimasi.
