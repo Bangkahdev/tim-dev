@@ -21,6 +21,7 @@ from textual.containers import Horizontal
 
 from core.project_state import ProjectState
 from core.lead_manager import LeadManager
+from core.employee_health import record_activity
 
 
 # ============================================================
@@ -479,6 +480,7 @@ class AICodingFactory:
 
         self.state = None
         self.lead_manager = None
+        self.agent_keys = {}
 
     # --------------------------------------------------------
     # CREATE AGENTS
@@ -621,6 +623,7 @@ class AICodingFactory:
             verbose=True
         )
 
+        self.agent_keys = {id(agent): name for name, agent in agents.items()}
         return agents
 
     # --------------------------------------------------------
@@ -628,15 +631,31 @@ class AICodingFactory:
     # --------------------------------------------------------
 
     def run_phase(self, agents, tasks):
-
-        crew = Crew(
-            agents=agents,
-            tasks=tasks,
-            process=Process.sequential,
-            verbose=True
-        )
-
-        return crew.kickoff()
+        result = None
+        for task in tasks:
+            agent = task.agent
+            agent_key = self.agent_keys.get(id(agent), "lead")
+            detail = task.description.strip().splitlines()[0][:180]
+            self.state.set_agent(agent_key, "working", detail)
+            record_activity(agent_key, "working", detail)
+            self.logger.log(f"[AGENT] {agent_key} memulai tugas.")
+            crew = Crew(
+                agents=[agent],
+                tasks=[task],
+                process=Process.sequential,
+                verbose=True
+            )
+            try:
+                result = crew.kickoff()
+            except Exception as error:
+                self.state.set_agent(agent_key, "failed", str(error)[:400])
+                record_activity(agent_key, "failed", str(error)[:240])
+                raise
+            usage = getattr(result, "token_usage", None) or getattr(crew, "usage_metrics", None)
+            self.state.set_agent(agent_key, "completed", str(result)[:1000])
+            record_activity(agent_key, "completed", detail, usage)
+            self.logger.log(f"[AGENT] {agent_key} menyelesaikan tugas.")
+        return result
 
     # --------------------------------------------------------
     # PHASE 1: PLANNING

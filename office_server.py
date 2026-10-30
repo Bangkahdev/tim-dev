@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from crewai import Agent, Crew, Process, Task
 
 from main import AICodingFactory, LOG_DIR, MODEL_MANAGER, OLLAMA_URL, WORKSPACE, LLM, check_ollama
+from core.employee_health import get_health_snapshot, record_activity
 
 BASE_DIR = Path(__file__).resolve().parent
 WEB_DIR = BASE_DIR / "web"
@@ -81,6 +82,7 @@ class OfficeHandler(BaseHTTPRequestHandler):
                 "active": dict(ACTIVE),
                 "projects": projects[:10],
                 "project": latest,
+                "health": get_health_snapshot(),
                 "activity": read_activity(),
             })
             return
@@ -172,7 +174,10 @@ class OfficeHandler(BaseHTTPRequestHandler):
                 expected_output="Balasan diskusi dari Lead Manager beserta pemahaman dan rencana kerja sementara.",
                 agent=lead,
             )
-            answer = str(Crew(agents=[lead], tasks=[task], process=Process.sequential, verbose=False).kickoff())
+            crew = Crew(agents=[lead], tasks=[task], process=Process.sequential, verbose=False)
+            output = crew.kickoff()
+            answer = str(output)
+            record_activity("lead", "idle", "Berdiskusi dengan owner.", getattr(output, "token_usage", None) or getattr(crew, "usage_metrics", None))
             CHAT_HISTORY.extend([{"role": "owner", "content": message}, {"role": "manager", "content": answer}])
             self.send_json({"reply": answer})
         except Exception as error:

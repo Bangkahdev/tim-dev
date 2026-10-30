@@ -2,6 +2,7 @@
 from crewai import Task, Crew, Process
 
 from core.task_router import TaskRouter
+from core.employee_health import record_activity
 
 
 class LeadManager:
@@ -88,6 +89,7 @@ class LeadManager:
             )
 
             result = crew.kickoff()
+            record_activity(name, "completed", "Menyelesaikan tugas perbaikan.", getattr(result, "token_usage", None) or getattr(crew, "usage_metrics", None))
 
             self.state.set_agent(
                 name,
@@ -108,6 +110,8 @@ class LeadManager:
             return str(result)
 
         except Exception as error:
+
+            record_activity(name, "failed", str(error))
 
             self.state.set_agent(
                 name,
@@ -172,7 +176,9 @@ class LeadManager:
             verbose=True
         )
 
-        return str(crew.kickoff())
+        result = crew.kickoff()
+        record_activity("lead", "completed", "Meninjau hasil QA dan menentukan tindak lanjut.", getattr(result, "token_usage", None) or getattr(crew, "usage_metrics", None))
+        return str(result)
 
     def get_project_status(self):
 

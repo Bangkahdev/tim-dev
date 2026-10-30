@@ -5,7 +5,7 @@ AI Coding Factory kini memiliki antarmuka kantor berbasis web lokal. Owner berdi
 ## Menjalankan
 
 1. Pasang dependensi yang tercantum di `requirements.txt`.
-2. Jalankan Ollama dan pastikan model `qwen2.5-coder:1.5b` serta `llama3.2:3b` tersedia.
+2. Jalankan Ollama dan pastikan model `o` serta `llama3.2:3b` tersedia.
 3. Dari folder proyek, jalankan `python office_server.py`.
 4. Buka `http://127.0.0.1:8765` di browser.
 
