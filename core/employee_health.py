@@ -28,6 +28,11 @@ def _empty_employee(employee_id):
         "completion_tokens": 0,
         "total_tokens": 0,
         "requests": 0,
+        "tasks_completed": 0,
+        "usage_available": False,
+        "runtime_seconds": 0,
+        "current_started_at": None,
+        "last_duration_seconds": 0,
         "last_activity_at": None,
         "last_detail": "Belum ada aktivitas tercatat.",
         "events": [],
@@ -66,6 +71,18 @@ def record_activity(employee_id, status=None, detail=None, usage=None):
     with LOCK:
         data = _load()
         employee = data["employees"][employee_id]
+        duration = 0
+        if status == "working":
+            employee["current_started_at"] = timestamp
+        elif status in ("completed", "failed") and employee.get("current_started_at"):
+            try:
+                started = datetime.fromisoformat(employee["current_started_at"])
+                duration = max(0, int((datetime.fromisoformat(timestamp) - started).total_seconds()))
+            except (TypeError, ValueError):
+                duration = 0
+            employee["runtime_seconds"] += duration
+            employee["last_duration_seconds"] = duration
+            employee["current_started_at"] = None
         if usage is not None:
             if hasattr(usage, "model_dump"):
                 usage = usage.model_dump()
@@ -78,12 +95,20 @@ def record_activity(employee_id, status=None, detail=None, usage=None):
             completion = _number(usage, "completion_tokens", "output_tokens")
             total = _number(usage, "total_tokens") or prompt + completion
             requests = _number(usage, "successful_requests", "requests")
+            employee["usage_available"] = employee["usage_available"] or any(
+                key in usage for key in (
+                    "prompt_tokens", "input_tokens", "completion_tokens",
+                    "output_tokens", "total_tokens"
+                )
+            )
             employee["prompt_tokens"] += prompt
             employee["completion_tokens"] += completion
             employee["total_tokens"] += total
             employee["requests"] += requests
         if status:
             employee["status"] = status
+            if status == "completed":
+                employee["tasks_completed"] += 1
         employee["last_activity_at"] = timestamp
         if detail:
             employee["last_detail"] = detail[:400]

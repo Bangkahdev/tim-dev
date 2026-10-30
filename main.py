@@ -21,7 +21,7 @@ from textual.containers import Horizontal
 
 from core.project_state import ProjectState
 from core.lead_manager import LeadManager
-from core.employee_health import record_activity
+from core.employee_health import EMPLOYEES, record_activity
 
 
 # ============================================================
@@ -672,13 +672,6 @@ class AICodingFactory:
             current_phase="planning"
         )
 
-        for agent_name in ("coo", "architect", "lead"):
-            self.state.set_agent(
-                agent_name,
-                "working",
-                "Menyusun dan meninjau rencana proyek."
-            )
-
         planning = Task(
             description=f"""
             Instruksi pemilik:
@@ -767,13 +760,6 @@ class AICodingFactory:
             str(result)[:3000]
         )
 
-        for agent_name in ("coo", "architect", "lead"):
-            self.state.set_agent(
-                agent_name,
-                "completed",
-                "Tahap perencanaan selesai."
-            )
-
         return planning, architecture, review
 
     # --------------------------------------------------------
@@ -795,13 +781,6 @@ class AICodingFactory:
         self.state.update(
             current_phase="development"
         )
-
-        for agent_name in ("backend", "api", "frontend"):
-            self.state.set_agent(
-                agent_name,
-                "working",
-                "Tugas pengembangan didelegasikan oleh Lead Manager."
-            )
 
         backend_task = Task(
             description="""
@@ -909,13 +888,6 @@ class AICodingFactory:
             "development_completed",
             str(result)[:3000]
         )
-
-        for agent_name in ("backend", "api", "frontend"):
-            self.state.set_agent(
-                agent_name,
-                "completed",
-                "Tahap pengembangan selesai; menunggu hasil QA."
-            )
 
         return result
 
@@ -1153,6 +1125,10 @@ class AICodingFactory:
             current_phase="initialization",
             qa_status="pending"
         )
+
+        for employee_id in EMPLOYEES:
+            self.state.set_agent(employee_id, "idle", "Menunggu arahan berikutnya.")
+            record_activity(employee_id, "idle", "Menunggu arahan berikutnya.")
 
         self.state.add_history(
             "owner",
