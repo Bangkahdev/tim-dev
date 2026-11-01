@@ -34,7 +34,7 @@ ROSTER = [
         ["kepemimpinan", "tinjauan teknis", "perencanaan"],
         [
             "create_task", "update_task", "move_employee", "create_meeting",
-            "generate_report", "create_project", "search_knowledge",
+            "run_meeting", "generate_report", "create_project", "search_knowledge",
             "print_paper", "deliver_paper",
         ],
     ),
@@ -42,7 +42,7 @@ ROSTER = [
         "coo", "Sinta", "COO / Project Manager", "engineering", "lead",
         "Ruang Perencanaan", "Meja COO", "👩🏽‍💼",
         ["perencanaan", "prioritas", "koordinasi"],
-        ["create_task", "update_task", "create_meeting", "generate_report", "search_knowledge", "print_paper", "deliver_paper"],
+        ["create_task", "update_task", "create_meeting", "run_meeting", "generate_report", "search_knowledge", "print_paper", "deliver_paper"],
     ),
     (
         "architect", "Raka", "System Architect", "engineering", "lead",
@@ -79,8 +79,8 @@ ROSTER = [
         "Ruang Promosi", "Meja Manajer Promosi", "📣",
         ["strategi kampanye", "penyuntingan", "penjadwalan konten"],
         [
-            "create_task", "update_task", "create_meeting", "generate_report",
-            "draft_email", "propose_website_publish", "search_knowledge",
+            "create_task", "update_task", "create_meeting", "run_meeting",
+            "generate_report", "draft_email", "propose_website_publish", "search_knowledge",
             "print_paper", "deliver_paper",
         ],
     ),

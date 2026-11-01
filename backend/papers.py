@@ -67,8 +67,8 @@ def list_papers(conn, *, delivery_status: str | None = None, limit: int = 100) -
     return [_decode(row) for row in rows]
 
 
-def tray(conn) -> list[dict[str, Any]]:
-    rows = fetch_all(
+def _tray_rows(conn) -> list[dict[str, Any]]:
+    return fetch_all(
         conn,
         """
         SELECT * FROM papers
@@ -78,11 +78,49 @@ def tray(conn) -> list[dict[str, Any]]:
                  created_at ASC
         """,
     )
-    return [_decode(row) for row in rows]
+
+
+def tray(conn, *, limit: int | None = None) -> list[dict[str, Any]]:
+    rows = _tray_rows(conn)
+    cap = max(1, limit or settings.PAPER_TRAY_LIMIT)
+    return [_decode(row) for row in rows[:cap]]
+
+
+def tray_summary(conn, *, limit: int | None = None) -> dict[str, Any]:
+    rows = _tray_rows(conn)
+    cap = max(1, limit or settings.PAPER_TRAY_LIMIT)
+    visible = [_decode(row) for row in rows[:cap]]
+    hidden = rows[cap:]
+    by_priority: dict[str, int] = {}
+    by_type: dict[str, int] = {}
+    for row in rows:
+        by_priority[row.get("priority") or "normal"] = by_priority.get(row.get("priority") or "normal", 0) + 1
+        by_type[row.get("type") or "unknown"] = by_type.get(row.get("type") or "unknown", 0) + 1
+    summary_sheet = None
+    if hidden:
+        summary_sheet = {
+            "title": "Ringkasan tray",
+            "total": len(rows),
+            "visible": len(visible),
+            "overflow": len(hidden),
+            "by_priority": by_priority,
+            "by_type": by_type,
+        }
+    return {
+        "papers": visible,
+        "pending": len(rows),
+        "limit": cap,
+        "overflow": len(hidden),
+        "overflow_papers": [
+            {"id": row["id"], "summary": row.get("summary", ""), "priority": row.get("priority")}
+            for row in hidden
+        ],
+        "summary_sheet": summary_sheet,
+    }
 
 
 def pending_count(conn) -> int:
-    return len(tray(conn))
+    return len(_tray_rows(conn))
 
 
 def create_paper(
