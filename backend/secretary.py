@@ -89,8 +89,28 @@ def handle_command(
     *,
     actor: str = "secretary",
     thread_id: str = "owner-secretary",
+    preview: bool = False,
 ) -> dict[str, Any]:
     plan = orchestrator.build_plan(conn, text, actor=actor)
+    if preview:
+        reply = "Pratinjau rencana. Kirim ulang tanpa preview untuk menjalankan."
+        if plan.get("needs_clarification"):
+            reply = plan.get("clarification") or reply
+        chat.append(conn, thread_type="secretary", thread_id=thread_id, sender="owner", role="owner", content=text)
+        chat.append(conn, thread_type="secretary", thread_id=thread_id, sender="secretary", role="assistant", content=reply)
+        audit.log(
+            conn, actor=actor, actor_kind="manager", action="secretary.preview",
+            detail=str({"intent": plan.get("intent"), "steps": len(plan.get("steps") or [])}),
+            ref_type="command", ref_id=plan.get("intent"),
+        )
+        events.publish(conn, "secretary.preview", actor, {"intent": plan.get("intent"), "plan": plan})
+        return {
+            "reply": reply,
+            "status": "PREVIEW",
+            "plan": plan,
+            "results": [],
+            "clarification": plan.get("clarification"),
+        }
     outcome = orchestrator.execute_plan(conn, plan, actor=actor)
     reply = _reply_for(plan, outcome)
     chat.append(conn, thread_type="secretary", thread_id=thread_id, sender="owner", role="owner", content=text)

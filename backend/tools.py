@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from . import audit, events, org, papers, settings, tasks
+from . import audit, emailer, events, knowledge, meetings, org, papers, settings, tasks, website
 from .db import fetch_all, fetch_one, json_dump, now
 from .sandbox import redact
 
@@ -108,40 +108,29 @@ def _move_employee(conn, actor: str, args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _create_meeting(conn, actor: str, args: dict[str, Any]) -> dict[str, Any]:
-    title = str(args.get("title") or args.get("judul") or "").strip()
-    agenda = str(args.get("agenda") or "").strip()
-    if not title:
-        raise ToolError("Judul rapat wajib diisi.")
     raw_participants = args.get("participants") or args.get("peserta") or []
     if isinstance(raw_participants, str):
         raw_participants = [raw_participants]
-    participant_ids: list[str] = []
-    for item in raw_participants:
-        employee = _resolve(conn, {"value": item}, "value")
-        if employee and employee["id"] not in participant_ids:
-            participant_ids.append(employee["id"])
-    meeting_id = f"meet_{uuid.uuid4().hex[:10]}"
-    conn.execute(
-        """
-        INSERT INTO meetings
-            (id, title, agenda, participants, room, scheduled_at, status,
-             transcript, minutes, decisions, created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, 'SCHEDULED', '[]', '', '[]', ?, ?)
-        """,
-        (
-            meeting_id, title, agenda, json_dump(participant_ids),
-            args.get("room", "ruang_rapat"), args.get("scheduled_at"), actor, now(),
-        ),
+    meeting = meetings.create_meeting(
+        conn,
+        title=str(args.get("title") or args.get("judul") or ""),
+        agenda=str(args.get("agenda") or ""),
+        participants=[str(item) for item in raw_participants],
+        room=str(args.get("room") or "ruang_rapat"),
+        scheduled_at=args.get("scheduled_at"),
+        created_by=actor,
+        actor_kind="owner" if actor == "owner" else "manager",
+        run_now=bool(args.get("run_now")),
+        rounds=args.get("rounds"),
     )
-    audit.log(
-        conn, actor=actor, actor_kind="manager", action="meeting.created",
-        detail=json_dump({"title": title, "participants": participant_ids}),
-        ref_type="meeting", ref_id=meeting_id,
-    )
-    events.publish(conn, "meeting.created", actor, {"meeting_id": meeting_id, "title": title})
-    return {
-        "meeting": dict(fetch_one(conn, "SELECT * FROM meetings WHERE id = ?", (meeting_id,)) or {}),
-    }
+    return {"meeting": meeting}
+
+
+def _run_meeting(conn, actor: str, args: dict[str, Any]) -> dict[str, Any]:
+    meeting_id = str(args.get("meeting_id") or "").strip()
+    if not meeting_id:
+        raise ToolError("meeting_id wajib diisi.")
+    return {"meeting": meetings.run_meeting(conn, meeting_id, actor=actor, rounds=args.get("rounds"))}
 
 
 def _generate_report(conn, actor: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -198,43 +187,40 @@ def _create_project(conn, actor: str, args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _draft_email(conn, actor: str, args: dict[str, Any]) -> dict[str, Any]:
-    recipient = str(args.get("to") or args.get("recipient") or "").strip()
-    subject = str(args.get("subject") or args.get("subjek") or "").strip()
-    body = str(args.get("body") or args.get("isi") or "").strip()
-    if not recipient or "@" not in recipient:
-        raise ToolError("Alamat email penerima wajib dan harus valid.")
-    if not subject:
-        raise ToolError("Subjek email wajib diisi.")
-    payload = {"to": recipient, "subject": subject, "body": body, "attachments": args.get("attachments", [])}
-    bundle = papers.create_approval_bundle(
-        conn, approval_type="email", payload=payload, requester=actor,
-        summary=f"Draf email ke {recipient}: {subject}", task_id=args.get("task_id"),
-    )
-    if args.get("auto_deliver", True):
-        papers.print_paper(conn, bundle["paper"]["id"], actor=actor)
-        bundle["paper"] = papers.deliver_paper(conn, bundle["paper"]["id"], actor=actor)
-    return {"status": "PENDING_APPROVAL", **bundle}
+    try:
+        return emailer.create_draft(
+            conn,
+            to=str(args.get("to") or args.get("recipient") or ""),
+            subject=str(args.get("subject") or args.get("subjek") or ""),
+            body=str(args.get("body") or args.get("isi") or ""),
+            attachments=[str(item) for item in (args.get("attachments") or [])],
+            requester=actor,
+            task_id=args.get("task_id"),
+            auto_deliver=bool(args.get("auto_deliver", True)),
+        )
+    except emailer.EmailError as error:
+        raise ToolError(str(error)) from error
 
 
 def _propose_website(conn, actor: str, args: dict[str, Any]) -> dict[str, Any]:
-    diff = str(args.get("diff") or args.get("changes") or "").strip()
-    summary = str(args.get("summary") or args.get("ringkasan") or "Perubahan website").strip()
-    if not diff:
-        raise ToolError("Paket perubahan website wajib berisi diff atau pratinjau.")
-    payload = {
-        "url": settings.WEBSITE_URL,
-        "summary": summary,
-        "diff": diff,
-        "release_id": f"rel_{uuid.uuid4().hex[:10]}",
-    }
-    bundle = papers.create_approval_bundle(
-        conn, approval_type="website", payload=payload, requester=actor,
-        summary=f"Publikasi website: {summary}", task_id=args.get("task_id"),
-    )
-    if args.get("auto_deliver", True):
-        papers.print_paper(conn, bundle["paper"]["id"], actor=actor)
-        bundle["paper"] = papers.deliver_paper(conn, bundle["paper"]["id"], actor=actor)
-    return {"status": "PENDING_APPROVAL", **bundle}
+    try:
+        return website.create_deployment(
+            conn,
+            diff=str(args.get("diff") or args.get("changes") or ""),
+            summary=str(args.get("summary") or args.get("ringkasan") or "Perubahan website"),
+            requester=actor,
+            task_id=args.get("task_id"),
+            auto_deliver=bool(args.get("auto_deliver", True)),
+        )
+    except website.WebsiteError as error:
+        raise ToolError(str(error)) from error
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(settings.BASE_DIR))
+    except ValueError:
+        return str(path)
 
 
 def _search_knowledge(conn, actor: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -253,10 +239,12 @@ def _search_knowledge(conn, actor: str, args: dict[str, Any]) -> dict[str, Any]:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
+            if knowledge.contains_secrets(text):
+                continue
             if query in text.lower():
                 index = text.lower().find(query)
                 results.append({
-                    "path": str(path.relative_to(settings.BASE_DIR)),
+                    "path": _display_path(path),
                     "snippet": redact(text[max(0, index - 80): index + 200]),
                 })
             if len(results) >= 8:
@@ -300,6 +288,7 @@ REGISTRY: dict[str, dict[str, Any]] = {
     "update_task": {"handler": _update_task, "risk": "internal"},
     "move_employee": {"handler": _move_employee, "risk": "internal"},
     "create_meeting": {"handler": _create_meeting, "risk": "internal"},
+    "run_meeting": {"handler": _run_meeting, "risk": "internal"},
     "generate_report": {"handler": _generate_report, "risk": "internal"},
     "create_project": {"handler": _create_project, "risk": "internal"},
     "draft_email": {"handler": _draft_email, "risk": "external"},

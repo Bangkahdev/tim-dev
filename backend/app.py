@@ -20,7 +20,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, 
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import audit, auth, chat, conversation, db, events, org, papers, secretary, settings, tasks, tools
+from . import audit, auth, chat, conversation, db, emailer, events, knowledge, meetings, monitor, org, papers, secretary, settings, tasks, tools, website
 from .db import fetch_all, fetch_one, json_dump, json_load, now
 
 WEB_DIR = settings.BASE_DIR / "web"
@@ -29,6 +29,7 @@ LLM_LOCK = threading.Lock()
 ACTIVE = {"running": False, "command": "", "started_at": None, "error": None}
 EMPLOYEE_CHAT_ACTIVE: dict[str, dict[str, Any]] = {}
 STATE_LOCK = threading.Lock()
+EMAIL_SYNC_STOP = threading.Event()
 _OLLAMA_CACHE: dict[str, Any] = {"checked_at": 0.0, "result": [False, "Belum diperiksa."]}
 
 
@@ -39,11 +40,32 @@ def _init() -> None:
 _init()
 
 
+def _email_sync_worker() -> None:
+    """Tarik email masuk secara berkala (EML-02) bila akun dikonfigurasi."""
+    interval = max(60, settings.EMAIL_SYNC_MINUTES * 60)
+    while not EMAIL_SYNC_STOP.wait(interval):
+        if not settings.EMAIL_IMAP_HOST:
+            continue
+        try:
+            with db.transaction() as conn:
+                emailer.sync_inbox(conn)
+        except Exception:
+            continue
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     _init()
     events.attach_loop(asyncio.get_running_loop())
-    yield
+    EMAIL_SYNC_STOP.clear()
+    worker = None
+    if settings.EMAIL_IMAP_HOST and settings.EMAIL_SYNC_MINUTES > 0:
+        worker = threading.Thread(target=_email_sync_worker, name="email-sync", daemon=True)
+        worker.start()
+    try:
+        yield
+    finally:
+        EMAIL_SYNC_STOP.set()
 
 
 app = FastAPI(title="Bangkah Company Simulator", version="1.0.0", lifespan=lifespan)
@@ -90,7 +112,11 @@ async def _value_error(_: Request, error: Exception):
     return JSONResponse({"error": str(error)}, status_code=400)
 
 
-for _error_type in (tasks.TaskError, papers.PaperError, tools.ToolError):
+for _error_type in (
+    tasks.TaskError, papers.PaperError, tools.ToolError,
+    meetings.MeetingError, monitor.MonitorError,
+    emailer.EmailError, website.WebsiteError, knowledge.KnowledgeError,
+):
     app.add_exception_handler(_error_type, _domain_error)
 app.add_exception_handler(ValueError, _value_error)
 
@@ -210,9 +236,14 @@ def status():
     projects = _projects()
     with db.connection() as conn:
         summary = _company_summary(conn)
-        summary["pending_papers"] = papers.pending_count(conn)
         employee_rows = org.employee_states(conn)
-        papers_list = papers.tray(conn)
+        tray = papers.tray_summary(conn)
+        summary["pending_papers"] = tray["pending"]
+        summary["paper_tray"] = {
+            "limit": tray["limit"],
+            "overflow": tray["overflow"],
+        }
+        papers_list = tray["papers"]
     with STATE_LOCK:
         active = dict(ACTIVE)
         employee_chats = dict(EMPLOYEE_CHAT_ACTIVE)
@@ -227,7 +258,11 @@ def status():
         "summary": summary,
         "employees": employee_rows,
         "papers": papers_list,
-        "pending_papers": len(papers_list),
+        "pending_papers": tray["pending"],
+        "paper_tray": {
+            "limit": tray["limit"],
+            "overflow": tray["overflow"],
+        },
         "server_time": now(),
     }
 
@@ -236,6 +271,52 @@ def _company_summary(conn) -> dict[str, Any]:
     from .orchestrator import company_status
 
     return company_status(conn)
+
+
+@app.get("/api/command-center")
+def command_center():
+    with db.connection() as conn:
+        summary = _company_summary(conn)
+        summary["tasks_overdue"] = tasks.overdue_tasks(conn)
+        project_rows = fetch_all(conn, "SELECT * FROM projects ORDER BY created_at DESC")
+        for row in project_rows:
+            counts = fetch_one(
+                conn,
+                "SELECT COUNT(*) AS total, SUM(status = 'COMPLETED') AS done FROM tasks WHERE project_id = ?",
+                (row["id"],),
+            )
+            row["task_total"] = int(counts["total"] or 0) if counts else 0
+            row["task_done"] = int(counts["done"] or 0) if counts else 0
+        usage = fetch_all(
+            conn,
+            """
+            SELECT employee_id, model, SUM(prompt_tokens) AS prompt_tokens,
+                   SUM(completion_tokens) AS completion_tokens,
+                   SUM(total_tokens) AS total_tokens,
+                   SUM(estimated_cost) AS estimated_cost
+            FROM usage_records GROUP BY employee_id, model
+            ORDER BY total_tokens DESC
+            """,
+        )
+        tray = papers.tray_summary(conn)
+        summary["pending_papers"] = tray["pending"]
+        return {
+            "summary": summary,
+            "papers": tray["papers"],
+            "paper_tray": {
+                "pending": tray["pending"],
+                "limit": tray["limit"],
+                "overflow": tray["overflow"],
+                "overflow_papers": tray["overflow_papers"],
+                "summary_sheet": tray["summary_sheet"],
+            },
+            "projects": project_rows,
+            "tasks": tasks.list_tasks(conn, limit=200),
+            "employees": org.employee_states(conn),
+            "usage": usage,
+            "activity": audit.list_entries(conn, limit=30),
+            "generated_at": now(),
+        }
 
 
 # ------------------------------------------------------------
@@ -320,6 +401,12 @@ def employee_state(employee_id: str, payload: EmployeeStateRequest, _: str = Dep
     with db.transaction() as conn:
         state = org.set_employee_state(conn, employee_id, room=payload.room, activity=payload.activity, source=payload.source)
     return {"state": state}
+
+
+@app.get("/api/employees/{employee_id}/monitor")
+def employee_monitor(employee_id: str, _: str = Depends(require_owner)):
+    with db.connection() as conn:
+        return {"monitor": monitor.employee_monitor(conn, employee_id)}
 
 
 # ------------------------------------------------------------
@@ -437,10 +524,16 @@ class MeetingCreate(BaseModel):
     participants: list[str] = []
     room: str = "ruang_rapat"
     scheduled_at: str | None = None
+    run_now: bool = False
+    rounds: int | None = None
+
+
+class MeetingInterjection(BaseModel):
+    content: str
 
 
 @app.get("/api/meetings")
-def meetings():
+def list_meetings():
     with db.connection() as conn:
         rows = fetch_all(conn, "SELECT * FROM meetings ORDER BY COALESCE(scheduled_at, created_at) ASC")
     for row in rows:
@@ -469,6 +562,23 @@ def create_meeting(payload: MeetingCreate, _: str = Depends(require_owner)):
     return result
 
 
+@app.post("/api/meetings/{meeting_id}/run")
+def run_meeting(meeting_id: str, rounds: int | None = None, _: str = Depends(require_owner)):
+    with db.transaction() as conn:
+        result = tools.execute(
+            conn, actor="owner", tool_name="run_meeting",
+            args={"meeting_id": meeting_id, "rounds": rounds},
+        )
+    return result
+
+
+@app.post("/api/meetings/{meeting_id}/interject")
+def interject_meeting(meeting_id: str, payload: MeetingInterjection, _: str = Depends(require_owner)):
+    with db.transaction() as conn:
+        meeting = meetings.interject(conn, meeting_id, payload.content, actor="owner")
+    return {"meeting": meeting}
+
+
 # ------------------------------------------------------------
 # Persetujuan dan Paper
 # ------------------------------------------------------------
@@ -486,8 +596,18 @@ class PaperRevise(BaseModel):
 @app.get("/api/papers")
 def list_papers(delivery_status: str | None = None, tray_only: bool = False, limit: int = 100):
     with db.connection() as conn:
-        rows = papers.tray(conn) if tray_only else papers.list_papers(conn, delivery_status=delivery_status, limit=limit)
-        pending = len(papers.tray(conn))
+        if tray_only:
+            tray = papers.tray_summary(conn, limit=limit)
+            return {
+                "papers": tray["papers"],
+                "pending": tray["pending"],
+                "limit": tray["limit"],
+                "overflow": tray["overflow"],
+                "overflow_papers": tray["overflow_papers"],
+                "summary_sheet": tray["summary_sheet"],
+            }
+        rows = papers.list_papers(conn, delivery_status=delivery_status, limit=limit)
+        pending = papers.pending_count(conn)
     return {"papers": rows, "pending": pending}
 
 
@@ -529,14 +649,22 @@ def decide_paper(paper_id: str, payload: PaperDecision, _: str = Depends(require
             failure = error
     if failure:
         raise HTTPException(status_code=getattr(failure, "status_code", 409), detail=str(failure))
-    return {"paper": paper}
+    _reflect_decision(paper)
+    execution = _execute_approval(paper.get("approval_id")) if paper["review_status"] == "APPROVED" else None
+    return {"paper": paper, "execution": execution}
 
 
 @app.post("/api/papers/{paper_id}/revise", status_code=201)
 def revise_paper(paper_id: str, payload: PaperRevise, _: str = Depends(require_owner)):
     with db.transaction() as conn:
         old = papers.get_paper(conn, paper_id)
+        old_approval = papers.get_approval(conn, old["approval_id"]) if old.get("approval_id") else None
         paper = papers.revise_paper(conn, paper_id, payload=payload.payload, summary=payload.summary, actor=old["creator"])
+        if old_approval and paper.get("approval_id"):
+            if old_approval["type"] == "email":
+                emailer.reattach_revision(conn, old["approval_id"], paper["approval_id"], payload.payload)
+            elif old_approval["type"] == "website":
+                website.reattach_revision(conn, old["approval_id"], paper["approval_id"], payload.payload)
         papers.print_paper(conn, paper["id"], actor=old["creator"])
         paper = papers.deliver_paper(conn, paper["id"], actor=old["creator"])
     return {"paper": paper}
@@ -591,7 +719,163 @@ def _decide_approval(approval_id: str, decision: str, note: str) -> dict[str, An
             failure = error
     if failure:
         raise HTTPException(status_code=getattr(failure, "status_code", 409), detail=str(failure))
-    return {"paper": paper}
+    _reflect_decision(paper)
+    execution = _execute_approval(paper.get("approval_id")) if paper["review_status"] == "APPROVED" else None
+    return {"paper": paper, "execution": execution}
+
+
+def _reflect_decision(paper: dict[str, Any]) -> None:
+    """Cerminkan penolakan/revisi ke outbox domain, bukan hanya ke Paper."""
+    approval_id = paper.get("approval_id")
+    review = paper.get("review_status")
+    if not approval_id or review not in ("REJECTED", "REVISION_REQUESTED"):
+        return
+    with db.transaction() as conn:
+        emailer.set_status_by_approval(conn, approval_id, review)
+        website.set_status_by_approval(conn, approval_id, review)
+
+
+def _execute_approval(approval_id: str | None) -> dict[str, Any] | None:
+    """Pekerja outbox: eksekusi aksi eksternal setelah persetujuan Owner (APR-10)."""
+    if not approval_id:
+        return None
+    try:
+        with db.transaction() as conn:
+            approval = papers.get_approval(conn, approval_id)
+            if approval["status"] != "APPROVED":
+                return None
+            if approval["type"] == "email":
+                return {"type": "email", "result": emailer.send_approved(conn, approval_id)}
+            if approval["type"] == "website":
+                return {"type": "website", "result": website.publish_approved(conn, approval_id)}
+    except Exception as error:
+        try:
+            with db.transaction() as conn:
+                audit.log(
+                    conn, actor="executor", actor_kind="backend", action="approval.execution_error",
+                    detail=json_dump({"approval_id": approval_id, "error": str(error)[:300]}),
+                    ref_type="approval", ref_id=approval_id,
+                )
+        except Exception:
+            pass
+        return {"error": str(error)}
+    return None
+
+
+@app.post("/api/approvals/{approval_id}/execute")
+def execute_approval(approval_id: str, _: str = Depends(require_owner)):
+    with db.transaction() as conn:
+        approval = papers.get_approval(conn, approval_id)
+    if approval["status"] != "APPROVED":
+        raise HTTPException(status_code=409, detail="Persetujuan belum disetujui Owner.")
+    return {"execution": _execute_approval(approval_id)}
+
+
+# ------------------------------------------------------------
+# Email: inbox, outbox, dan sinkronisasi (EML)
+# ------------------------------------------------------------
+
+class EmailDraftRequest(BaseModel):
+    to: str
+    subject: str
+    body: str = ""
+    attachments: list[str] = []
+    task_id: str | None = None
+
+
+@app.get("/api/inbox")
+def inbox(limit: int = 50):
+    with db.connection() as conn:
+        return {"messages": emailer.list_inbox(conn, limit=limit), "warning": emailer.UNTRUSTED_WARNING}
+
+
+@app.post("/api/inbox/sync")
+def inbox_sync(limit: int = 20, _: str = Depends(require_owner)):
+    with db.transaction() as conn:
+        messages = emailer.sync_inbox(conn, limit=limit)
+    return {"messages": messages, "warning": emailer.UNTRUSTED_WARNING}
+
+
+@app.get("/api/outbox")
+def outbox(limit: int = 50):
+    with db.connection() as conn:
+        return {"messages": emailer.list_outbox(conn, limit=limit)}
+
+
+@app.post("/api/outbox", status_code=201)
+def create_outbox(payload: EmailDraftRequest, _: str = Depends(require_owner)):
+    with db.transaction() as conn:
+        result = emailer.create_draft(
+            conn,
+            to=payload.to,
+            subject=payload.subject,
+            body=payload.body,
+            attachments=payload.attachments,
+            requester="owner",
+            task_id=payload.task_id,
+        )
+    return result
+
+
+@app.post("/api/outbox/process")
+def process_outbox(_: str = Depends(require_owner)):
+    with db.transaction() as conn:
+        return {"messages": emailer.process_outbox(conn)}
+
+
+# ------------------------------------------------------------
+# Website: paket rilis, publikasi, rollback (WEB)
+# ------------------------------------------------------------
+
+class WebsitePackageRequest(BaseModel):
+    summary: str
+    diff: str
+    task_id: str | None = None
+
+
+@app.get("/api/website/deployments")
+def website_deployments(limit: int = 50):
+    with db.connection() as conn:
+        return {"deployments": website.list_deployments(conn, limit=limit)}
+
+
+@app.post("/api/website/deployments", status_code=201)
+def create_website_deployment(payload: WebsitePackageRequest, _: str = Depends(require_owner)):
+    with db.transaction() as conn:
+        result = website.create_deployment(
+            conn,
+            summary=payload.summary,
+            diff=payload.diff,
+            requester="owner",
+            task_id=payload.task_id,
+        )
+    return result
+
+
+@app.get("/api/website/deployments/{release_id}")
+def website_deployment(release_id: str):
+    with db.connection() as conn:
+        return {"deployment": website.get_deployment(conn, release_id)}
+
+
+@app.post("/api/website/deployments/{release_id}/publish")
+def publish_website(release_id: str, _: str = Depends(require_owner)):
+    with db.transaction() as conn:
+        deployment = website.publish(conn, release_id, actor="owner")
+    return {"deployment": deployment}
+
+
+@app.post("/api/website/deployments/{release_id}/rollback")
+def rollback_website(release_id: str, _: str = Depends(require_owner)):
+    with db.transaction() as conn:
+        deployment = website.rollback(conn, release_id, actor="owner")
+    return {"deployment": deployment}
+
+
+@app.get("/api/website/deployments/{release_id}/reconcile")
+def reconcile_website(release_id: str):
+    with db.connection() as conn:
+        return website.reconcile(conn, release_id)
 
 
 # ------------------------------------------------------------
@@ -600,6 +884,7 @@ def _decide_approval(approval_id: str, decision: str, note: str) -> dict[str, An
 
 class SecretaryCommand(BaseModel):
     text: str
+    preview: bool = False
 
 
 @app.post("/api/secretary/command")
@@ -607,7 +892,7 @@ def secretary_command(payload: SecretaryCommand, _: str = Depends(require_owner)
     if not payload.text.strip():
         raise HTTPException(status_code=400, detail="Perintah tidak boleh kosong.")
     with db.transaction() as conn:
-        result = secretary.handle_command(conn, payload.text)
+        result = secretary.handle_command(conn, payload.text, preview=payload.preview)
     return result
 
 
@@ -660,29 +945,34 @@ def usage():
     }
 
 
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(settings.BASE_DIR))
+    except ValueError:
+        return str(path)
+
+
 def _knowledge_documents() -> list[dict[str, Any]]:
     documents = []
     for root in (settings.DOCS_DIR, settings.REPORT_DIR):
         if not root.exists():
             continue
         for path in root.rglob("*"):
-            if path.is_file() and path.suffix.lower() in {".md", ".txt", ".json"}:
-                documents.append({
-                    "path": str(path.relative_to(settings.BASE_DIR)),
-                    "size": path.stat().st_size,
-                    "updated_at": datetime.fromtimestamp(path.stat().st_mtime).astimezone().isoformat(timespec="seconds"),
-                })
+            if not path.is_file() or path.suffix.lower() not in {".md", ".txt", ".json"}:
+                continue
+            if knowledge.file_has_secrets(path):
+                continue
+            documents.append({
+                "path": _display_path(path),
+                "size": path.stat().st_size,
+                "updated_at": datetime.fromtimestamp(path.stat().st_mtime).astimezone().isoformat(timespec="seconds"),
+            })
     return documents
 
 
 class KnowledgeDocument(BaseModel):
     name: str
     content: str
-
-
-SECRET_PATTERN = re.compile(
-    r"(?i)(api[_-]?key|secret|password|passwd|token)\s*[=:]\s*['\"]?[A-Za-z0-9_\-./+]{12,}"
-)
 
 
 @app.get("/api/knowledge/documents")
@@ -695,18 +985,17 @@ def add_knowledge_document(payload: KnowledgeDocument, _: str = Depends(require_
     name = re.sub(r"[^A-Za-z0-9._-]+", "-", payload.name).strip(".-") or "dokumen.md"
     if not name.lower().endswith((".md", ".txt", ".json")):
         name += ".md"
-    if SECRET_PATTERN.search(payload.content):
-        raise HTTPException(status_code=422, detail="Dokumen mengandung pola rahasia dan ditolak (KNW-04).")
+    knowledge.assert_safe(payload.content)
     target = settings.DOCS_DIR / name
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(payload.content, encoding="utf-8")
     with db.transaction() as conn:
         audit.log(
             conn, actor="owner", actor_kind="owner", action="knowledge.document_added",
-            detail=str({"path": str(target.relative_to(settings.BASE_DIR))}),
+            detail=str({"path": _display_path(target)}),
             ref_type="knowledge", ref_id=name,
         )
-    return {"document": {"path": str(target.relative_to(settings.BASE_DIR)), "size": target.stat().st_size}}
+    return {"document": {"path": _display_path(target), "size": target.stat().st_size}}
 
 
 @app.get("/api/knowledge/search")

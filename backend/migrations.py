@@ -281,6 +281,58 @@ MIGRATIONS: list[tuple[int, str]] = [
         CREATE INDEX IF NOT EXISTS idx_chat_thread ON chat_messages(thread_type, thread_id, id);
         """,
     ),
+    (
+        2,
+        """
+        CREATE TABLE IF NOT EXISTS email_messages (
+            id TEXT PRIMARY KEY,
+            direction TEXT NOT NULL CHECK(direction IN ('IN', 'OUT')),
+            status TEXT NOT NULL DEFAULT 'DRAFT',
+            from_addr TEXT NOT NULL DEFAULT '',
+            to_addr TEXT NOT NULL DEFAULT '',
+            subject TEXT NOT NULL DEFAULT '',
+            body TEXT NOT NULL DEFAULT '',
+            attachments TEXT NOT NULL DEFAULT '[]',
+            message_id TEXT NOT NULL UNIQUE,
+            in_reply_to TEXT,
+            trust_level TEXT NOT NULL DEFAULT 'trusted',
+            approval_id TEXT REFERENCES approvals(id),
+            imap_uid TEXT,
+            error TEXT,
+            received_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS email_send_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_id TEXT NOT NULL,
+            at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS website_deployments (
+            id TEXT PRIMARY KEY,
+            approval_id TEXT REFERENCES approvals(id),
+            status TEXT NOT NULL DEFAULT 'PENDING',
+            summary TEXT NOT NULL DEFAULT '',
+            diff TEXT NOT NULL DEFAULT '',
+            url TEXT NOT NULL DEFAULT '',
+            version TEXT NOT NULL DEFAULT '',
+            previous_version TEXT,
+            backup_path TEXT,
+            approved_by TEXT,
+            published_at TEXT,
+            check_result TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_email_direction ON email_messages(direction, status);
+        CREATE INDEX IF NOT EXISTS idx_email_approval ON email_messages(approval_id);
+        CREATE INDEX IF NOT EXISTS idx_send_log_at ON email_send_log(at);
+        CREATE INDEX IF NOT EXISTS idx_website_approval ON website_deployments(approval_id);
+        """,
+    ),
 ]
 
 
