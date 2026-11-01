@@ -15,6 +15,8 @@ from datetime import datetime
 from crewai import Agent, Task, Crew, Process, LLM
 from crewai.tools import tool
 
+from backend.sandbox import redact, safe_env
+
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, Input, Button, RichLog
 from textual.containers import Horizontal
@@ -327,10 +329,7 @@ def create_project_tools(project_dir, logger):
                 text=True,
                 timeout=COMMAND_TIMEOUT,
                 shell=False,
-                env={
-                    **os.environ,
-                    "PYTHONUNBUFFERED": "1"
-                }
+                env=safe_env({"PYTHONUNBUFFERED": "1"}),
             )
 
             output = (
@@ -341,7 +340,7 @@ def create_project_tools(project_dir, logger):
 
             return (
                 f"EXIT CODE: {result.returncode}\n"
-                f"OUTPUT:\n{output[-12000:]}"
+                f"OUTPUT:\n{redact(output[-12000:])}"
             )
 
         except subprocess.TimeoutExpired:

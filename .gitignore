@@ -11,3 +11,12 @@ venv/
 logs/
 reports/
 workspace/
+
+# Data runtime dan tes
+data/
+.pytest_cache/
+tests/.tmp/
+*.db
+
+# File lokal berisi kredensial
+cek.py

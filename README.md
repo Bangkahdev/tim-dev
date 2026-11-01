@@ -2,6 +2,37 @@
 
 AI Coding Factory kini memiliki antarmuka kantor berbasis web lokal. Owner berdiskusi secara privat dengan Lead Manager, menyetujui arahan, lalu pipeline CrewAI yang sudah ada mengoordinasikan tim spesialis.
 
+Backend `backend/` adalah sumber kebenaran untuk organisasi, task, paper, persetujuan, audit, dan event. UI lama tetap kompatibel; Command Center baru memakai API domain di bawah ini.
+
+## Backend Bangkah
+
+- **Sesi Owner**: `POST /api/session` (lokal, token `API_AUTH_TOKEN` bila diisi). Semua mutasi memakai `Authorization: Bearer <token>`.
+- **Organisasi**: `/api/departments`, `/api/employees`.
+- **Task**: `/api/tasks`, `/api/tasks/{id}/transition`. Hanya matriks 4.6.1 yang sah; `COMPLETED` hanya ditetapkan backend setelah bukti PRJ-11 valid.
+- **Rapat**: `/api/meetings`.
+- **Paper dan persetujuan**: `/api/papers` (tray), `print`, `deliver`, `decision`, `revise`, `pdf`; `/api/approvals`.
+- **Sekretaris**: `/api/secretary/command`, `/api/secretary/agenda`.
+- **Audit, usage, event**: `/api/audit`, `/api/usage`, `/api/events`, `/ws/events`.
+
+Aturan penting:
+
+- Tool hanya dapat dipanggil lewat allowlist per karyawan (`backend/tools.py`).
+- Approval mengikat hash payload; payload yang berubah membatalkan persetujuan.
+- Audit append-only dijaga trigger SQLite.
+- Event memiliki ID monoton dan mendukung replay/gap.
+- Subprocess memakai env allowlist dan redaksi rahasia (`backend/sandbox.py`).
+
+## Menjalankan backend dan tes
+
+```powershell
+pip install -r requirements.txt
+$env:BANGKAH_SKIP_MODEL_CHECK="1"   # opsional saat tidak memakai Ollama
+python office_server.py             # http://127.0.0.1:8765
+python -m pytest -q
+```
+
+Database default `data/bangkah.db`; PDF di `data/prints/`. Ubah lewat variabel `BANGKAH_*` di `.env.example`.
+
 ## Menjalankan
 
 1. Pasang dependensi: `pip install -r requirements.txt`.
