@@ -20,7 +20,11 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, 
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import audit, auth, chat, conversation, db, emailer, events, knowledge, meetings, monitor, org, papers, secretary, settings, tasks, tools, website
+from . import (
+    audit, auth, chat, conversation, db, emailer, events, knowledge, meetings,
+    monitor, org, papers, projects as project_service, reports, secretary,
+    settings, tasks, tools, website,
+)
 from .db import fetch_all, fetch_one, json_dump, json_load, now
 
 WEB_DIR = settings.BASE_DIR / "web"
@@ -287,17 +291,7 @@ def command_center():
             )
             row["task_total"] = int(counts["total"] or 0) if counts else 0
             row["task_done"] = int(counts["done"] or 0) if counts else 0
-        usage = fetch_all(
-            conn,
-            """
-            SELECT employee_id, model, SUM(prompt_tokens) AS prompt_tokens,
-                   SUM(completion_tokens) AS completion_tokens,
-                   SUM(total_tokens) AS total_tokens,
-                   SUM(estimated_cost) AS estimated_cost
-            FROM usage_records GROUP BY employee_id, model
-            ORDER BY total_tokens DESC
-            """,
-        )
+        usage = reports.usage_summary(conn)
         tray = papers.tray_summary(conn)
         summary["pending_papers"] = tray["pending"]
         return {
@@ -313,8 +307,10 @@ def command_center():
             "projects": project_rows,
             "tasks": tasks.list_tasks(conn, limit=200),
             "employees": org.employee_states(conn),
-            "usage": usage,
-            "activity": audit.list_entries(conn, limit=30),
+            "usage": usage["by_employee"],
+            "usage_summary": usage,
+            "division_performance": reports.division_performance(conn),
+            "activity": reports.activity(conn, limit=30),
             "generated_at": now(),
         }
 
@@ -439,19 +435,21 @@ class ProjectCreate(BaseModel):
     deliverable: str = ""
 
 
+class ProjectComplete(BaseModel):
+    note: str = ""
+    force: bool = False
+
+
 @app.get("/api/projects")
-def projects():
+def projects(status: str | None = None, department_id: str | None = None, limit: int = 200):
     with db.connection() as conn:
-        rows = fetch_all(conn, "SELECT * FROM projects ORDER BY created_at DESC")
-        for row in rows:
-            counts = fetch_one(
-                conn,
-                "SELECT COUNT(*) AS total, SUM(status = 'COMPLETED') AS done FROM tasks WHERE project_id = ?",
-                (row["id"],),
-            )
-            row["task_total"] = int(counts["total"] or 0) if counts else 0
-            row["task_done"] = int(counts["done"] or 0) if counts else 0
-    return {"projects": rows}
+        rows = project_service.list_projects(conn, status=status, department_id=department_id, limit=limit)
+        active = project_service.active_count(conn)
+    return {
+        "projects": rows,
+        "active": active,
+        "max_concurrent": settings.MAX_CONCURRENT_PROJECTS,
+    }
 
 
 @app.post("/api/projects", status_code=201)
@@ -462,6 +460,56 @@ def create_project(payload: ProjectCreate, _: str = Depends(require_owner)):
             args={"name": payload.name, "department_id": payload.department_id, "deliverable": payload.deliverable},
         )
     return result
+
+
+@app.post("/api/projects/{project_id}/request-start", status_code=201)
+def request_project_start(project_id: str, _: str = Depends(require_owner)):
+    with db.transaction() as conn:
+        try:
+            return project_service.request_start(conn, project_id, requester="owner")
+        except project_service.ProjectError as error:
+            raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+
+
+@app.post("/api/projects/{project_id}/complete")
+def complete_project(project_id: str, payload: ProjectComplete | None = None, _: str = Depends(require_owner)):
+    body = payload or ProjectComplete()
+    with db.transaction() as conn:
+        try:
+            return project_service.complete_project(
+                conn, project_id, actor="owner", note=body.note, force=body.force
+            )
+        except project_service.ProjectError as error:
+            raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+
+
+@app.post("/api/projects/{project_id}/fail")
+def fail_project(project_id: str, payload: ProjectComplete | None = None, _: str = Depends(require_owner)):
+    body = payload or ProjectComplete()
+    with db.transaction() as conn:
+        try:
+            return project_service.fail_project(conn, project_id, actor="owner", reason=body.note)
+        except project_service.ProjectError as error:
+            raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+
+
+@app.get("/api/projects/{project_id}/report")
+def project_report(project_id: str):
+    with db.connection() as conn:
+        try:
+            markdown = reports.project_markdown(conn, project_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+    return {"project_id": project_id, "markdown": markdown}
+
+
+@app.post("/api/projects/{project_id}/report/export")
+def export_project_report(project_id: str, _: str = Depends(require_owner)):
+    with db.transaction() as conn:
+        try:
+            return reports.export_project(conn, project_id, actor="owner")
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 @app.get("/api/tasks")
@@ -748,6 +796,13 @@ def _execute_approval(approval_id: str | None) -> dict[str, Any] | None:
                 return {"type": "email", "result": emailer.send_approved(conn, approval_id)}
             if approval["type"] == "website":
                 return {"type": "website", "result": website.publish_approved(conn, approval_id)}
+            if approval["type"] == "project_start":
+                if papers.claim_execution(conn, approval_id, "project") is None:
+                    return None
+                project_id = approval["payload"].get("project_id")
+                result = project_service.enqueue(conn, project_id, actor="owner")
+                papers.finish_execution(conn, approval_id, status="SUCCEEDED", result="project_started")
+                return {"type": "project_start", "result": result}
     except Exception as error:
         try:
             with db.transaction() as conn:
@@ -923,26 +978,72 @@ def audit_entries(
 
 
 @app.get("/api/usage")
-def usage():
+def usage(days: int = 30):
     with db.connection() as conn:
-        by_employee = fetch_all(
-            conn,
-            """
-            SELECT employee_id, model, SUM(prompt_tokens) AS prompt_tokens,
-                   SUM(completion_tokens) AS completion_tokens, SUM(total_tokens) AS total_tokens,
-                   SUM(estimated_cost) AS estimated_cost, COUNT(*) AS calls
-            FROM usage_records GROUP BY employee_id, model ORDER BY total_tokens DESC
-            """,
-        )
-        by_day = fetch_all(
-            conn,
-            "SELECT substr(at, 1, 10) AS day, SUM(total_tokens) AS total_tokens, SUM(estimated_cost) AS estimated_cost FROM usage_records GROUP BY day ORDER BY day DESC LIMIT 30",
-        )
-    return {
-        "by_employee": by_employee,
-        "by_day": by_day,
-        "budget": settings.DAILY_TOKEN_BUDGET,
-    }
+        return reports.usage_summary(conn, days=days)
+
+
+class UsageRecordRequest(BaseModel):
+    employee_id: str
+    model: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int | None = None
+    estimated_cost: float = 0.0
+    project_id: str | None = None
+
+
+@app.post("/api/usage/record", status_code=201)
+def record_usage(payload: UsageRecordRequest, _: str = Depends(require_owner)):
+    with db.transaction() as conn:
+        try:
+            return reports.record_usage(conn, actor="owner", **payload.model_dump())
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.get("/api/activity")
+def activity(
+    department_id: str | None = None,
+    employee_id: str | None = None,
+    action: str | None = None,
+    limit: int = 100,
+):
+    with db.connection() as conn:
+        return {
+            "entries": reports.activity(
+                conn,
+                department_id=department_id,
+                employee_id=employee_id,
+                action=action,
+                limit=limit,
+            )
+        }
+
+
+@app.get("/api/reports/divisions")
+def division_reports():
+    with db.connection() as conn:
+        return {"divisions": reports.division_performance(conn)}
+
+
+@app.get("/api/reports/divisions/{department_id}")
+def division_report(department_id: str):
+    with db.connection() as conn:
+        try:
+            markdown = reports.division_markdown(conn, department_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+    return {"department_id": department_id, "markdown": markdown}
+
+
+@app.post("/api/reports/divisions/{department_id}/export")
+def export_division_report(department_id: str, _: str = Depends(require_owner)):
+    with db.transaction() as conn:
+        try:
+            return reports.export_division(conn, department_id, actor="owner")
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 def _display_path(path: Path) -> str:
