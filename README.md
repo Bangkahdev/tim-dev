@@ -10,7 +10,9 @@ Backend `backend/` adalah sumber kebenaran untuk organisasi, task, paper, perset
 - **Organisasi**: `/api/departments`, `/api/employees`.
 - **Task**: `/api/tasks`, `/api/tasks/{id}/transition`. Hanya matriks 4.6.1 yang sah; `COMPLETED` hanya ditetapkan backend setelah bukti PRJ-11 valid.
 - **Rapat**: `/api/meetings`, `/api/meetings/{id}/run`, `/api/meetings/{id}/interject`. Notulen disimpan ke `docs/meetings/`, diindeks ke knowledge base, dan dikirim ke tray sebagai paper `meeting_minutes`.
-- **Command Center**: `/api/command-center` merangkum proyek, task, tray, karyawan, usage, dan audit; `/api/employees/{id}/monitor` menampilkan state, task aktif, file terakhir, terminal, dan hasil tes.
+- **Proyek paralel**: `/api/projects` (antrean dan batas `MAX_CONCURRENT_PROJECTS`), `request-start` (butuh persetujuan Owner), `complete` (arsip akhir + task Promosi + laporan), `fail`, dan `report`/`report/export`. Proyek `QUEUED` naik otomatis saat slot kosong.
+- **Laporan dan aktivitas**: `/api/reports/divisions` (kinerja per divisi), `/api/reports/divisions/{id}` dan `export` (PDF), `/api/activity` (filter divisi/karyawan/jenis), `/api/usage` (per karyawan, model, proyek, dan hari), `POST /api/usage/record`.
+- **Command Center**: `/api/command-center` merangkum proyek, task, tray, karyawan, usage, kinerja divisi, dan audit; `/api/employees/{id}/monitor` menampilkan state, task aktif, file terakhir, terminal, dan hasil tes.
 - **Paper dan persetujuan**: `/api/papers` (tray, dengan `limit`/`overflow`), `print`, `deliver`, `decision`, `revise`, `pdf`; `/api/approvals`, `/api/approvals/{id}/execute`.
 - **Email**: `/api/inbox` (baca), `POST /api/inbox/sync` (tarik IMAP; juga berkala tiap `EMAIL_SYNC_MINUTES`), `/api/outbox` (draf), `POST /api/outbox/process`. Draf menjadi Paper dan hanya dikirim setelah Owner menyetujui; email masuk selalu ditandai tak tepercaya.
 - **Website**: `/api/website/deployments` (paket rilis), `publish`, `rollback`, `reconcile`. Publikasi hanya setelah persetujuan, dengan backup otomatis dan pemeriksaan pasca-publikasi.
