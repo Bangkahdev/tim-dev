@@ -1,6 +1,6 @@
 crewai>=0.100.0
 textual>=8.2.8
-python-dotenv>=1.0.0
+python-dotenv>=1.2.4
 pydantic>=2.14.1
 fastapi>=0.162.0
 uvicorn>=0.54.0
