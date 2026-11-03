@@ -34,15 +34,15 @@ ROSTER = [
         ["kepemimpinan", "tinjauan teknis", "perencanaan"],
         [
             "create_task", "update_task", "move_employee", "create_meeting",
-            "run_meeting", "generate_report", "create_project", "search_knowledge",
-            "print_paper", "deliver_paper",
+            "run_meeting", "generate_report", "create_project", "complete_project",
+            "search_knowledge", "print_paper", "deliver_paper",
         ],
     ),
     (
         "coo", "Sinta", "COO / Project Manager", "engineering", "lead",
         "Ruang Perencanaan", "Meja COO", "👩🏽‍💼",
         ["perencanaan", "prioritas", "koordinasi"],
-        ["create_task", "update_task", "create_meeting", "run_meeting", "generate_report", "search_knowledge", "print_paper", "deliver_paper"],
+        ["create_task", "update_task", "create_meeting", "run_meeting", "generate_report", "complete_project", "search_knowledge", "print_paper", "deliver_paper"],
     ),
     (
         "architect", "Raka", "System Architect", "engineering", "lead",

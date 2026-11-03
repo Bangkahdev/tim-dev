@@ -333,6 +333,23 @@ MIGRATIONS: list[tuple[int, str]] = [
         CREATE INDEX IF NOT EXISTS idx_website_approval ON website_deployments(approval_id);
         """,
     ),
+    (
+        3,
+        """
+        ALTER TABLE projects ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal';
+        ALTER TABLE projects ADD COLUMN queued_at TEXT;
+        ALTER TABLE projects ADD COLUMN started_at TEXT;
+        ALTER TABLE projects ADD COLUMN completed_at TEXT;
+        ALTER TABLE projects ADD COLUMN archive_path TEXT;
+        ALTER TABLE projects ADD COLUMN archive_hash TEXT;
+        ALTER TABLE projects ADD COLUMN failed_reason TEXT;
+
+        ALTER TABLE usage_records ADD COLUMN project_id TEXT;
+
+        CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+        CREATE INDEX IF NOT EXISTS idx_usage_project ON usage_records(project_id);
+        """,
+    ),
 ]
 
 

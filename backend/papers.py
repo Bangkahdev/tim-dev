@@ -17,8 +17,8 @@ from .db import fetch_all, fetch_one, json_dump, json_load, now, parse_time
 from .pdf import write_pdf
 
 PAPER_TYPES = {
-    "task_report", "project_report", "approval_proposal", "meeting_minutes",
-    "email_draft", "website_package",
+    "task_report", "project_report", "division_report", "approval_proposal",
+    "meeting_minutes", "email_draft", "website_package",
 }
 DELIVERY_STATUSES = {"DRAFT", "PRINTED", "DELIVERED", "EXPIRED", "ARCHIVED"}
 REVIEW_STATUSES = {"UNREAD", "REVIEWED", "DEFERRED", "APPROVED", "REJECTED", "REVISION_REQUESTED"}

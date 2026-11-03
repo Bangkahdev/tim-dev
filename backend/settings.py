@@ -41,6 +41,7 @@ DB_PATH = _path("BANGKAH_DB_PATH", DATA_DIR / "bangkah.db")
 PRINT_DIR = _path("BANGKAH_PRINT_DIR", DATA_DIR / "prints")
 REPORT_DIR = _path("BANGKAH_REPORT_DIR", BASE_DIR / "reports")
 WORKSPACE_DIR = _path("BANGKAH_WORKSPACE_DIR", BASE_DIR / "workspace" / "projects")
+ARCHIVE_DIR = _path("BANGKAH_ARCHIVE_DIR", DATA_DIR / "archive")
 DOCS_DIR = _path("BANGKAH_DOCS_DIR", BASE_DIR / "docs")
 
 HOST = env("BANGKAH_HOST", "127.0.0.1")
@@ -109,7 +110,10 @@ def model_for_role(role: str) -> str:
 
 
 def ensure_directories() -> None:
-    for directory in (DATA_DIR, PRINT_DIR, REPORT_DIR, WORKSPACE_DIR, DOCS_DIR, WEBSITE_BACKUP_DIR):
+    for directory in (
+        DATA_DIR, PRINT_DIR, REPORT_DIR, WORKSPACE_DIR, ARCHIVE_DIR, DOCS_DIR,
+        WEBSITE_BACKUP_DIR,
+    ):
         directory.mkdir(parents=True, exist_ok=True)
 
 

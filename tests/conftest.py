@@ -29,6 +29,7 @@ def isolated(tmp_path, monkeypatch):
         ("PRINT_DIR", "prints"),
         ("REPORT_DIR", "reports"),
         ("WORKSPACE_DIR", "workspace"),
+        ("ARCHIVE_DIR", "archive"),
         ("DOCS_DIR", "docs"),
     ):
         target = tmp_path / subdir

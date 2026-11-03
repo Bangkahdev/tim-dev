@@ -12,8 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from . import audit, emailer, events, knowledge, meetings, org, papers, settings, tasks, website
-from .db import fetch_all, fetch_one, json_dump, now
+from . import audit, emailer, knowledge, meetings, org, papers, projects, settings, tasks, website
+from .db import fetch_all, json_dump, now
 from .sandbox import redact
 
 
@@ -159,31 +159,35 @@ def _generate_report(conn, actor: str, args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _create_project(conn, actor: str, args: dict[str, Any]) -> dict[str, Any]:
-    name = str(args.get("name") or args.get("nama") or "").strip()
-    if not name:
-        raise ToolError("Nama proyek wajib diisi.")
-    project_id = f"proj_{uuid.uuid4().hex[:10]}"
-    workspace = settings.WORKSPACE_DIR / name.lower().replace(" ", "-")[:45]
-    workspace.mkdir(parents=True, exist_ok=True)
-    stamp = now()
-    conn.execute(
-        """
-        INSERT INTO projects
-            (id, name, department_id, workspace_path, status, deliverable, created_by, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'PLANNED', ?, ?, ?, ?)
-        """,
-        (
-            project_id, name, args.get("department_id", "engineering"), str(workspace),
-            args.get("deliverable", ""), actor, stamp, stamp,
-        ),
-    )
-    audit.log(
-        conn, actor=actor, actor_kind="manager", action="project.created",
-        detail=json_dump({"name": name, "workspace": str(workspace)}),
-        ref_type="project", ref_id=project_id,
-    )
-    events.publish(conn, "project.created", actor, {"project_id": project_id, "name": name})
-    return {"project": dict(fetch_one(conn, "SELECT * FROM projects WHERE id = ?", (project_id,)) or {})}
+    try:
+        project = projects.create_project(
+            conn,
+            name=str(args.get("name") or args.get("nama") or ""),
+            department_id=args.get("department_id", "engineering"),
+            deliverable=args.get("deliverable", ""),
+            actor=actor,
+            actor_kind="manager" if actor != "owner" else "owner",
+            priority=args.get("priority", "normal"),
+        )
+    except projects.ProjectError as error:
+        raise ToolError(str(error)) from error
+    return {"project": project}
+
+
+def _complete_project(conn, actor: str, args: dict[str, Any]) -> dict[str, Any]:
+    project_id = str(args.get("project_id") or "").strip()
+    if not project_id:
+        raise ToolError("project_id wajib diisi.")
+    try:
+        return projects.complete_project(
+            conn,
+            project_id,
+            actor=actor,
+            note=str(args.get("note") or ""),
+            force=bool(args.get("force")),
+        )
+    except projects.ProjectError as error:
+        raise ToolError(str(error)) from error
 
 
 def _draft_email(conn, actor: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -291,6 +295,7 @@ REGISTRY: dict[str, dict[str, Any]] = {
     "run_meeting": {"handler": _run_meeting, "risk": "internal"},
     "generate_report": {"handler": _generate_report, "risk": "internal"},
     "create_project": {"handler": _create_project, "risk": "internal"},
+    "complete_project": {"handler": _complete_project, "risk": "internal"},
     "draft_email": {"handler": _draft_email, "risk": "external"},
     "propose_website_publish": {"handler": _propose_website, "risk": "external"},
     "search_knowledge": {"handler": _search_knowledge, "risk": "internal"},
