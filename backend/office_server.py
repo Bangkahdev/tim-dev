@@ -23,6 +23,9 @@ from core.orchestrator import ORCHESTRATOR
 from core.knowledge_base import KNOWLEDGE
 from core.company_operations import OPS
 from core.workstations import DESKTOP, DesktopAuthError, DesktopError
+from core.employee_activity import EmployeeActivityEngine
+
+ACTIVITY = EmployeeActivityEngine()
 from core.action_adapters import execute_outbox, AdapterError
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -341,6 +344,21 @@ class OfficeHandler(BaseHTTPRequestHandler):
         if route == "/api/office/state":
             self.send_json(STORE.snapshot())
             return
+        if route == "/api/office/activity":
+            after_id = query.get("after_id", [0])[0]
+            limit = query.get("limit", [100])[0]
+            try:
+                events = ACTIVITY.feed(after_id, limit)
+            except (TypeError, ValueError):
+                events = ACTIVITY.feed(0, 100)
+            fallback_cursor = int(events[-1]["id"]) if events else 0
+            try:
+                fallback_cursor = max(fallback_cursor, int(after_id))
+            except (TypeError, ValueError):
+                pass
+            self.send_json({"events": events, "next_after_id": fallback_cursor,
+                            "summary": ACTIVITY.summary()})
+            return
         if route == "/api/office/player":
             self.send_json({"player": STORE.owner_player_state()})
             return
@@ -363,6 +381,11 @@ class OfficeHandler(BaseHTTPRequestHandler):
             latest = projects[0] if projects else None
             with EMPLOYEE_CHAT_STATE_LOCK:
                 active_chats = dict(EMPLOYEE_CHAT_ACTIVE)
+            try:
+                activity_tick = ACTIVITY.tick()
+            except Exception as error:
+                print(f"[ACTIVITY ENGINE ERROR] {type(error).__name__}: {error}", flush=True)
+                activity_tick = {"error": "Engine aktivitas karyawan gagal berjalan."}
             self.send_json({
                 "ollama": cached_ollama_status(),
                 "active": dict(ACTIVE),
@@ -371,6 +394,7 @@ class OfficeHandler(BaseHTTPRequestHandler):
                 "health": get_health_snapshot(),
                 "employee_chats": active_chats,
                 "activity": read_activity(),
+                "activity_engine": activity_tick,
                 "office": STORE.snapshot(),
                 "company": {
                     "departments": OPS.departments(),
@@ -529,8 +553,18 @@ class OfficeHandler(BaseHTTPRequestHandler):
             print(f"[COMPANY API ERROR] {type(error).__name__}: {error}", flush=True)
             self.send_json({"error": "Operasi perusahaan gagal diproses."}, 500); return
 
-        if route not in ("/api/command", "/api/chat", "/api/employee-chat", "/api/room-chat", "/api/office/action", "/api/office/player", "/api/knowledge/documents"):
+        if route not in ("/api/command", "/api/chat", "/api/employee-chat", "/api/room-chat", "/api/office/action", "/api/office/player", "/api/knowledge/documents", "/api/office/activity/tick"):
             self.send_error(404)
+            return
+        if route == "/api/office/activity/tick":
+            force = bool(body.get("force", False))
+            ignore_window = bool(body.get("ignore_window", False))
+            try:
+                result = ACTIVITY.tick(force=force, ignore_window=ignore_window)
+                self.send_json({"success": True, "activity": result}, 200)
+            except Exception as error:
+                print(f"[ACTIVITY ENGINE ERROR] {type(error).__name__}: {error}", flush=True)
+                self.send_json({"error": "Engine aktivitas karyawan gagal berjalan."}, 500)
             return
         command = str(body.get("command", "")).strip()
         project_name_hint = str(body.get("project_name_hint", "")).strip()

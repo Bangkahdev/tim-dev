@@ -130,6 +130,36 @@ try:
 
     status, body = call("GET", "/api/desktop/session")
     check("missing session rejected", status == 401, f"status={status}")
+
+    # ---- Employee activity engine (real posts, no mocks) ----
+    status, body = call("GET", "/api/workstations")
+    stations = {item["id"]: item for item in body.get("workstations", [])}
+    station = stations.get("PC-BE-001", {})
+    account = station.get("account", {})
+    check("employee workstation carries account info",
+          status == 200 and account.get("id") == "backend" and account.get("role") == "employee",
+          f"status={status}")
+
+    status, body = call("POST", "/api/office/activity/tick",
+                        {"force": True, "ignore_window": True})
+    tick = body.get("activity", {})
+    check("activity tick runs", status == 200 and tick.get("enabled") is True,
+          f"status={status} enabled={tick.get('enabled')}")
+
+    status, body = call("GET", "/api/office/activity?limit=100")
+    summary = body.get("summary", {})
+    employees = summary.get("employees", [])
+    kinds = {event["event_type"] for event in body.get("events", [])}
+    check("activity feed has employee events",
+          status == 200 and "employee_work" in kinds,
+          f"status={status}")
+    check("activity summary covers roster",
+          status == 200 and len(employees) == 7,
+          f"status={status} employees={len(employees)}")
+
+    for row in body.get("events", []):
+        if row["event_type"] == "employee_work":
+            break
 finally:
     server.shutdown()
     server.server_close()

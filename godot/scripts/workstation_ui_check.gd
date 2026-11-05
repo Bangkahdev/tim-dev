@@ -66,6 +66,10 @@ func _run() -> void:
 	_check("accepted login stores session", desktop.has_session())
 	_check("session label from backend", desktop._session_label.text.contains("OWNER-PC-001") and desktop._session_label.text.contains("Owner"))
 	_check("four apps in dock", desktop._nav_buttons.size() == 4)
+	_check("infrastructure button visible for owner", desktop._nav_buttons["infrastructure"].visible)
+
+	desktop.open_for("PC-BE-001", "Bima Workstation", "backend")
+	_check("employee station prefills account field", desktop._login_account.text == "backend")
 
 	var files := {
 		"workstation_id": "OWNER-PC-001",

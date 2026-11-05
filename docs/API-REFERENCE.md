@@ -37,13 +37,15 @@ The backend only binds to loopback. For remote access, place it behind a TLS rev
 | `GET /api/chat/history?channel=team` | Persisted chat history | `channel_id`, `messages[]` |
 | `GET /api/knowledge/documents` | Knowledge documents | `documents[]` |
 | `GET /api/knowledge/search?q=...` | Knowledge retrieval | `query`, `results[]` |
-| `GET /api/workstations` | Workstation catalogue with room and account binding | `workstations[]` |
+| `GET /api/workstations` | Workstation catalogue with room and account binding | `workstations[]` each with `account{id,name,role,active,apps}` |
 | `GET /api/workstations/{id}` | One workstation summary | `workstation`, `account`, `workspace` |
 | `GET /api/desktop/audit?after_id=0&limit=12` | Workstation audit trail | `events[]`, `next_after_id` |
+| `GET /api/office/activity?after_id=0&limit=100` | Employee workshift feed (audited events by employees) | `events[]`, `next_after_id`, `summary` |
+| `POST /api/office/activity/tick` | Manual workshift tick | `{"success", "activity"}` |
 
 ## Workstation desktop sessions (Bangkah OS)
 
-Physical workstations are backed by `backend/core/workstations.py`. Logging in at a workstation starts a desktop session that is separate from the company `Authorization: Bearer` token. The Owner workstation `OWNER-PC-001` is active; employee workstation accounts are catalogued but intentionally inactive until their accounts are activated.
+Physical workstations are backed by `backend/core/workstations.py`. Logging in at a workstation starts a desktop session that is separate from the company `Authorization: Bearer` token. `OWNER-PC-001` and all seven employee desks (`PC-MGT-001`, `PC-MGT-002`, `PC-ARC-001`, `PC-BE-001`, `PC-API-001`, `PC-FE-001`, `PC-QA-001`) are active; each employee has a real login at their own desk (credentials in `backend/data/employee_credentials.local` or the shared `BANGKAH_EMPLOYEE_PASSWORD`). `BANGKAH_EMPLOYEE_ACCOUNTS=0` freezes employee logins back to inactive.
 
 `POST /api/workstations/{id}/login`
 
@@ -64,6 +66,15 @@ Desktop routes require the header `X-Desktop-Session: <token>`. When `Authorizat
 - `POST /api/terminal/exec` — `{"command": "ls"}` runs a builtin argv-only command. No host shell shell metacharacters; external binaries run only when allowlisted through `BANGKAH_TERMINAL_ALLOWED_BINARIES`.
 
 Login, file writes, terminal commands and session events are recorded in the company audit trail and surfaced through `GET /api/desktop/audit`.
+
+### Employee workshift engine
+
+Driven by `/api/status` (rate-limited tick, exposed under `activity_engine`) and the manual endpoint:
+
+- `GET /api/office/activity?after_id=0&limit=100` — every audited event whose actor is an employee (`employee_login`, `employee_work`, `desktop_login`, `desktop_file_write`, `terminal_exec`, `desktop_close`, ...) plus a per-employee summary (`units_done`, `units_today`, `last_tick_at`, `last_detail`).
+- `POST /api/office/activity/tick` — body `{"force": true, "ignore_window": true}`. `force` bypasses the tick throttle (`BANGKAH_EMPLOYEE_TICK_SECONDS`, default 20); `ignore_window` works outside `BANGKAH_EMPLOYEE_DUTY_HOURS` (default `9-17`). Returns `{"success", "activity"}` with `units[]`, `on_shift[]`, `off_shift[]`, `errors[]`, `overtime` and `skipped`.
+
+Engine state lives in `employee_workshift` (per-employee status, unit counters, day, last detail); employees with live 3D interactions are left alone, and shift end closes sessions. `BANGKAH_EMPLOYEE_ACTIVITY=0` disables the engine.
 
 ## Company mutations
 

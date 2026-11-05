@@ -1,8 +1,25 @@
 ﻿extends Node3D
+class_name StubMain
 
 const PLAYER_SCRIPT = preload("res://scripts/player.gd")
 const NPC_SCRIPT = preload("res://scripts/npc.gd")
 const COMPANY_UI_SCRIPT = preload("res://scripts/company_ui.gd")
+
+# Every employee desk now owns a real workstation from the backend catalog
+# (PC-MGT-001, PC-MGT-002, PC-ARC-001, PC-BE-001, PC-API-001, PC-FE-001,
+# PC-QA-001). Seat / camera / target use the formulas of _add_workstation in
+# office_environment.gd: seat = P + (0, 0.05, 1.55),
+# camera = seat + (0, 1.22, -0.2), target = P + (0, 1.35, -0.44) when the
+# desk rotation is 0 as for every employee desk.
+const EMPLOYEE_STATIONS := {
+	"arman_desk": {"workstation_id": "PC-MGT-001", "title": "Arman", "account": "lead", "position": Vector3(5.8, 0, -31.3)},
+	"sinta_desk": {"workstation_id": "PC-MGT-002", "title": "Sinta", "account": "coo", "position": Vector3(13.2, 0, -31.3)},
+	"raka_desk": {"workstation_id": "PC-ARC-001", "title": "Raka", "account": "architect", "position": Vector3(29.0, 0, -31.3)},
+	"dira_desk": {"workstation_id": "PC-FE-001", "title": "Dira", "account": "frontend", "position": Vector3(-29.0, 0, -8.9)},
+	"tika_desk": {"workstation_id": "PC-QA-001", "title": "Tika", "account": "qa", "position": Vector3(-5.0, 0, -8.9)},
+	"bima_desk": {"workstation_id": "PC-BE-001", "title": "Bima", "account": "backend", "position": Vector3(27.0, 0, -8.9)},
+	"naya_desk": {"workstation_id": "PC-API-001", "title": "Naya", "account": "api", "position": Vector3(29.0, 0, 12.65)},
+}
 const OFFICE_WORLD_SCRIPT = preload("res://scripts/office_environment.gd")
 const WORKSTATION_SYSTEM_SCRIPT = preload("res://scripts/workstation_sys.gd")
 const DESKTOP_UI_SCRIPT = preload("res://scripts/desktop_ui.gd")
@@ -370,21 +387,34 @@ func _ambient_plans_for(employee_id: String, _home: Vector3) -> Array:
 func _build_interaction_points() -> void:
 	_interactables = [
 		{"id":"reception", "label":"Reception Desk", "position":Vector3(0,0,22.7), "prompt":"Sapa resepsionis Mira"},
-		{"id":"workstation", "label":"Owner Workstation", "position":Vector3(-29.3,0,-31.3), "prompt":"Gunakan komputer Owner",
-			"workstation_id":"OWNER-PC-001", "seat":Vector3(-29.3,0.05,-29.75), "seat_yaw":0.0,
-			"camera":Vector3(-29.3,1.27,-29.95), "camera_target":Vector3(-29.3,1.35,-31.74)},
+		_station_interactable("workstation", "Owner Workstation", "OWNER-PC-001", "owner", Vector3(-29.3,0,-31.3)),
 		{"id":"owner_tray", "label":"Owner Paper Tray", "position":Vector3(-27.2,0,-29.8), "prompt":"Periksa dokumen di tray Owner"},
 		{"id":"secretary_desk", "label":"Secretary Desk", "position":Vector3(-10.8,0,-31.3), "prompt":"Buka agenda Sekretaris"},
-		{"id":"arman_desk", "label":"Arman Workstation", "position":Vector3(5.8,0,-31.3), "prompt":"Gunakan komputer Arman"},
-		{"id":"sinta_desk", "label":"Sinta Workstation", "position":Vector3(13.2,0,-31.3), "prompt":"Gunakan komputer Sinta"},
-		{"id":"raka_desk", "label":"Raka Workstation", "position":Vector3(29.0,0,-31.3), "prompt":"Gunakan komputer Raka"},
-		{"id":"dira_desk", "label":"Dira Workstation", "position":Vector3(-29.0,0,-8.9), "prompt":"Gunakan komputer Dira"},
 		{"id":"meeting", "label":"Boardroom", "position":Vector3(-29.5,0,10.0), "prompt":"Masuk ke ruang rapat"},
 		{"id":"printer", "label":"Office Printer", "position":Vector3(-23.2,0,29.9), "prompt":"Gunakan printer kantor"},
 		{"id":"coffee", "label":"Coffee Station", "position":Vector3(22.5,0,34.8), "prompt":"Ambil kopi di pantry"},
 		{"id":"lounge", "label":"Staff Lounge", "position":Vector3(7.0,0,32.1), "prompt":"Beristirahat di lounge"},
-		{"id":"archive", "label":"Company Archive", "position":Vector3(-29.5,0,27.2), "prompt":"Buka arsip perusahaan"}
+		{"id":"archive", "label":"Company Archive", "position":Vector3(-29.5,0,27.2), "prompt":"Buka arsip perusahaan"},
 	]
+	for desk_id in EMPLOYEE_STATIONS:
+		var station: Dictionary = EMPLOYEE_STATIONS[desk_id]
+		_interactables.append(
+			_station_interactable(desk_id, str(station["title"]) + " Workstation",
+				str(station["workstation_id"]), str(station["account"]),
+				station["position"]))
+
+# Interaction entry for a backend workstation. Station seat/camera/target
+# follow _add_workstation geometry: seat = P + (0, 0.05, 1.55),
+# camera = seat + (0, 1.22, -0.2), target = P + (0, 1.35, -0.44) when the
+# desk rotation is 0 as for all mapped desks.
+func _station_interactable(desk_id: String, label: String, workstation_id: String, account: String, position: Vector3) -> Dictionary:
+	var seat := position + Vector3(0, 0.05, 1.55)
+	return {"id":desk_id, "label":label, "position":position,
+		"prompt":"Duduk di workstation %s (%s)" % [label, workstation_id],
+		"workstation_id":workstation_id, "account_id":account,
+		"seat":seat, "seat_yaw":0.0,
+		"camera":seat + Vector3(0, 1.22, -0.2),
+		"camera_target":position + Vector3(0, 1.35, -0.44)}
 
 func _build_ui() -> void:
 	var layer := CanvasLayer.new()
@@ -963,13 +993,13 @@ func _on_player_interact() -> void:
 	var info := _interaction_info(target_id)
 	# Only send interaction IDs understood by the currently existing backend.
 	# Paper, printer and Secretary panels remain local prototypes until v1.3 APIs exist.
-	if _connection_online and target_id in ["meeting", "coffee", "lounge", "archive", "secretary_desk", "arman_desk", "sinta_desk", "raka_desk", "dira_desk"]:
+	if _connection_online and target_id in ["meeting", "coffee", "lounge", "archive", "secretary_desk"]:
 		var payload := _player_payload()
 		payload["interaction"] = target_id
 		_send_post("/api/office/player", payload, "interaction")
-	elif not _connection_online or target_id not in ["meeting", "coffee", "lounge", "archive", "secretary_desk", "arman_desk", "sinta_desk", "raka_desk", "dira_desk"]:
+	elif not _connection_online or target_id not in ["meeting", "coffee", "lounge", "archive", "secretary_desk"]:
 		_show_toast(str(info.get("detail", "Interaksi lokal.")))
-	if target_id in ["secretary_desk", "arman_desk", "sinta_desk", "raka_desk", "dira_desk"]:
+	if target_id == "secretary_desk":
 		player.activity = "working"
 		_show_toast(str(info.get("detail", "Anda menggunakan workstation ini.")))
 	elif target_id == "meeting":
@@ -986,8 +1016,6 @@ func _on_player_interact() -> void:
 			_company_ui.open_panel("documents")
 		elif target_id == "secretary_desk":
 			_company_ui.open_panel("documents")
-		elif target_id in ["arman_desk", "sinta_desk", "raka_desk", "dira_desk"]:
-			_company_ui.open_panel("overview")
 		elif target_id == "meeting":
 			_company_ui.open_panel("meetings")
 		elif target_id == "archive":
@@ -1017,7 +1045,7 @@ func _enter_workstation(target: Dictionary) -> void:
 	var camera_position: Vector3 = target.get("camera", player.global_position)
 	var camera_target: Vector3 = target.get("camera_target", player.global_position + Vector3(0.0, 1.0, -1.0))
 	_workstation_sys.enter(player, workstation_id, seat, seat_yaw, camera_position, camera_target)
-	_desktop_ui.open_for(workstation_id, str(target.get("label", "Workstation")))
+	_desktop_ui.open_for(workstation_id, str(target.get("label", "Workstation")), str(target.get("account_id", "owner")))
 
 func _exit_workstation() -> void:
 	if not _desktop_active:

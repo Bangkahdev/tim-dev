@@ -1,5 +1,14 @@
 # Changelog
 
+## Employee workshift slice — staffed workstations
+
+- Activated the seven employee workstation accounts (`lead`, `coo`, `architect`, `backend`, `api`, `frontend`, `qa`) bound 1:1 to their desks. Passwords are provisioned into `backend/data/employee_credentials.local`, the same local-secret pattern as the Owner credentials; `BANGKAH_EMPLOYEE_ACCOUNTS=0` freezes back to Owner-only login.
+- Added the workshift engine `core/employee_activity.py`: at shift start every employee logs into their own workstation through the same public login path, and the engine produces one role-specific audited work unit per tick (code files, endpoint contracts, ADRs, component stubs, QA reports, standup notes, project updates), referencing the latest open task assigned to them. Employees interacting in the 3D office (talking/listening) are preserved; sessions close at shift end. Config: `BANGKAH_EMPLOYEE_ACTIVITY`, `BANGKAH_EMPLOYEE_DUTY_HOURS` (default 9-17), `BANGKAH_EMPLOYEE_TICK_SECONDS` (default 20).
+- Added `GET /api/office/activity` (audited feed + summary) and `POST /api/office/activity/tick` (manual `force` / `ignore_window` tick), plus `activity_engine` in `/api/status`.
+- Extended `/api/workstations` to carry each workstation's bound `account` (`id`/`name`/`role`/`active`/`apps`, and `list_accounts()` with no password data).
+- Godot: all seven employee desks are proper `workstation` interactables with seat/camera transforms (seat = P + (0, 0.05, 1.55), camera = seat + (0, 1.22, -0.2), target = P + (0, 1.35, -0.44) when the desk rotation is 0 as for every mapped desk), prompts name the workstation, and the login account is prefilled per desk. The dock follows session apps (employee: files/terminal/company only).
+- Validation: 12 new activity tests plus 2 replaced workstation tests (suite now 85 passed), `backend/tools/check_desktop_api.py` 21/21, `godot/scripts/workstation_ui_check.gd` 22/22.
+
 ## Workstation slice — physical workstation and Bangkah OS
 
 - Added eight catalogued physical workstations in the backend. The Owner station `OWNER-PC-001` opens Bangkah OS in-game; employee station accounts stay inactive and their logins are refused honestly until activation.
