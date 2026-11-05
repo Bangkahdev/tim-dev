@@ -113,8 +113,55 @@ try:
 
     status, body = call("GET", "/api/desktop/system", token=token)
     integrations = body.get("integrations", {})
-    check("system info honest",
-          status == 200 and integrations.get("domain", {}).get("dns_managed") is False,
+    system_dm = integrations.get("domain", {}).get("dns_managed")
+    dm_status, dm_body = call("GET", "/api/domain/state")
+    check("system info domain consistent with domain service",
+          status == 200 and dm_status == 200
+          and system_dm == bool(dm_body.get("internal_dns_managed")),
+          f"status={status} system={system_dm} domain={dm_body.get('internal_dns_managed')}")
+
+    # ---- Domain & DNS internal (Slice B) ----
+    joined_before = dm_body.get("joined_count", 0)
+    joined_ids_before = {c["workstation_id"] for c in dm_body.get("joined_computers", [])}
+
+    target = "PC-QA-001" if "PC-QA-001" not in joined_ids_before else "PC-FE-001"
+    status, body = call("POST", "/api/domain/join",
+                        {"workstation_id": target, "actor": "owner"})
+    domain_join = body.get("domain", {})
+    check("domain join workstation",
+          status == 201 and domain_join.get("workstation_id") == target,
+          f"status={status}")
+
+    status, body = call("GET", "/api/domain/state")
+    check("domain state after join",
+          status == 200 and body.get("internal_dns_managed") is True
+          and body.get("joined_count") >= joined_before + 1
+          and target in {c["workstation_id"] for c in body.get("joined_computers", [])},
+          f"status={status} body={body}")
+
+    status, body = call("GET", "/api/domain/dns/lookup?name=%s.bangkah.my.id" % target)
+    check("dns lookup found",
+          status == 200 and body.get("found") is True
+          and body["record"]["value"] == "127.0.0.1",
+          f"status={status} body={body}")
+
+    status, body = call("GET", "/api/domain/dns/lookup?name=tidakada.bangkah.my.id")
+    check("dns lookup not found", status == 404, f"status={status}")
+
+    status, body = call("GET", "/api/domain/dns/records")
+    check("dns records list",
+          status == 200 and len(body.get("records", [])) >= 10,
+          f"status={status}")
+
+    status, body = call("POST", "/api/domain/dns/record",
+                        {"name": "apps.bangkah.my.id", "type": "CNAME",
+                         "value": "dc.bangkah.my.id", "actor": "owner"})
+    check("dns record added", status == 201 and body.get("record", {}).get("type") == "CNAME",
+          f"status={status}")
+
+    status, body = call("GET", "/api/desktop/system", token=token)
+    check("system info domain managed after join",
+          status == 200 and body.get("integrations", {}).get("domain", {}).get("dns_managed") is True,
           f"status={status}")
 
     status, body = call("GET", "/api/desktop/audit", token=token)

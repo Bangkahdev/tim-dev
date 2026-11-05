@@ -29,6 +29,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .office_store import OfficeStore, STORE, LOCK, _now
+from .domain_service import DOMAIN
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 WORKSPACE_ROOT = BASE_DIR / "workspace" / "desktop"
@@ -913,12 +914,12 @@ class DesktopOperations:
                 "enabled": bool(os.getenv("BANGKAH_API_TOKEN", "").strip()),
                 "detail": "Bearer token untuk seluruh endpoint API.",
             },
-            "domain": {
-                "name": os.getenv("BANGKAH_DOMAIN", "").strip() or "bangkah.my.id",
-                "dns_managed": False,
-                "email_provisioned": False,
-                "detail": "Manajemen domain, DNS dan email belum diaktifkan pada slice ini.",
-            },
+        "domain": {
+            "name": os.getenv("BANGKAH_DOMAIN", "").strip() or "bangkah.my.id",
+            "dns_managed": bool(DOMAIN.state().get("internal_dns_managed", False)),
+            "email_provisioned": False,
+            "detail": "Domain dan DNS internal dielola sebagai layanan backend Bangkah (model simulasi, bukan Windows AD sungguhan). DNS eksternal dan email belum diaktifkan.",
+        },
         }
         return {
             "workstation": {"id": workstation["id"], "label": workstation["label"], "room_id": workstation["room_id"]},

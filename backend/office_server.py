@@ -24,8 +24,10 @@ from core.knowledge_base import KNOWLEDGE
 from core.company_operations import OPS
 from core.workstations import DESKTOP, DesktopAuthError, DesktopError
 from core.employee_activity import EmployeeActivityEngine
+from core.domain_service import DomainService
 
 ACTIVITY = EmployeeActivityEngine()
+DOMAIN = DomainService()
 from core.action_adapters import execute_outbox, AdapterError
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -306,6 +308,20 @@ class OfficeHandler(BaseHTTPRequestHandler):
             except DesktopError as error:
                 self._desktop_error(error)
             return
+        if route == "/api/domain/state":
+            self.send_json(DOMAIN.state())
+            return
+        if route == "/api/domain/dns/lookup":
+            name = query.get("name", [""])[0]
+            record = DOMAIN.dns_lookup(name)
+            if record is None:
+                self.send_json({"name": name, "found": False}, 404)
+            else:
+                self.send_json({"name": name, "found": True, "record": record})
+            return
+        if route == "/api/domain/dns/records":
+            self.send_json({"records": DOMAIN.dns_records(), "domain": DOMAIN.domain_name})
+            return
         if route == "/api/desktop/session":
             try:
                 self.send_json({"session": DESKTOP.session_state(self._desktop_token())})
@@ -455,6 +471,7 @@ class OfficeHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         route = parsed.path
+        print(f"[DEBUG DOPOST] route={route}", flush=True)
         if not self._authorize_mutation():
             return
         try:
@@ -497,6 +514,28 @@ class OfficeHandler(BaseHTTPRequestHandler):
                                                   body.get("content", "")))
             except DesktopError as error:
                 self._desktop_error(error)
+            return
+        if route == "/api/domain/join" and route.count("/") == 2:
+            print(f"[DEBUG DOPOST] domain-join branch taken cond={route == '/api/domain/join'} count={route.count('/')}", flush=True)
+            workstation_id = str(body.get("workstation_id", "")).strip()
+            actor = str(body.get("actor", "system")).strip() or "system"
+            try:
+                result = DOMAIN.join_domain(workstation_id, actor)
+            except ValueError as error:
+                self.send_json({"error": str(error)}, 400)
+                return
+            self.send_json({"success": True, "domain": result}, 201)
+            return
+        if route == "/api/domain/dns/record" and route.count("/") == 3:
+            try:
+                result = DOMAIN.add_dns_record(
+                    str(body.get("name", "")), str(body.get("type", "A")),
+                    str(body.get("value", "")),
+                    str(body.get("actor", "system")).strip() or "system")
+            except ValueError as error:
+                self.send_json({"error": str(error)}, 400)
+                return
+            self.send_json({"success": True, "record": result}, 201)
             return
 
         # Persisted company workflows. All external side effects are separated
@@ -553,7 +592,7 @@ class OfficeHandler(BaseHTTPRequestHandler):
             print(f"[COMPANY API ERROR] {type(error).__name__}: {error}", flush=True)
             self.send_json({"error": "Operasi perusahaan gagal diproses."}, 500); return
 
-        if route not in ("/api/command", "/api/chat", "/api/employee-chat", "/api/room-chat", "/api/office/action", "/api/office/player", "/api/knowledge/documents", "/api/office/activity/tick"):
+        if route not in ("/api/command", "/api/chat", "/api/employee-chat", "/api/room-chat", "/api/office/action", "/api/office/player", "/api/knowledge/documents", "/api/office/activity/tick", "/api/domain/join", "/api/domain/dns/record"):
             self.send_error(404)
             return
         if route == "/api/office/activity/tick":
