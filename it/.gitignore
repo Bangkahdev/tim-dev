@@ -1,0 +1,5 @@
+# Kredential layanan — jangan di-commit.
+credentials/
+*.log
+__pycache__/
+.tmp/

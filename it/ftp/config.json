@@ -1,0 +1,16 @@
+{
+  "host": "0.0.0.0",
+  "port": 2121,
+  "passive_ports": [
+    30000,
+    30009
+  ],
+  "share_dir": "share",
+  "users_file": "users.json",
+  "tls": {
+    "enabled": true,
+    "certfile": "certs/ftp.crt",
+    "keyfile": "certs/ftp.key"
+  },
+  "banner": "Bangkah Company FTPS - authorized users only."
+}

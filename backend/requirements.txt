@@ -1,0 +1,9 @@
+crewai>=0.100.0
+textual>=0.50.0
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+
+reportlab>=4.0
+
+# Test suite (backend/tests)
+pytest>=8.0

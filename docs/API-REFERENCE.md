@@ -1,0 +1,157 @@
+# Bangkah Company Simulator API Reference
+
+Base URL: `http://127.0.0.1:8765`  
+Content type for JSON mutations: `application/json`  
+All responses are UTF-8 JSON unless noted. The service is intended for a local single-Owner desktop instance.
+
+When `BANGKAH_API_TOKEN` is non-empty, every `/api/*` request (GET and POST, including PDF downloads) requires:
+
+```http
+Authorization: Bearer <BANGKAH_API_TOKEN>
+```
+
+The backend only binds to loopback. For remote access, place it behind a TLS reverse proxy and preserve the Authorization header. Request bodies are limited to 100 KB. Error responses use `{"error":"..."}` and do not intentionally return environment secrets.
+
+## Read endpoints
+
+| Method / path | Purpose | Response |
+|---|---|---|
+| `GET /api/status` | Combined live health, legacy office snapshot and company snapshot | `ollama`, `active`, `projects`, `health`, `office`, `company` |
+| `GET /api/departments` | Department catalogue | `departments[]` |
+| `GET /api/employees` | Employee roster, department and active task | `employees[]` |
+| `GET /api/projects` | Latest project state files detected under workspace | `projects[]` |
+| `GET /api/tasks` | Persisted tasks with acceptance criteria and evidence | `tasks[]` |
+| `GET /api/meetings` | Persisted meetings, attendees, minutes, decisions and follow-ups | `meetings[]` |
+| `GET /api/papers[?status=unread]` | Paper inbox | `papers[]` |
+| `GET /api/papers/{paper_id}` | One Paper and body | `paper` |
+| `GET /api/approvals[?status=pending]` | Approval records including exact review payload and SHA-256 | `approvals[]` |
+| `GET /api/outbox` | Approved external action queue and delivery state | `outbox[]` |
+| `GET /api/print-jobs` | PDF generation records | `print_jobs[]` |
+| `GET /api/print-jobs/{job_id}` | One print job | `print_job` |
+| `GET /api/print-jobs/{job_id}/download` | Download generated PDF | `application/pdf` |
+| `GET /api/audit?after_id=0&limit=100` | Audit events | `events[]`, `next_after_id` |
+| `GET /api/events?after_id=0&limit=100` | Cursor-based event retrieval (polling; not WebSocket) | `events[]`, `next_after_id` |
+| `GET /api/usage` | Model usage where provider reports metrics | `usage` with totals and employee metrics |
+| `GET /api/office/state` | Legacy office snapshot | Snapshot object |
+| `GET /api/office/player` | Saved Owner position | `player` |
+| `GET /api/chat/history?channel=team` | Persisted chat history | `channel_id`, `messages[]` |
+| `GET /api/knowledge/documents` | Knowledge documents | `documents[]` |
+| `GET /api/knowledge/search?q=...` | Knowledge retrieval | `query`, `results[]` |
+| `GET /api/workstations` | Workstation catalogue with room and account binding | `workstations[]` |
+| `GET /api/workstations/{id}` | One workstation summary | `workstation`, `account`, `workspace` |
+| `GET /api/desktop/audit?after_id=0&limit=12` | Workstation audit trail | `events[]`, `next_after_id` |
+
+## Workstation desktop sessions (Bangkah OS)
+
+Physical workstations are backed by `backend/core/workstations.py`. Logging in at a workstation starts a desktop session that is separate from the company `Authorization: Bearer` token. The Owner workstation `OWNER-PC-001` is active; employee workstation accounts are catalogued but intentionally inactive until their accounts are activated.
+
+`POST /api/workstations/{id}/login`
+
+```json
+{"account_id": "owner", "password": "..."}
+```
+
+Responds `201` with the one-time session token (only its SHA-256 is stored) plus app list; other codes return `{"error"}` (400 wrong password / inactive account / throttle).
+
+Desktop routes require the header `X-Desktop-Session: <token>`. When `Authorization: Bearer` is configured, both headers are checked:
+
+- `POST /api/desktop/session/close` — logout, audited.
+- `GET /api/desktop/session` — current session, account, workstation, apps, expiry.
+- `GET /api/desktop/system` — system, sandbox terminal and truthful integration rows (`configured: false` when not configured, `dns_managed: false` / `email_provisioned: false` for the domain).
+- `GET /api/desktop/files?path=.` — sandbox directory listing relative to the workstation folder.
+- `GET /api/desktop/files/content?path=README.md` — read a text file.
+- `POST /api/desktop/files/write` — `{"path": "notes.txt", "content": "..."}`, constrained to the workstation sandbox folder.
+- `POST /api/terminal/exec` — `{"command": "ls"}` runs a builtin argv-only command. No host shell shell metacharacters; external binaries run only when allowlisted through `BANGKAH_TERMINAL_ALLOWED_BINARIES`.
+
+Login, file writes, terminal commands and session events are recorded in the company audit trail and surfaced through `GET /api/desktop/audit`.
+
+## Company mutations
+
+All mutations require an authenticated Owner when `BANGKAH_API_TOKEN` is configured. The backend validates transitions and arguments; the Godot client is not the authority.
+
+### Tasks
+
+`POST /api/tasks`
+
+```json
+{
+  "title": "Implement user profile endpoint",
+  "description": "Add GET and PATCH profile routes",
+  "assignee_id": "backend",
+  "priority": "high",
+  "project_key": "company-portal",
+  "acceptance_criteria": "Routes are covered by tests and API docs"
+}
+```
+
+`POST /api/tasks/{task_id}/transition`
+
+```json
+{
+  "status": "completed",
+  "note": "Implementation and QA verified",
+  "evidence": [
+    {"type": "pull_request", "reference": "https://git.example/repo/pull/14", "note": "Tests passed"}
+  ]
+}
+```
+
+Allowed transitions: `pending → in_progress|cancelled`; `in_progress → blocked|completed|failed|cancelled`; `blocked → in_progress|cancelled|failed`; `failed → pending`. Completion requires at least one evidence object with a non-empty reference.
+
+### Meetings
+
+`POST /api/meetings` accepts `title`, `attendee_ids[]`, `agenda`, and `room_id`.
+
+- `POST /api/meetings/{id}/start` changes `scheduled` to `in_progress`.
+- `POST /api/meetings/{id}/complete` requires `minutes` and may include `decisions[]` / `followups[]`.
+- `POST /api/meetings/{id}/cancel` changes `scheduled` or `in_progress` to `cancelled`.
+
+### Papers and PDF print jobs
+
+`POST /api/papers` accepts `title`, `body`, `paper_type`, `origin`, `priority`, optional `related_task_id`, and optional `approval_id`.
+
+`POST /api/papers/{paper_id}/review` accepts a Paper status such as `read`, `deferred`, or `archived`. A Paper linked to an approval cannot be independently approved/rejected; decide the linked approval instead.
+
+`POST /api/print-jobs` accepts `paper_id` and produces a PDF PrintJob. A completed job can be retrieved from `/api/print-jobs/{id}/download`.
+
+### Approval and outbox
+
+`POST /api/approvals` accepts:
+
+```json
+{
+  "action_type": "email.send",
+  "summary": "Send the approved project status to the client",
+  "payload": {
+    "to": "client@example.com",
+    "subject": "Project status",
+    "body": "The reviewed release candidate is ready."
+  }
+}
+```
+
+Supported action types: `email.send`, `website.deploy`, `expense.purchase`.
+
+- `POST /api/approvals/{id}/approve` creates one queued outbox item.
+- `POST /api/approvals/{id}/reject` rejects the request.
+- `POST /api/outbox/{id}/execute` executes an approved email / deployment adapter. The Owner must explicitly invoke this endpoint after approval.
+
+Approval payload JSON is canonicalized, SHA-256 hashed and protected by a database trigger against modification. Secrets are rejected from approval payloads. Email and deployment actions require provider configuration. Purchases remain `awaiting_executor` for manual handling. Uncertain provider results become `unknown` and must be reconciled manually before any retry.
+
+## Legacy / agent routes
+
+The pre-existing agent endpoints are preserved:
+
+- `POST /api/command`
+- `POST /api/chat`
+- `POST /api/employee-chat`
+- `POST /api/room-chat`
+- `POST /api/office/action`
+- `POST /api/office/player`
+- `POST /api/knowledge/documents`
+
+These routes continue to use the existing Orchestrator, office tools, CrewAI pipeline and knowledge store. They are not a replacement for approval gates around external actions.
+
+## Important omissions
+
+This release does not expose a WebSocket replay endpoint, a general Owner web login/session bootstrap (workstation desktop sessions are scoped to a physical workstation and its apps, not a web session), full organization CRUD, task delegation engine, website rollback API, automated purchasing, or a general plugin registry. `/api/events` is cursor polling, not a WebSocket implementation.

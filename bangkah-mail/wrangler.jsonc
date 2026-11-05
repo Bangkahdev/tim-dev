@@ -1,0 +1,29 @@
+{
+  "$schema": "../bangkah-web/node_modules/wrangler/config-schema.json",
+  "name": "bangkah-mail-web",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "observability": {
+    "enabled": true
+  },
+  "routes": [
+    { "pattern": "mail.bangkah.web.id", "custom_domain": true }
+  ],
+  "d1_databases": [
+    {
+      "binding": "MAIL_DB",
+      "database_name": "bangkah-mail-webid",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MAIL_BUCKET",
+      "bucket_name": "bangkah-mail-web"
+    }
+  ],
+  "vars": {
+    "MAIL_DOMAIN": "bangkah.web.id",
+    "FORWARD_TO": "mdhyaulatha@gmail.com"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "../bangkah-web/node_modules/wrangler/config-schema.json",
+  "name": "bangkah-files",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "observability": {
+    "enabled": true
+  },
+  "routes": [
+    { "pattern": "files.bangkah.web.id", "custom_domain": true }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "FILES_BUCKET",
+      "bucket_name": "bangkah-files"
+    }
+  ],
+  "vars": {
+    "MAX_UPLOAD_BYTES": "104857600"
+  }
+}

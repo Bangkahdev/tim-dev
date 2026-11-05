@@ -1,0 +1,7 @@
+# Kredensial FTP — jangan dibagikan atau di-commit.
+users.json
+.pylibs/
+share/
+certs/
+*.log
+__pycache__/

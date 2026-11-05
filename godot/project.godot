@@ -1,0 +1,37 @@
+; Bangkah Company Simulator - Godot 4 project
+; Open this folder in Godot 4.3 or newer.
+config_version=5
+
+[application]
+config/name="Bangkah Company Simulator"
+config/description="Bangkah Company Simulator Final Desktop MVP 1.0: walkable headquarters and AI company operations."
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.3", "Forward Plus")
+run/max_fps=144
+
+[display]
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/size/window_width_override=1600
+window/size/window_height_override=900
+window/stretch/mode="canvas_items"
+
+[rendering]
+renderer/rendering_method="forward_plus"
+renderer/rendering_method.mobile="forward_plus"
+textures/default_filters/use_nearest_mipmap_filter=false
+textures/default_filters/anisotropic_filtering_level=16
+anti_aliasing/quality/msaa_3d=2
+anti_aliasing/quality/screen_space_aa=1
+anti_aliasing/quality/use_taa=true
+environment/defaults/default_clear_color=Color(0.69, 0.77, 0.79, 1)
+directional_shadow/size=8192
+directional_shadow/soft_shadow_quality=3
+positional_shadow/soft_shadow_quality=3
+positional_shadow/atlas_size=4096
+shading/depth_prepass_enable=true
+mesh_lod/lod_change/threshold_pixels=8
+
+[physics]
+3d/default_gravity=18.0
+

@@ -1,0 +1,16 @@
+# Rahasia
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Hasil jalannya aplikasi
+logs/
+reports/
+workspace/
+
+# Database lokal kantor
+data/

@@ -1,0 +1,10 @@
+{
+  "name": "bangkah-files",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Portal file perusahaan Bangkah di atas Cloudflare R2.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  }
+}

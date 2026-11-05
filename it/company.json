@@ -1,0 +1,18 @@
+{
+  "company": "Bangkah",
+  "domain": "bangkah.web.id",
+  "website": "https://bangkah.web.id",
+  "mail": "https://mail.bangkah.web.id",
+  "files": "https://files.bangkah.web.id",
+  "employees": [
+    { "name": "Owner", "role": "Founder & CEO", "email": "owner@bangkah.web.id" },
+    { "name": "Arman", "role": "Lead Manager", "email": "arman@bangkah.web.id" },
+    { "name": "Sinta", "role": "COO / Project Manager", "email": "sinta@bangkah.web.id" },
+    { "name": "Raka", "role": "System Architect", "email": "raka@bangkah.web.id" },
+    { "name": "Bima", "role": "Backend Developer", "email": "bima@bangkah.web.id" },
+    { "name": "Naya", "role": "API Specialist", "email": "naya@bangkah.web.id" },
+    { "name": "Dira", "role": "Frontend Developer", "email": "dira@bangkah.web.id" },
+    { "name": "Tika", "role": "QA Engineer", "email": "tika@bangkah.web.id" },
+    { "name": "Mira", "role": "Receptionist", "email": "mira@bangkah.web.id" }
+  ]
+}

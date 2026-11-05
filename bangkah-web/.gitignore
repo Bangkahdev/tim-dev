@@ -1,0 +1,14 @@
+# Build output
+.next/
+out/
+node_modules/
+.wrangler/
+
+# Local secrets
+.env
+.env.*
+!.env.example
+.dev.vars
+
+# Logs
+*.log
