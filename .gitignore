@@ -1,0 +1,45 @@
+# Godot editor/runtime
+.godot/
+*.translation
+
+# Python runtime
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Private configuration and company data
+.env
+*.env
+backend/.env
+backend/data/
+backend/reports/
+backend/logs/
+backend/workspace/
+
+# Cloudflare & Digital
+.cloudflare/
+**/.cloudflare/
+**/.next/
+**/out/
+**/node_modules/
+**/.wrangler/
+**/.dev.vars
+
+# Company IT — online credentials and office data
+it/credentials/
+it/ftp/users.json
+it/ftp/share/
+it/ftp/certs/
+it/ftp/.pylibs/
+it/r2/.cache/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+backend/.pylibs/
+*.so
