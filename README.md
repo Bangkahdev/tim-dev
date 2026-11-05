@@ -17,7 +17,7 @@ This release is the **Final Desktop MVP 1.0** for the single-Owner local desktop
 - NPC local separation, obstacle probes and route recovery using authored waypoints.
 - Local Boardroom preview with seated participants, alternating speaking/listening gestures and return routes. This visual preview is separate from persisted backend meetings.
 - Optional GLB character slots under `godot/assets/characters/`. Procedural humanoids remain the fallback; no third-party rigged models are bundled.
-- Physical workstation slice: the Owner desk (`OWNER-PC-001`) opens **Bangkah OS** through the real backend — workstation login (PBKDF2 accounts, login throttling, 8-hour sessions), a Files sandbox folder per workstation, an argv-only sandbox Terminal, truthful Infrastructure status, and a Company summary. Employee workstations are catalogued but their accounts stay inactive; the backend refuses their logins honestly. See `docs/WORKSTATION-AND-DESKTOP.md`.
+- Physical workstation slice: every desk in the office (`OWNER-PC-001` and the seven employee desks `PC-MGT-001`…`PC-QA-001`) opens **Bangkah OS** through the real backend — workstation login (PBKDF2 accounts, login throttling, 8-hour sessions), a Files sandbox folder per workstation, an argv-only sandbox Terminal, truthful Infrastructure status, and a Company summary. Every employee has a real login at their own desk, and the workshift engine logs them in during office hours to write audited work files. See `docs/WORKSTATION-AND-DESKTOP.md`.
 
 ### Company operations backend
 
@@ -68,7 +68,7 @@ The 3D office remains explorable when the backend is offline. Company data and o
 | `Space` | Jump |
 | Mouse | Look around |
 | `E` | Interact with the focused nearby employee / office object |
-| `E` at the Owner desk | Sit down at OWNER-PC-001 and open Bangkah OS |
+| `E` at a workstation desk | Sit down at that workstation and open Bangkah OS |
 | `Esc` while in Bangkah OS | Stand up and return to the office (session stays until `LOGOUT`) |
 | `V` | Toggle third-person / first-person |
 | Mouse wheel | Adjust third-person camera distance |
@@ -105,6 +105,11 @@ Optional external integrations:
 | `BANGKAH_HOST`, `BANGKAH_PORT` | Local API bind | Host must remain loopback; default port 8765 |
 | `BANGKAH_OWNER_PASSWORD` | Owner workstation password for Bangkah OS | Generated into `backend/data/owner_credentials.local` when left empty; never committed |
 | `BANGKAH_DESKTOP_SESSION_HOURS` | Desktop session lifetime in hours | Default 8 |
+| `BANGKAH_EMPLOYEE_ACCOUNTS` | Employee workstation accounts | `0` freezes employee logins back to inactive; default on |
+| `BANGKAH_EMPLOYEE_PASSWORD` | One shared password for every employee workstation | When empty, per-account passwords in `backend/data/employee_credentials.local` |
+| `BANGKAH_EMPLOYEE_ACTIVITY` | Workshift engine toggle | `0` stops the engine; default on |
+| `BANGKAH_EMPLOYEE_DUTY_HOURS` | Office hours window for the workshift engine | `9-17` default (server-local, supports overnight) |
+| `BANGKAH_EMPLOYEE_TICK_SECONDS` | Engine tick cadence | Default 20 |
 | `BANGKAH_TERMINAL_ALLOWED_BINARIES` | Allowlist for external terminal binaries | Empty = builtin commands only; argv-resolved paths, no shell metacharacters |
 | `BANGKAH_DOMAIN` | Company domain shown in system info | DNS / email state is reported honestly as unmanaged |
 

@@ -78,12 +78,14 @@ func session_workstation() -> String:
 # ---------------------------------------------------------------------------
 # Public lifecycle
 # ---------------------------------------------------------------------------
-func open_for(workstation_id: String, label: String) -> void:
+func open_for(workstation_id: String, label: String, account_hint: String = "") -> void:
 	_workstation_id = workstation_id
 	_workstation_label = label
 	visible = true
 	set_process(true)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	if is_instance_valid(_login_account) and not account_hint.is_empty():
+		_login_account.text = account_hint
 	if _desktop_token.is_empty():
 		_show_login()
 	else:
@@ -173,7 +175,7 @@ func _build_login_view() -> void:
 	_login_button.pressed.connect(_submit_login)
 	box.add_child(_login_button)
 	box.add_child(_label("Kata sandi Owner dibuat oleh backend pada data/owner_credentials.local "
-		+ "atau mengikuti BANGKAH_OWNER_PASSWORD. Akun karyawan belum diaktifkan pada slice ini.",
+		+ "atau mengikuti BANGKAH_OWNER_PASSWORD. Kata sandi karyawan ada pada data/employee_credentials.local.",
 		10, MUTED))
 	box.add_child(_label("ESC  ·  berdiri dan kembali ke kantor", 10, WARN, false, false))
 
@@ -358,6 +360,17 @@ func _apply_session() -> void:
 	_session_label.text = "%s  ·  %s (%s)  ·  sesi berakhir %s" % [session_head, account_name, account_role, session_end]
 	if is_instance_valid(_status_label):
 		_status_label.text = "WORKDIR  %s  ·  TEKAN ESC UNTUK BERDIRI  ·  SESI TETAP AKTIF SAMPAI LOGOUT" % _workstation_id
+	# The dock follows the account's backend permission list: employees see
+	# files, terminal and company only; infrastructure stays for the Owner.
+	for app_id in _nav_buttons:
+		var button: Button = _nav_buttons[app_id]
+		button.visible = app_id in _session_apps()
+
+func _session_apps() -> Array:
+	var apps = _session.get("apps", [])
+	if apps is Array:
+		return apps
+	return ["files", "terminal", "infrastructure", "company"]
 
 func _lose_session(data: Variant) -> void:
 	_desktop_token = ""

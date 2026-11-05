@@ -21,14 +21,16 @@ It is not certified as full SRS v1.3 compliance. The scope below separates imple
 | Deployment HTTPS validation | Adapter tests | Passed |
 | Workstation catalogue, login, throttle, session lifetime | `backend/tests/test_workstations.py` | Passed |
 | Workstation sandbox filesystem, argv terminal, audit honesty | `backend/tests/test_workstations.py` | Passed |
+| Employee workstation accounts, activation gate and credential provision | `backend/tests/test_workstations.py` | Passed |
+| Employee workshift engine: login, files, audit feed, duty window | `backend/tests/test_employee_activity.py` | Passed |
 | Python syntax compilation | `python -m compileall -q backend` | Passed |
-| Backend unit suite | `python -m pytest -q` | 71 passed |
+| Backend unit suite | `python -m pytest -q` | 85 passed |
 | HTTP route integration | Isolated local HTTP smoke test | Passed |
-| Workstation desktop live HTTP check | `backend/tools/check_desktop_api.py` | 17/17 passed |
-| Godot headless boot and workstation UI state machine | `godot/scripts/workstation_ui_check.gd` (Godot 4.7.2 headless) | 20/20 passed |
+| Workstation desktop live HTTP check | `backend/tools/check_desktop_api.py` | 21/21 passed |
+| Godot headless boot and workstation UI state machine | `godot/scripts/workstation_ui_check.gd` (Godot 4.7.2 headless) | 22/22 passed |
 | Static Godot resource references / docs / package hygiene | `python tools/validate_bundle.py` | Passed |
 
-The HTTP smoke test uses a fake `crewai` import because the exercised endpoints do not call the LLM. It does not prove a real provider has been configured or that coding agents can complete an external project. SMTP and deployment adapter tests use mocks / configuration validation; no real email or website deployment was triggered. The desktop HTTP runtime check runs the real server routes over loopback; the Godot script validates the client state machine against recorded real-backend response shapes because the build sandbox blocks Godot-to-loopback sockets (details in `docs/WORKSTATION-AND-DESKTOP.md`).
+The HTTP smoke test uses a fake `crewai` import because the exercised endpoints do not call the LLM. It does not prove a real provider has been configured or that coding agents can complete an external project. SMTP and deployment adapter tests use mocks / configuration validation; no real email or website deployment was triggered. The desktop HTTP runtime check runs the real server routes over loopback, including the employee workshift tick and audited feed; the Godot script validates the client state machine against recorded real-backend response shapes because the build sandbox blocks Godot-to-loopback sockets (details in `docs/WORKSTATION-AND-DESKTOP.md`).
 
 ## Manual desktop acceptance still required
 
@@ -48,13 +50,14 @@ Godot itself is now available in the build environment (4.7.2 headless), and the
 - [ ] Approval UI exposes the exact payload and hash before decision; reject does not create an outbox item.
 - [ ] Approve creates one outbox item; explicit execution sends only after approval.
 - [ ] API token protects GET, POST and PDF download routes when configured.
-- [ ] Owner walks to the Owner desk, presses `E`, sits with the sit animation and the camera lands on the monitor.
+- [ ] Owner walks to a workstation desk, presses `E`, sits with the sit animation and the camera lands on the monitor.
 - [ ] Bangkah OS login accepts the Owner password once and refuses a wrong password with the backend message; fails and throttle states surface honestly.
+- [ ] Employee desks open Bangkah OS too; the login account is prefilled per desk and the dock follows the account's apps (employee: files/terminal/company only).
 - [ ] Files lists the seeded sandbox folder, opens README.md and saves an edited file (write appears in the workstation audit).
 - [ ] Terminal accepts builtin commands, echoes output/exit codes and refuses shell chaining / path traversal.
 - [ ] Infrastructure shows `ABSENT` for unconfigured SMTP / deploy / API token and `DNS tidak dikelola` for the domain.
 - [ ] `ESC` stands the Owner up with the stand-up animation, restores the office HUD; sitting again resumes the session; `LOGOUT` closes it for real.
-- [ ] Employee desks keep the prototype panels and reject workstation login attempts honestly.
+- [ ] With the backend running during office hours, employees appear logged-in at their desks working; polling `/api/office/activity` shows `employee_work` units appearing for them.
 - [ ] Offline exploration remains usable and business actions clearly report the unavailable backend.
 - [ ] FPS and 1% low are measured in reception, Engineering and boardroom with hardware / renderer recorded.
 
