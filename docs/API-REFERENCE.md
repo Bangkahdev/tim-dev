@@ -2,13 +2,36 @@
 
 Base URL: `http://127.0.0.1:8765`  
 Content type for JSON mutations: `application/json`  
-All responses are UTF-8 JSON unless noted. The service is intended for a local single-Owner desktop instance.
+All responses are UTF-8 JSON unless noted.
 
-When `BANGKAH_API_TOKEN` is non-empty, every `/api/*` request (GET and POST, including PDF downloads) requires:
+## Authentication
+
+Every `/api/*` route except `POST /api/auth/login` requires a verified company session:
 
 ```http
-Authorization: Bearer <BANGKAH_API_TOKEN>
+Authorization: Bearer <session token>
 ```
+
+- `POST /api/auth/login` with `{"username":"...","password":"..."}` returns `{"success":true,"session":{"token":"...","username":"...","role":"..."}}`.
+- `GET /api/auth/me` returns the current user; `POST /api/auth/logout` revokes the session token.
+- Missing, invalid, expired, revoked or disabled-account sessions receive `401`. A valid session without the required permission receives `403`.
+- There is no anonymous Owner and no implicit loopback bypass.
+- Sessions expire after `BANGKAH_SESSION_HOURS` (default 8). Role, employee and department are read from the database on every request, so disabling an account or changing a role takes effect immediately.
+- The first owner is created by `ensure_bootstrap_owner()` at server start: it uses `BANGKAH_OWNER_PASSWORD` when set, otherwise generates a password into `backend/data/owner_auth_password.local` (never committed).
+
+A shared `BANGKAH_API_TOKEN` is not an identity by itself. For legacy clients, an operator must explicitly opt in with `BANGKAH_LEGACY_TOKEN_ROLE=owner|secretary|manager|employee|admin`; without it the shared token is rejected.
+
+### Roles and scope
+
+| Role | Summary |
+|---|---|
+| `owner` | Full access, including approvals, outbox execution/reconciliation and external writes. |
+| `secretary` | Company operations, meetings, Papers, approvals (create), audit read; scoped to executive, operations, front office and promotion. |
+| `manager` | Task assignment and transitions, meetings, Papers, approvals (create), project runs, audit read; every department except reserved owner-only actions; no external write. |
+| `employee` | Read company data, transition own assigned tasks, use the team chat and their workstation; no task creation, audit, outbox or approval access. |
+| `admin` | Legacy operations role kept for existing installations; never receives owner-only permissions. |
+
+Department scope is enforced for task assignment/transition, employee listings and the "owner-only" routes. Employees only see their own tasks, their own employee record and projects linked to their assigned tasks.
 
 The backend only binds to loopback. For remote access, place it behind a TLS reverse proxy and preserve the Authorization header. Request bodies are limited to 100 KB. Error responses use `{"error":"..."}` and do not intentionally return environment secrets.
 
@@ -78,7 +101,7 @@ Engine state lives in `employee_workshift` (per-employee status, unit counters, 
 
 ## Company mutations
 
-All mutations require an authenticated Owner when `BANGKAH_API_TOKEN` is configured. The backend validates transitions and arguments; the Godot client is not the authority.
+All mutations require an authenticated session with the matching permission. The acting user is taken from the session, never from the request body. The backend validates transitions and arguments; the Godot client is not the authority.
 
 ### Tasks
 
@@ -170,4 +193,4 @@ These routes continue to use the existing Orchestrator, office tools, CrewAI pip
 
 ## Important omissions
 
-This release does not expose a WebSocket replay endpoint, a general Owner web login/session bootstrap (workstation desktop sessions are scoped to a physical workstation and its apps, not a web session), full organization CRUD, task delegation engine, website rollback API, automated purchasing, or a general plugin registry. `/api/events` is cursor polling, not a WebSocket implementation.
+This release does not expose a WebSocket replay endpoint, full organization CRUD, a task delegation engine, a website rollback API, automated purchasing, or a general plugin registry. `/api/events` is cursor polling, not a WebSocket implementation. Web sessions are separate from workstation desktop sessions (`X-Desktop-Session`), which remain scoped to a physical workstation and its apps.

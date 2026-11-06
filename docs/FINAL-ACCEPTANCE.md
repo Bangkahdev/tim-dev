@@ -49,7 +49,7 @@ Godot itself is now available in the build environment (4.7.2 headless), and the
 - [ ] Paper creation, review and PDF print job work; a PDF can be downloaded and opened from the client.
 - [ ] Approval UI exposes the exact payload and hash before decision; reject does not create an outbox item.
 - [ ] Approve creates one outbox item; explicit execution sends only after approval.
-- [ ] API token protects GET, POST and PDF download routes when configured.
+- [ ] Every `/api/*` route except login returns 401 without a valid session; unauthorized roles receive 403.
 - [ ] Owner walks to a workstation desk, presses `E`, sits with the sit animation and the camera lands on the monitor.
 - [ ] Bangkah OS login accepts the Owner password once and refuses a wrong password with the backend message; fails and throttle states surface honestly.
 - [ ] Employee desks open Bangkah OS too; the login account is prefilled per desk and the dock follows the account's apps (employee: files/terminal/company only).
@@ -67,7 +67,7 @@ Godot itself is now available in the build environment (4.7.2 headless), and the
 - NPC pathing uses authored waypoints with local steering, not a complete NavigationAgent3D / NavigationMesh crowd system.
 - The local 3D Boardroom preview is visual; the separate meeting records are the persisted business record.
 - The event feed uses cursor-based HTTP polling. No WebSocket replay/reconnect endpoint is included.
-- Owner identity is a single local Owner. Workstation desktop sessions exist for physical stations (logout closes them), but there is no general web account system or multi-user RBAC.
+- Company accounts now use real logins, revocable expiring sessions and role/department enforcement (`owner`, `secretary`, `manager`, `employee`, legacy `admin`). Workstation desktop sessions remain a separate credential scoped to a physical station. Account administration is local (`core.auth.sessions`), not a public HTTP user-management API.
 - Task completion evidence is validated as a non-empty reference and note object; the backend does not fetch or independently verify an external Git / CI URL.
 - SMTP / webhook integrations require configuration and provider-side testing. No credentials or real provider state are included in the archive.
 - Purchases remain manual; no payment provider is integrated.

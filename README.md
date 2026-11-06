@@ -29,7 +29,7 @@ This release is the **Final Desktop MVP 1.0** for the single-Owner local desktop
 - SMTP TLS email adapter and HTTPS deployment webhook adapter, both disabled until credentials / endpoint are configured.
 - Explicit manual handling for purchases. The application never records a purchase as completed merely because approval was granted.
 - Audit events, cursor-based event retrieval and model usage summaries when the provider reports token metrics.
-- Optional bearer-token authentication for every API endpoint. The backend binds to loopback only; remote access should pass through a TLS reverse proxy.
+- Mandatory session authentication for every API endpoint, bcrypt password hashing, revocable expiring sessions, and four company roles (`owner`, `secretary`, `manager`, `employee`) with department scope, task ownership and owner-only approvals. The backend binds to loopback only; remote access should pass through a TLS reverse proxy.
 
 ## Quick start
 
@@ -101,7 +101,10 @@ Optional external integrations:
 |---|---|---|
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` | Outbound email | SMTP with TLS; only via approved outbox execution |
 | `DEPLOY_WEBHOOK_URL`, `DEPLOY_WEBHOOK_TOKEN` | Website deployment trigger | HTTPS only; only via approved outbox execution |
-| `BANGKAH_API_TOKEN` | Protect all API reads and writes | Bearer token; kept in game memory for the current session |
+| `BANGKAH_OWNER_PASSWORD` | First `owner` login password | Used once when the auth database is empty; otherwise a generated password is written to `backend/data/owner_auth_password.local` |
+| `BANGKAH_SESSION_HOURS` | Web/API session lifetime in hours | Default 8; sessions are revocable and rejected for disabled accounts |
+| `BANGKAH_API_TOKEN` | Legacy shared token | Not an identity. Only accepted with `BANGKAH_LEGACY_TOKEN_ROLE` set explicitly |
+| `BANGKAH_LEGACY_TOKEN_ROLE` | Opt-in role for the legacy shared token | `owner`, `secretary`, `manager`, `employee` or `admin`; empty rejects the shared token |
 | `BANGKAH_HOST`, `BANGKAH_PORT` | Local API bind | Host must remain loopback; default port 8765 |
 | `BANGKAH_OWNER_PASSWORD` | Owner workstation password for Bangkah OS | Generated into `backend/data/owner_credentials.local` when left empty; never committed |
 | `BANGKAH_DESKTOP_SESSION_HOURS` | Desktop session lifetime in hours | Default 8 |
@@ -115,7 +118,7 @@ Optional external integrations:
 
 External email and deployment are intentionally not preconfigured. Do not put passwords, provider tokens or private keys in Paper content, chat messages, approval payloads or source files. Put secrets only in `backend/.env`, which is excluded from the release package and version control.
 
-For remote access, keep the Python service bound to `127.0.0.1`, configure `BANGKAH_API_TOKEN`, and expose the API through a TLS reverse proxy. Do not expose the plain HTTP backend directly to a network.
+Every API call requires a company session created with `POST /api/auth/login`; the web UI shows a login gate. Roles are `owner`, `secretary`, `manager` and `employee`, with department scope, task ownership and owner-only approvals/outbox actions. There is no anonymous Owner. For remote access, keep the Python service bound to `127.0.0.1` and expose it through a TLS reverse proxy; do not expose the plain HTTP backend directly to a network.
 
 ## Documentation
 

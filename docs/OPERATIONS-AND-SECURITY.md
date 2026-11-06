@@ -4,24 +4,32 @@
 
 The supported release topology is one Owner desktop running the Godot client and a Python backend bound to `127.0.0.1:8765`. SQLite stores office and company operation records under `backend/data/`. Generated PDF files are stored under `backend/data/prints/`. Agent logs, reports and workspaces remain under the backend directory and are excluded from the release ZIP.
 
-The backend refuses direct non-loopback binding. For remote access, keep the process on loopback, configure `BANGKAH_API_TOKEN`, and place an HTTPS reverse proxy in front of it. The proxy must forward the `Authorization` header and should apply request size / rate limits. Never expose the Python HTTP server directly on a public interface.
+The backend refuses direct non-loopback binding. Every `/api/*` route except `/api/auth/login` requires a company session; place an HTTPS reverse proxy in front of remote access and forward the `Authorization` header with request size / rate limits. Never expose the Python HTTP server directly on a public interface.
 
 ## First run
 
 1. Run `start_backend.bat` or `start_backend.sh` from the extracted project root.
 2. The start script creates a virtual environment and installs `backend/requirements.txt`.
 3. On first launch, `backend/.env.example` is copied to `backend/.env`; configure model variables and provider keys.
-4. Start the backend again. Keep its console open.
-5. Launch `godot/project.godot` in Godot 4.3+.
-6. The client initially connects to `http://127.0.0.1:8765`. For token-protected setups, enter the exact `BANGKAH_API_TOKEN` in Settings. The game holds the token in memory only; it is not written to disk.
+4. Start the backend again. Keep its console open. On an empty database the server creates the first `owner` account: it uses `BANGKAH_OWNER_PASSWORD` if set, otherwise writes a generated password to `backend/data/owner_auth_password.local`.
+5. Launch `godot/project.godot` in Godot 4.3+. The web UI shows a login gate and stores only the session token.
+6. Log in through `POST /api/auth/login` (or the UI). There is no anonymous access and no implicit Owner identity.
+
+## Accounts, sessions and roles
+
+- Passwords are hashed with bcrypt. Sessions are random 32-byte tokens; only server-side state decides validity. Sessions expire after `BANGKAH_SESSION_HOURS` (default 8), can be revoked, and are rejected when the account is disabled.
+- Roles: `owner`, `secretary`, `manager`, `employee` (plus legacy `admin` with operations rights but no owner-only permissions).
+- Authorization combines role permission, department scope, task assignment/ownership, project access and approval authority. `POST /api/approvals/{id}/approve|reject` is owner-only, and the reviewer is the authenticated session user.
+- Actions are attributed to the authenticated user. Request body fields such as `actor` are ignored.
+- Manage accounts with `core.auth.sessions.create_user`, `set_user_enabled` and `set_user_role`. Employee accounts can be linked to a roster id and department.
 
 ## Secrets
 
 - Keep provider keys, SMTP credentials and deployment tokens only in `backend/.env` or a stronger secret store used by the host.
 - Do not paste secrets into chat, Paper, approval payloads, knowledge documents, task evidence or source code.
-- `.env`, SQLite databases, generated PDFs, logs, reports and workspaces are gitignored and excluded from the release archive.
-- The game API token is not persisted by the Godot client. Closing the game clears it.
-- The backend compares bearer tokens using a constant-time comparison. If configured, the token protects all `/api/*` reads, writes and generated-file downloads.
+- `.env`, SQLite databases, generated PDFs, logs, reports, workspaces and `owner_auth_password.local` are gitignored and excluded from the release archive.
+- The Godot client keeps the API/session credential in memory only.
+- A shared `BANGKAH_API_TOKEN` is not accepted as an identity unless the operator sets `BANGKAH_LEGACY_TOKEN_ROLE` explicitly. Prefer real sessions.
 
 ## External action safety
 
@@ -50,8 +58,8 @@ A local Ollama model keeps prompts on the local machine, subject to the configur
 
 ## Security boundary and known gaps
 
-- This is a single-owner local MVP, not a hardened multi-user service.
-- The API bearer token is static configuration, not a short-lived login session with rotation/revocation endpoint.
+- This is a local single-company MVP. It now has real logins, short-lived revocable sessions and role/department enforcement, but it is not a hardened internet-facing multi-tenant service.
+- Account administration is local (`create_user`, `set_user_enabled`, `set_user_role`); there is no public user-management HTTP API yet.
 - There is no full subprocess/container sandbox or per-agent filesystem/network isolation in this release.
 - RAG content is context, not authorization. Tool allowlists in the legacy Orchestrator remain the control point for tool invocation.
 - Email and deployment adapters are opt-in and require real provider credentials. The package contains no credentials and has not sent a real message or deployment.
