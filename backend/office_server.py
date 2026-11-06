@@ -27,7 +27,9 @@ from core.workstations import DESKTOP, DesktopAuthError, DesktopError
 from core.employee_activity import EmployeeActivityEngine
 from core.domain_service import DomainService
 from core.auth import authentication as AUTH
+from core.auth.sessions import ensure_bootstrap_owner
 from core import authz
+from core.rbac import can_access_employee, can_access_department, can_assign, can_transition_task
 from core.infra_service import INFRA
 from core.ftp_service import FTP
 from core.mail_service import MAIL
@@ -42,6 +44,9 @@ WEB_DIR = BASE_DIR / "web"
 HOST = os.getenv("BANGKAH_HOST", "127.0.0.1").strip() or "127.0.0.1"
 PORT = int(os.getenv("BANGKAH_PORT", "8765"))
 API_AUTH_TOKEN = os.getenv("BANGKAH_API_TOKEN", "").strip()
+LEGACY_TOKEN_ROLE = os.getenv("BANGKAH_LEGACY_TOKEN_ROLE", "").strip().lower()
+if LEGACY_TOKEN_ROLE not in ("", "owner", "admin", "secretary", "manager", "employee"):
+    LEGACY_TOKEN_ROLE = ""
 RUN_LOCK = threading.Lock()
 ACTIVE = {"running": False, "command": "", "started_at": None, "error": None}
 CHAT_HISTORY = []
@@ -197,41 +202,58 @@ class OfficeHandler(BaseHTTPRequestHandler):
             raise ValueError("Body JSON harus berupa objek.")
         return value
 
-    def _current_user(self):
+    def _bearer_token(self):
         supplied = self.headers.get("Authorization", "")
         if supplied.lower().startswith("bearer "):
             supplied = supplied[7:].strip()
-        # Prefer session token
-        try:
-            from core.auth.authentication import current_user as cu
-            u = cu(supplied)
-            if u:
-                return u
-        except Exception:
-            pass
-        # Fallback legacy token -> owner
-        if API_AUTH_TOKEN and hmac.compare_digest(supplied, API_AUTH_TOKEN):
-            return {"username": "owner", "role": "owner"}
-        if self.headers.get("X-Forwarded-For"):
+        return supplied.strip()
+
+    def _current_user(self):
+        """Resolve the caller from a verified session.
+
+        A bare shared API token never becomes an identity unless the operator
+        explicitly opted into the legacy migration with
+        ``BANGKAH_LEGACY_TOKEN_ROLE``. There is no anonymous Owner.
+        """
+        token = self._bearer_token()
+        if not token:
             return None
-        if not API_AUTH_TOKEN:
-            return {"username": "anonymous", "role": "owner"}
+        try:
+            user = AUTH.current_user(token)
+        except Exception:
+            user = None
+        if user:
+            return user
+        if API_AUTH_TOKEN and LEGACY_TOKEN_ROLE and hmac.compare_digest(token, API_AUTH_TOKEN):
+            return {"username": "legacy-token", "role": LEGACY_TOKEN_ROLE,
+                    "employee_id": None, "department_id": None}
         return None
+
+    @property
+    def actor(self):
+        return (getattr(self, "_auth_user", None) or {}).get("username", "unknown")
+
+    def _chat_identity(self):
+        user = self._auth_user or {}
+        username = str(user.get("username") or "unknown")
+        return username, username
 
     def _authorize_mutation(self):
         user = self._current_user()
         if user is None:
-            self.send_json({"success": False, "error": {"code": "UNAUTHORIZED", "message": "Authentication required."}}, 401)
+            self.send_json({"success": False, "error": {
+                "code": "UNAUTHORIZED", "message": "Authentication required."}}, 401)
             return False
         self._auth_user = user
-        try:
-            if not authz.is_allowed(user["role"], self.path.split("?")[0], self.command):
-                self.send_json({"success": False, "error": {"code": "FORBIDDEN", "message": "Permission denied."}}, 403)
-                return False
-        except PermissionError:
-            self.send_json({"success": False, "error": {"code": "FORBIDDEN", "message": "Permission denied."}}, 403)
+        if not authz.is_allowed(user["role"], self.path.split("?")[0], self.command):
+            self.send_json({"success": False, "error": {
+                "code": "FORBIDDEN", "message": "Permission denied."}}, 403)
             return False
         return True
+
+    def _forbidden(self):
+        self.send_json({"success": False, "error": {
+            "code": "FORBIDDEN", "message": "Permission denied."}}, 403)
 
     def _api_error(self, error, status=400):
         self.send_json({"error": str(error)}, status)
@@ -256,19 +278,41 @@ class OfficeHandler(BaseHTTPRequestHandler):
         return {**totals, "usage_available": any(bool(x.get("usage_available")) for x in health.values())}
 
     def do_GET(self):
+        self._auth_user = None
         parsed = urlparse(self.path)
         route = parsed.path
         query = parse_qs(parsed.query)
         if route.startswith("/api/") and not self._authorize_mutation():
             return
+        user = self._auth_user or {}
+        scope_all = user.get("role") in ("owner", "admin")
         if route == "/api/departments":
-            self.send_json({"departments": OPS.departments()}); return
+            items = OPS.departments()
+            if not scope_all and user.get("role") != "manager":
+                items = [d for d in items if can_access_department(
+                    user.get("role"), user.get("department_id"), d["id"])]
+            self.send_json({"departments": items}); return
         if route == "/api/employees":
-            self.send_json({"employees": OPS.employees()}); return
+            items = OPS.employees()
+            if not scope_all:
+                items = [e for e in items if can_access_employee(user, e) or
+                         (user.get("role") in ("manager", "secretary") and can_access_department(
+                             user.get("role"), user.get("department_id"), e.get("department_id")))]
+            self.send_json({"employees": items}); return
         if route == "/api/projects":
-            self.send_json({"projects": latest_project_state()[:100]}); return
+            items = latest_project_state()[:100]
+            if user.get("role") == "employee":
+                allowed = {str(t.get("project_key") or "").lower()
+                           for t in OPS.tasks() if t.get("assignee_id") == user.get("employee_id")}
+                items = [p for p in items if (
+                    str(p.get("name") or "").lower() in allowed or
+                    Path(str(p.get("directory", ""))).name.lower() in allowed)]
+            self.send_json({"projects": items}); return
         if route == "/api/tasks":
-            self.send_json({"tasks": OPS.tasks()}); return
+            items = OPS.tasks()
+            if user.get("role") == "employee":
+                items = [t for t in items if t.get("assignee_id") == user.get("employee_id")]
+            self.send_json({"tasks": items}); return
         if route == "/api/meetings":
             self.send_json({"meetings": OPS.meetings()}); return
         if route == "/api/papers":
@@ -331,8 +375,9 @@ class OfficeHandler(BaseHTTPRequestHandler):
         if route == "/api/workstations":
             self.send_json({"workstations": DESKTOP.list_workstations()})
             return
-        if route.startswith("/api/workstations/") and route.count("/") == 3:
-            workstation_id = route.rsplit("/", 1)[-1]
+        workstation_parts = route.strip("/").split("/")
+        if len(workstation_parts) == 3 and workstation_parts[:2] == ["api", "workstations"]:
+            workstation_id = workstation_parts[2]
             try:
                 self.send_json({"workstation": DESKTOP.workstation(workstation_id)})
             except DesktopError as error:
@@ -377,8 +422,7 @@ class OfficeHandler(BaseHTTPRequestHandler):
             self.send_json({"peers": NETWORK.list_vpn_peers()})
             return
         if route == "/api/auth/me":
-            token = self.headers.get("Authorization","").replace("Bearer ","").strip()
-            user = AUTH.current_user(token)
+            user = self._auth_user or self._current_user()
             if not user:
                 self.send_json({"success": False, "error": {"code":"UNAUTHORIZED","message":"Invalid session"}}, 401)
                 return
@@ -531,9 +575,10 @@ class OfficeHandler(BaseHTTPRequestHandler):
         self.send_error(404)
 
     def do_POST(self):
+        self._auth_user = None
         parsed = urlparse(self.path)
         route = parsed.path
-        if route not in ("/api/auth/login",):
+        if route != "/api/auth/login":
             if not self._authorize_mutation():
                 return
         try:
@@ -544,8 +589,10 @@ class OfficeHandler(BaseHTTPRequestHandler):
 
         # Workstation desktop. Sessions are separate from the company API token:
         # a login returns an opaque desktop token scoped to one workstation.
-        if route.startswith("/api/workstations/") and route.endswith("/login") and route.count("/") == 4:
-            workstation_id = route.split("/")[3]
+        workstation_parts = route.strip("/").split("/")
+        if len(workstation_parts) == 4 and workstation_parts[:2] == ["api", "workstations"] \
+                and workstation_parts[3] == "login":
+            workstation_id = workstation_parts[2]
             try:
                 session = DESKTOP.login(
                     workstation_id,
@@ -577,22 +624,20 @@ class OfficeHandler(BaseHTTPRequestHandler):
             except DesktopError as error:
                 self._desktop_error(error)
             return
-        if route == "/api/domain/join" and route.count("/") == 2:
+        if route == "/api/domain/join":
             workstation_id = str(body.get("workstation_id", "")).strip()
-            actor = str(body.get("actor", "system")).strip() or "system"
             try:
-                result = DOMAIN.join_domain(workstation_id, actor)
+                result = DOMAIN.join_domain(workstation_id, self.actor)
             except ValueError as error:
                 self.send_json({"error": str(error)}, 400)
                 return
             self.send_json({"success": True, "domain": result}, 201)
             return
-        if route == "/api/domain/dns/record" and route.count("/") == 3:
+        if route == "/api/domain/dns/record":
             try:
                 result = DOMAIN.add_dns_record(
                     str(body.get("name", "")), str(body.get("type", "A")),
-                    str(body.get("value", "")),
-                    str(body.get("actor", "system")).strip() or "system")
+                    str(body.get("value", "")), self.actor)
             except ValueError as error:
                 self.send_json({"error": str(error)}, 400)
                 return
@@ -615,13 +660,13 @@ class OfficeHandler(BaseHTTPRequestHandler):
         if route == "/api/infra/service/start":
             sid = str(body.get("service_id","")).strip()
             try:
-                self.send_json({"service": INFRA.start(sid, str(body.get("actor","system")))})
+                self.send_json({"service": INFRA.start(sid, self.actor)})
             except Exception as e:
                 self.send_json({"error": str(e)}, 400)
             return
         if route == "/api/infra/service/stop":
             sid = str(body.get("service_id","")).strip()
-            self.send_json({"service": INFRA.stop(sid, str(body.get("actor","system")))})
+            self.send_json({"service": INFRA.stop(sid, self.actor)})
             return
         if route == "/api/ftp/provision":
             u = str(body.get("username","")).strip()
@@ -646,45 +691,59 @@ class OfficeHandler(BaseHTTPRequestHandler):
 
         # Persisted company workflows. All external side effects are separated
         # into approvals -> outbox -> explicit execute.
+        user = self._auth_user or {}
+        employees_by_id = {employee["id"]: employee for employee in OPS.employees()}
         try:
             if route == "/api/tasks":
+                assignee = body.get("assignee_id")
+                if assignee and not can_assign(user, assignee, employees_by_id):
+                    self._forbidden(); return
                 item = OPS.create_task(body.get("title", ""), body.get("description", ""),
-                    body.get("assignee_id"), body.get("priority", "normal"), body.get("project_key", ""),
-                    body.get("acceptance_criteria", ""))
+                    assignee, body.get("priority", "normal"), body.get("project_key", ""),
+                    body.get("acceptance_criteria", ""), actor=self.actor)
                 self.send_json({"success": True, "task": item}, 201); return
             if route.startswith("/api/tasks/") and route.endswith("/transition"):
                 task_id = route.split("/")[-2]
-                item = OPS.transition_task(task_id, body.get("status", ""), body.get("evidence", []), body.get("note", ""))
+                task = next((t for t in OPS.tasks() if t["id"] == task_id), None)
+                if task is None:
+                    self.send_json({"error": "Tugas tidak ditemukan."}, 404); return
+                if not can_transition_task(user, task, employees_by_id):
+                    self._forbidden(); return
+                item = OPS.transition_task(task_id, body.get("status", ""), body.get("evidence", []),
+                                           body.get("note", ""), actor=self.actor)
                 self.send_json({"success": True, "task": item}); return
             if route == "/api/meetings":
                 item = OPS.create_meeting(body.get("title", ""), body.get("attendee_ids", []),
-                    body.get("agenda", ""), body.get("room_id", "meeting"))
+                    body.get("agenda", ""), body.get("room_id", "meeting"), actor=self.actor)
                 self.send_json({"success": True, "meeting": item}, 201); return
             if route.startswith("/api/meetings/"):
                 parts = route.strip("/").split("/")
                 if len(parts) == 4 and parts[3] in ("start", "complete", "cancel"):
                     item = OPS.update_meeting(parts[2], parts[3], body.get("minutes", ""),
-                        body.get("decisions", []), body.get("followups", []))
+                        body.get("decisions", []), body.get("followups", []), actor=self.actor)
                     self.send_json({"success": True, "meeting": item}); return
             if route == "/api/papers":
                 item = OPS.create_paper(body.get("title", ""), body.get("body", ""),
-                    body.get("paper_type", "memo"), body.get("origin", "owner"),
-                    body.get("priority", "normal"), body.get("related_task_id"), body.get("approval_id"))
+                    body.get("paper_type", "memo"), body.get("origin", self.actor),
+                    body.get("priority", "normal"), body.get("related_task_id"),
+                    body.get("approval_id"), actor=self.actor)
                 self.send_json({"success": True, "paper": item}, 201); return
             if route.startswith("/api/papers/") and route.endswith("/review"):
                 paper_id = route.split("/")[-2]
-                item = OPS.update_paper_status(paper_id, body.get("status", "read"))
+                item = OPS.update_paper_status(paper_id, body.get("status", "read"), actor=self.actor)
                 self.send_json({"success": True, "paper": item}); return
             if route == "/api/print-jobs":
                 item = OPS.create_print_job(body.get("paper_id", ""))
                 self.send_json({"success": True, "print_job": item}, 201); return
             if route == "/api/approvals":
-                item = OPS.create_approval(body.get("action_type", ""), body.get("summary", ""), body.get("payload", {}))
+                item = OPS.create_approval(body.get("action_type", ""), body.get("summary", ""),
+                                           body.get("payload", {}), actor=self.actor,
+                                           actor_role=user.get("role", ""))
                 self.send_json({"success": True, "approval": item}, 201); return
             if route.startswith("/api/approvals/"):
                 parts = route.strip("/").split("/")
                 if len(parts) == 4 and parts[3] in ("approve", "reject"):
-                    item = OPS.decide_approval(parts[2], parts[3], "owner", body.get("note", ""))
+                    item = OPS.decide_approval(parts[2], parts[3], self.actor, body.get("note", ""))
                     self.send_json({"success": True, "approval": item}); return
             if route == "/api/outbox/retry-due":
                 processed = []
@@ -702,11 +761,11 @@ class OfficeHandler(BaseHTTPRequestHandler):
                 outbox_id = route.split("/")[-2]
                 item = OPS.reconcile_outbox(outbox_id, body.get("outcome", ""),
                                             body.get("note", ""), body.get("external_id", ""),
-                                            actor="operator")
+                                            actor=self.actor)
                 self.send_json({"success": True, "outbox": item}); return
             if route.startswith("/api/outbox/") and route.endswith("/requeue"):
                 outbox_id = route.split("/")[-2]
-                item = OPS.requeue_outbox(outbox_id, actor="operator")
+                item = OPS.requeue_outbox(outbox_id, actor=self.actor)
                 self.send_json({"success": True, "outbox": item}); return
         except ValueError as error:
             self.send_json({"error": str(error)}, 400); return
@@ -759,7 +818,7 @@ class OfficeHandler(BaseHTTPRequestHandler):
                 document = KNOWLEDGE.add_document(
                     body.get("title", ""), body.get("content", ""), body.get("source", "manual")
                 )
-                STORE.add_event("knowledge_document_added", "owner",
+                STORE.add_event("knowledge_document_added", self.actor,
                                 f"Dokumen knowledge base ditambahkan: {document['title']}", document["id"])
                 self.send_json({"success": True, "document": document}, 201)
             except ValueError as error:
@@ -773,7 +832,8 @@ class OfficeHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Tulis pesan sebelum mengirim."}, 400)
                 return
             try:
-                STORE.add_chat_message(channel_id, "owner", "Owner", "owner", employee_message)
+                sender_id, sender_name = self._chat_identity()
+                STORE.add_chat_message(channel_id, sender_id, sender_name, "owner", employee_message)
                 if channel_id == "team":
                     result = ORCHESTRATOR.handle_chat(employee_message)
                     reply = str(result.get("reply") or "Pesan diterima tim.")
@@ -812,7 +872,7 @@ class OfficeHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Aksi atau argumen tidak valid."}, 400)
                 return
             try:
-                result = TOOLS.execute(action, arguments, actor="owner")
+                result = TOOLS.execute(action, arguments, actor=self.actor)
                 self.send_json({"success": True, "action": action, "result": result})
             except ValueError as error:
                 self.send_json({"error": str(error)}, 400)
@@ -838,6 +898,8 @@ class OfficeHandler(BaseHTTPRequestHandler):
             return
 
         ACTIVE.update(running=True, command=command, started_at=datetime.now().isoformat(timespec="seconds"), error=None)
+        STORE.add_event("project_run_requested", self.actor, command[:900])
+        trigger_actor = self.actor
         pipeline_task_ids = []
         for task in STORE.snapshot().get("tasks", [])[:6]:
             if task.get("status") == "pending" and task.get("assignee_id"):
@@ -862,7 +924,8 @@ class OfficeHandler(BaseHTTPRequestHandler):
                 )
                 project_name = create_project_name(project_name_hint or command)
                 try:
-                    record_pipeline_result(OPS, WORKSPACE / project_name, pipeline_task_ids)
+                    record_pipeline_result(OPS, WORKSPACE / project_name, pipeline_task_ids,
+                                           actor=trigger_actor)
                 except Exception as error:  # never mark completed without evidence
                     print(f"[OFFICE REPORT ERROR] {error}", flush=True)
                     update_pipeline_tasks("failed")
@@ -889,7 +952,7 @@ class OfficeHandler(BaseHTTPRequestHandler):
                 {"role": "owner", "content": message},
                 {"role": "manager", "content": reply},
             ])
-            STORE.add_event("owner_chat", "owner", message[:900])
+            STORE.add_event("owner_chat", self.actor, message[:900])
             STORE.add_event("lead_chat", "lead", reply[:900])
             record_activity("lead", "idle", "Menganalisis instruksi, mengambil konteks RAG, dan mengorkestrasi tool kantor.")
             self.send_json(result)
@@ -908,7 +971,8 @@ class OfficeHandler(BaseHTTPRequestHandler):
         with EMPLOYEE_CHAT_STATE_LOCK:
             EMPLOYEE_CHAT_ACTIVE[employee_id] = {"started_at": datetime.now().isoformat(timespec="seconds")}
         try:
-            STORE.add_chat_message(employee_id, "owner", "Owner", "owner", message)
+            sender_id, sender_name = self._chat_identity()
+            STORE.add_chat_message(employee_id, sender_id, sender_name, "owner", message)
             result = ORCHESTRATOR.handle_employee_chat(employee_id, message)
             reply = str(result.get("reply") or "Pesan diterima.")
             STORE.add_chat_message(employee_id, employee_id, employee["name"], "agent", reply)
@@ -928,5 +992,9 @@ if __name__ == "__main__":
     if HOST not in ("127.0.0.1", "localhost", "::1"):
         raise SystemExit("Direct non-loopback binding is disabled. Keep BANGKAH_HOST on loopback and expose it through a TLS reverse proxy.")
     KNOWLEDGE.ensure_seed_documents()
+    ensure_bootstrap_owner()
+    if API_AUTH_TOKEN and not LEGACY_TOKEN_ROLE:
+        print("[AUTH] BANGKAH_API_TOKEN is configured but no BANGKAH_LEGACY_TOKEN_ROLE is set; "
+              "the shared token is NOT accepted. Use /api/auth/login or opt into the legacy role explicitly.")
     print(f"Bangkah AI Office API ready at http://{HOST}:{PORT}")
     ThreadingHTTPServer((HOST, PORT), OfficeHandler).serve_forever()
