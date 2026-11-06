@@ -15,13 +15,14 @@ import hmac
 import os
 
 from config import make_llm, model_for
-from main import AICodingFactory, LOG_DIR, WORKSPACE, check_ollama
+from main import AICodingFactory, LOG_DIR, WORKSPACE, check_ollama, create_project_name
 from core.employee_health import EMPLOYEES, get_health_snapshot, record_activity
 from core.office_store import STORE
 from core.office_tools import TOOLS
 from core.orchestrator import ORCHESTRATOR
 from core.knowledge_base import KNOWLEDGE
 from core.company_operations import OPS
+from core.business_cycle import record_pipeline_result
 from core.workstations import DESKTOP, DesktopAuthError, DesktopError
 from core.employee_activity import EmployeeActivityEngine
 from core.domain_service import DomainService
@@ -224,7 +225,9 @@ class OfficeHandler(BaseHTTPRequestHandler):
             return False
         self._auth_user = user
         try:
-            authz.check(user["role"], self.path.split("?")[0])
+            if not authz.is_allowed(user["role"], self.path.split("?")[0], self.command):
+                self.send_json({"success": False, "error": {"code": "FORBIDDEN", "message": "Permission denied."}}, 403)
+                return False
         except PermissionError:
             self.send_json({"success": False, "error": {"code": "FORBIDDEN", "message": "Permission denied."}}, 403)
             return False
@@ -683,10 +686,28 @@ class OfficeHandler(BaseHTTPRequestHandler):
                 if len(parts) == 4 and parts[3] in ("approve", "reject"):
                     item = OPS.decide_approval(parts[2], parts[3], "owner", body.get("note", ""))
                     self.send_json({"success": True, "approval": item}); return
+            if route == "/api/outbox/retry-due":
+                processed = []
+                for item in OPS.list_due_outbox():
+                    try:
+                        processed.append({"id": item["id"], **execute_outbox(item["id"])})
+                    except (AdapterError, ValueError) as error:
+                        processed.append({"id": item["id"], "success": False, "error": str(error)})
+                self.send_json({"success": True, "processed": processed}); return
             if route.startswith("/api/outbox/") and route.endswith("/execute"):
                 outbox_id = route.split("/")[-2]
                 result = execute_outbox(outbox_id)
                 self.send_json(result, 200 if result.get("success") else 202); return
+            if route.startswith("/api/outbox/") and route.endswith("/reconcile"):
+                outbox_id = route.split("/")[-2]
+                item = OPS.reconcile_outbox(outbox_id, body.get("outcome", ""),
+                                            body.get("note", ""), body.get("external_id", ""),
+                                            actor="operator")
+                self.send_json({"success": True, "outbox": item}); return
+            if route.startswith("/api/outbox/") and route.endswith("/requeue"):
+                outbox_id = route.split("/")[-2]
+                item = OPS.requeue_outbox(outbox_id, actor="operator")
+                self.send_json({"success": True, "outbox": item}); return
         except ValueError as error:
             self.send_json({"error": str(error)}, 400); return
         except AdapterError as error:
@@ -839,7 +860,12 @@ class OfficeHandler(BaseHTTPRequestHandler):
                     command,
                     project_name_hint=project_name_hint or None,
                 )
-                update_pipeline_tasks("completed")
+                project_name = create_project_name(project_name_hint or command)
+                try:
+                    record_pipeline_result(OPS, WORKSPACE / project_name, pipeline_task_ids)
+                except Exception as error:  # never mark completed without evidence
+                    print(f"[OFFICE REPORT ERROR] {error}", flush=True)
+                    update_pipeline_tasks("failed")
             except Exception as error:  # surfaced in the office status instead of disappearing in a worker thread
                 ACTIVE["error"] = str(error)
                 print(f"[OFFICE ERROR] {error}", flush=True)

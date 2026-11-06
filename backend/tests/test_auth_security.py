@@ -8,6 +8,9 @@ class AuthSecurityTests(unittest.TestCase):
     def setUp(self):
         root = Path(tempfile.mkdtemp())
         os.environ["BANGKAH_DB_PATH"] = str(root / "office.db")
+        from core.office_store import STORE
+        with STORE._db() as db:
+            db.execute("DELETE FROM auth_users WHERE username='owner'")
         create_user("owner","pass","owner")
     def test_login_wrong(self):
         self.assertIsNone(A.login("owner","bad"))

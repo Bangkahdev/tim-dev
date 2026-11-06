@@ -1,32 +1,20 @@
-"""Route-based authorization (default deny)."""
+from core.rbac import has_permission
 
-ROUTE_PERMISSIONS = {
-    "/api/terminal/exec": "owner",
-    "/api/desktop/files/write": "owner",
-    "/api/infra/service/start": "owner",
-    "/api/infra/service/stop": "owner",
-    "/api/network/subnet": "owner",
-    "/api/network/scope": "owner",
-    "/api/network/lease": "owner",
-    "/api/network/vpn/peer": "owner",
-    "/api/domain/dns/record": "admin",
-    "/api/domain/join": "admin",
-    "/api/ftp/provision": "admin",
-    "/api/mail/provision": "admin",
-}
+ROUTE_PERMISSIONS = [
+    ("/api/domain/", "domain.read", "domain.write"),
+    ("/api/infra/", "infra.read", "infra.write"),
+    ("/api/ftp/", "ftp.read", "ftp.write"),
+    ("/api/mail/", "mail.read", "mail.write"),
+    ("/api/network/", "network.read", "network.write"),
+]
+SELF_SERVICE = {"/api/auth/logout", "/api/auth/me"}
+READ_METHODS = {"GET", "HEAD"}
 
-def allowed(role, route):
-    # owner can do everything
-    if role == "owner":
+
+def is_allowed(role, route, method):
+    if route in SELF_SERVICE:
         return True
-    # admin for infra/domain/ftp/mail/network
-    if role == "admin":
-        if route.startswith("/api/infra") or route.startswith("/api/domain") or route.startswith("/api/ftp") or route.startswith("/api/mail") or route.startswith("/api/network"):
-            return True
-        return False
-    # employee read-only (GET allowed elsewhere)
-    return False
-
-def check(role, route):
-    if not allowed(role, route):
-        raise PermissionError("Forbidden")
+    for prefix, read, write in ROUTE_PERMISSIONS:
+        if route.startswith(prefix):
+            return has_permission(role, read if method.upper() in READ_METHODS else write)
+    return has_permission(role, "*")  # selain itu hanya owner
