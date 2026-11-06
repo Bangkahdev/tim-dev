@@ -25,6 +25,10 @@ from core.company_operations import OPS
 from core.workstations import DESKTOP, DesktopAuthError, DesktopError
 from core.employee_activity import EmployeeActivityEngine
 from core.domain_service import DomainService
+from core.infra_service import INFRA
+from core.ftp_service import FTP
+from core.mail_service import MAIL
+from core.network_service import NETWORK
 
 ACTIVITY = EmployeeActivityEngine()
 DOMAIN = DomainService()
@@ -322,6 +326,30 @@ class OfficeHandler(BaseHTTPRequestHandler):
         if route == "/api/domain/dns/records":
             self.send_json({"records": DOMAIN.dns_records(), "domain": DOMAIN.domain_name})
             return
+        if route == "/api/infra/services":
+            self.send_json({"services": INFRA.list_services()})
+            return
+        if route == "/api/ftp/status":
+            self.send_json(FTP.health())
+            return
+        if route == "/api/mail/status":
+            self.send_json(MAIL.health())
+            return
+        if route == "/api/network/networks":
+            self.send_json({"networks": NETWORK.list_networks()})
+            return
+        if route == "/api/network/subnets":
+            self.send_json({"subnets": NETWORK.list_subnets()})
+            return
+        if route == "/api/network/scopes":
+            self.send_json({"scopes": NETWORK.list_scopes()})
+            return
+        if route == "/api/network/leases":
+            self.send_json({"leases": NETWORK.list_leases()})
+            return
+        if route == "/api/network/vpn/peers":
+            self.send_json({"peers": NETWORK.list_vpn_peers()})
+            return
         if route == "/api/desktop/session":
             try:
                 self.send_json({"session": DESKTOP.session_state(self._desktop_token())})
@@ -536,6 +564,37 @@ class OfficeHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(error)}, 400)
                 return
             self.send_json({"success": True, "record": result}, 201)
+            return
+        if route == "/api/infra/service/start":
+            sid = str(body.get("service_id","")).strip()
+            try:
+                self.send_json({"service": INFRA.start(sid, str(body.get("actor","system")))})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 400)
+            return
+        if route == "/api/infra/service/stop":
+            sid = str(body.get("service_id","")).strip()
+            self.send_json({"service": INFRA.stop(sid, str(body.get("actor","system")))})
+            return
+        if route == "/api/ftp/provision":
+            u = str(body.get("username","")).strip()
+            self.send_json({"path": FTP.provision_home(u)})
+            return
+        if route == "/api/mail/provision":
+            u = str(body.get("username","")).strip()
+            self.send_json({"email": MAIL.provision_mailbox(u)})
+            return
+        if route == "/api/network/subnet":
+            self.send_json({"subnet": NETWORK.create_subnet(str(body.get("id","")), str(body.get("network_id","bangkah-net")), str(body.get("name","")), str(body.get("cidr","")), body.get("gateway"), body.get("dns"))}, 201)
+            return
+        if route == "/api/network/scope":
+            self.send_json({"scope": NETWORK.create_scope(str(body.get("id","")), str(body.get("subnet_id","")), str(body.get("name","")), str(body.get("pool_start","")), str(body.get("pool_end","")), int(body.get("lease_seconds",86400)))}, 201)
+            return
+        if route == "/api/network/lease":
+            self.send_json({"lease": NETWORK.allocate_lease(str(body.get("scope_id","")), str(body.get("hostname","")), str(body.get("mac","")), str(body.get("ip","")))}, 201)
+            return
+        if route == "/api/network/vpn/peer":
+            self.send_json({"peer": NETWORK.create_vpn_peer(str(body.get("id","")), str(body.get("username","")), str(body.get("device","")), str(body.get("allowed_ips","")))}, 201)
             return
 
         # Persisted company workflows. All external side effects are separated
