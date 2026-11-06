@@ -26,6 +26,7 @@ from core.workstations import DESKTOP, DesktopAuthError, DesktopError
 from core.employee_activity import EmployeeActivityEngine
 from core.domain_service import DomainService
 from core.auth import authentication as AUTH
+from core import authz
 from core.infra_service import INFRA
 from core.ftp_service import FTP
 from core.mail_service import MAIL
@@ -195,16 +196,37 @@ class OfficeHandler(BaseHTTPRequestHandler):
             raise ValueError("Body JSON harus berupa objek.")
         return value
 
-    def _authorize_mutation(self):
-        # The default bind is loopback-only. When an explicit token is configured,
-        # all mutation calls require it; secrets are never returned by the API.
-        if not API_AUTH_TOKEN:
-            return True
+    def _current_user(self):
         supplied = self.headers.get("Authorization", "")
         if supplied.lower().startswith("bearer "):
             supplied = supplied[7:].strip()
-        if not hmac.compare_digest(supplied, API_AUTH_TOKEN):
-            self.send_json({"error": "Sesi Owner tidak valid atau telah kedaluwarsa."}, 401)
+        # Prefer session token
+        try:
+            from core.auth.authentication import current_user as cu
+            u = cu(supplied)
+            if u:
+                return u
+        except Exception:
+            pass
+        # Fallback legacy token -> owner
+        if API_AUTH_TOKEN and hmac.compare_digest(supplied, API_AUTH_TOKEN):
+            return {"username": "owner", "role": "owner"}
+        if self.headers.get("X-Forwarded-For"):
+            return None
+        if not API_AUTH_TOKEN:
+            return {"username": "anonymous", "role": "owner"}
+        return None
+
+    def _authorize_mutation(self):
+        user = self._current_user()
+        if user is None:
+            self.send_json({"success": False, "error": {"code": "UNAUTHORIZED", "message": "Authentication required."}}, 401)
+            return False
+        self._auth_user = user
+        try:
+            authz.check(user["role"], self.path.split("?")[0])
+        except PermissionError:
+            self.send_json({"success": False, "error": {"code": "FORBIDDEN", "message": "Permission denied."}}, 403)
             return False
         return True
 
@@ -508,9 +530,9 @@ class OfficeHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         route = parsed.path
-        print(f"[DEBUG DOPOST] route={route}", flush=True)
-        if not self._authorize_mutation():
-            return
+        if route not in ("/api/auth/login",):
+            if not self._authorize_mutation():
+                return
         try:
             body = self._read_json()
         except ValueError as error:
@@ -553,7 +575,6 @@ class OfficeHandler(BaseHTTPRequestHandler):
                 self._desktop_error(error)
             return
         if route == "/api/domain/join" and route.count("/") == 2:
-            print(f"[DEBUG DOPOST] domain-join branch taken cond={route == '/api/domain/join'} count={route.count('/')}", flush=True)
             workstation_id = str(body.get("workstation_id", "")).strip()
             actor = str(body.get("actor", "system")).strip() or "system"
             try:
