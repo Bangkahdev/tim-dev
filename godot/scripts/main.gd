@@ -31,7 +31,7 @@ const ROOM_CENTERS := {
 	"backend": Vector2(24.0, -7.8), "meeting": Vector2(-29.5, 14.5),
 	"lobby": Vector2(-0.4, 14.5), "api": Vector2(29.0, 14.5),
 	"archive": Vector2(-29.5, 32.0), "kitchen": Vector2(29.0, 32.0),
-	"promotion": Vector2(-10.0, 32.0), "lounge": Vector2(8.0, 32.0), "entrance": Vector2(0.0, 35.0)
+	"owner_lounge": Vector2(-10.0, 32.0), "lounge": Vector2(8.0, 32.0), "entrance": Vector2(0.0, 35.0)
 }
 
 const EMPLOYEES := [
@@ -154,15 +154,16 @@ func _build_environment() -> void:
 	environment.background_mode = Environment.BG_SKY
 	environment.sky = sky
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	environment.ambient_light_energy = 0.78
+	environment.ambient_light_energy = 0.72
 
-	# Tonemapping — filmic for natural HDR response.
+	# Tonemapping — filmic for natural HDR response. Exposure diturunkan
+	# sedikit agar warna tidak tercuci (washed out) di layar terang.
 	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	environment.tonemap_exposure = 1.05
+	environment.tonemap_exposure = 0.97
 	environment.adjustment_enabled = true
 	environment.adjustment_brightness = 1.0
-	environment.adjustment_contrast = 1.06
-	environment.adjustment_saturation = 0.98
+	environment.adjustment_contrast = 1.08
+	environment.adjustment_saturation = 1.03
 
 	# SSAO — high quality screen-space ambient occlusion.
 	environment.ssao_enabled = true
@@ -339,6 +340,10 @@ func _spawn_characters() -> void:
 	player = PLAYER_SCRIPT.new()
 	player.name = "Player_Owner"
 	player.position = Vector3(-5.0, 0.06, 23.0)
+	# Spawn menghadap diagonal ke arah lobby/meja resepsionis: lengan kamera
+	# mengarah ke lantai terbuka (bukan ke partisi di z=25), sehingga jarak
+	# kamera ketiga penuh dan avatar tidak memenuhi layar.
+	player.rotation.y = deg_to_rad(-68.0)
 	add_child(player)
 	player.interact_requested.connect(_on_player_interact)
 	player.ui_requested.connect(_on_player_ui_requested)
@@ -548,12 +553,12 @@ func _build_ui() -> void:
 	_toast_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	toast_row.add_child(_toast_label)
 
-	var help_panel := _make_panel(root, Vector2(22, 0), Vector2(430, 34))
+	var help_panel := _make_panel(root, Vector2(22, 0), Vector2(520, 34))
 	help_panel.anchor_top = 1.0
 	help_panel.anchor_bottom = 1.0
 	help_panel.offset_top = -54
 	help_panel.offset_bottom = -20
-	var help := _ui_label("WASD GERAK     SHIFT LARI     E INTERAKSI     V KAMERA     F1-F4 PANEL     ESC KURSOR", 10, Color("#d2dbd4"))
+	var help := _ui_label("WASD GERAK · SHIFT LARI · E INTERAKSI · V KAMERA · F1-F4 PANEL · ESC", 9, Color("#d2dbd4"))
 	help_panel.add_child(help)
 
 	_chat_panel = _make_panel(root, Vector2.ZERO, Vector2(390, 330))
@@ -1201,7 +1206,7 @@ func _room_label(room_id: String) -> String:
 		"owner":"OWNER OFFICE", "secretary":"EXECUTIVE SECRETARY", "manager":"ENGINEERING LEADERSHIP",
 		"architect":"SYSTEM ARCHITECTURE", "frontend":"FRONTEND DESIGN STUDIO", "qa":"QUALITY ASSURANCE LAB",
 		"backend":"BACKEND ENGINEERING", "meeting":"BOARDROOM", "lobby":"RECEPTION / LOBBY",
-		"api":"API / INFRASTRUCTURE LAB", "archive":"COMPANY ARCHIVE", "promotion":"PROMOTION STUDIO", "lounge":"STAFF LOUNGE",
+		"api":"API / INFRASTRUCTURE LAB", "archive":"COMPANY ARCHIVE", "owner_lounge":"OWNER LOUNGE / RUANG PRIBADI", "lounge":"STAFF LOUNGE",
 		"kitchen":"PANTRY", "entrance":"MAIN ENTRANCE", "corridor":"OFFICE CORRIDOR"
 	}
 	return str(labels.get(room_id, room_id.to_upper()))
