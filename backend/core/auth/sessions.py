@@ -48,7 +48,7 @@ def create_session(username, ttl_seconds=28800):
     now = _now()
     expires = time.time() + ttl_seconds
     import datetime
-    expires_iso = datetime.datetime.utcfromtimestamp(expires).isoformat() + "Z"
+    expires_iso = datetime.datetime.fromtimestamp(expires, datetime.timezone.utc).isoformat()
     with LOCK, _db() as db:
         db.execute("INSERT INTO auth_sessions(token,username,created_at,expires_at) VALUES(?,?,?,?)",
                    (token, username, now, expires_iso))
@@ -59,7 +59,16 @@ def get_session(token):
         row = db.execute("SELECT username,expires_at,revoked FROM auth_sessions WHERE token=?", (token,)).fetchone()
     if not row or row["revoked"]:
         return None
-    if row["expires_at"] < _now():
+    from datetime import datetime, timezone
+    try:
+        exp = datetime.fromisoformat(row["expires_at"].replace("Z","+00:00"))
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        else:
+            exp = exp.astimezone(timezone.utc)
+    except (ValueError, TypeError):
+        return None
+    if exp <= datetime.now(timezone.utc):
         return None
     # fetch role
     with LOCK, _db() as db:

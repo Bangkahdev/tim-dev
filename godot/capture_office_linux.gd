@@ -7,7 +7,12 @@ const SHOTS := [
 	{"name": "office-lobby-south.png", "pos": Vector3(5.2, 1.85, 24.0), "look": Vector3(1.6, 1.3, 33.0)},
 	{"name": "office-doors.png", "pos": Vector3(-13.8, 1.72, 14.5), "look": Vector3(-19.8, 2.6, 14.5)},
 	{"name": "office-doors-north.png", "pos": Vector3(8.0, 1.72, -15.6), "look": Vector3(8.0, 2.7, -20.1)},
-	{"name": "office-reception.png", "pos": Vector3(4.5, 1.75, 27.5), "look": Vector3(0, 1.5, 19)},
+	{"name": "office-logo-exterior.png", "pos": Vector3(0, 4.4, 49.5), "look": Vector3(0, 5.0, 40.3)},
+	{"name": "office-info-board.png", "pos": Vector3(0.0, 1.75, 38.8), "look": Vector3(0, 1.5, 34.2)},
+	{"name": "office-board-front.png", "pos": Vector3(10.8, 1.55, 38.2), "look": Vector3(10.8, 1.5, 34.4)},
+	{"name": "office-board-announce.png", "pos": Vector3(-10.8, 1.55, 38.2), "look": Vector3(-10.8, 1.5, 34.4)},
+	{"name": "office-board-boardroom.png", "pos": Vector3(-14.2, 1.7, 17.8), "look": Vector3(-19.35, 1.5, 17.8)},
+	{"name": "office-reception.png", "pos": Vector3(4.5, 1.75, 27.5), "look": Vector3(0, 1.9, 17.4)},
 	{"name": "office-leadership.png", "pos": Vector3(8, 1.7, -21), "look": Vector3(8, 1.5, -32)},
 	{"name": "office-frontend.png", "pos": Vector3(-29.5, 1.7, -2), "look": Vector3(-29.5, 1.4, -10)},
 	{"name": "office-qa.png", "pos": Vector3(-6.5, 1.7, -2), "look": Vector3(-6.5, 1.4, -10)},
@@ -45,13 +50,6 @@ func _spawn_cast(host: Node) -> Node3D:
 func _initialize() -> void:
 	call_deferred("_run")
 
-func _hide_labels(node: Node) -> void:
-	for child in node.get_children():
-		if child is Label3D:
-			child.visible = false
-		else:
-			_hide_labels(child)
-
 func _run() -> void:
 	DirAccess.make_dir_recursive_absolute(OUT)
 	var scene: PackedScene = load("res://scenes/main.tscn")
@@ -79,7 +77,6 @@ func _run() -> void:
 	root.add_child(cam)
 	var cast_root: Node3D = null
 	var prev_char := false
-	var index := 0
 	for shot in SHOTS:
 		var char_shot: bool = String(shot["name"]).begins_with("office-char")
 		if char_shot and not prev_char and cast_root == null:
@@ -100,8 +97,5 @@ func _run() -> void:
 		var image := root.get_texture().get_image()
 		image.save_png(OUT + shot["name"])
 		print("CAPTURE: " + shot["name"])
-		index += 1
-		if index == 1:
-			_hide_labels(main)
 	print("CAPTURE_OK")
 	quit()

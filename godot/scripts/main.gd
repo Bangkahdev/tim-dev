@@ -412,6 +412,7 @@ func _build_interaction_points() -> void:
 				str(station["workstation_id"]), str(station["account"]),
 				station["position"]))
 	_append_free_seat_interactables()
+	_append_door_interactables()
 
 # Kursi dan sofa yang dibangun office_environment.gd didaftarkan sebagai titik
 # interaksi "duduk". Semua kursi/sofa jadi dudukan nyata; kursi kantor punya
@@ -439,6 +440,25 @@ func _append_free_seat_interactables() -> void:
 			"pivot_base_yaw": seat_yaw,
 		})
 		seat_index += 1
+
+# Pintu juga jadi titik interaksi: E membuka/menutup daun pintu dengan animasi.
+func _append_door_interactables() -> void:
+	var office_world = get_node_or_null("BangkahHeadquarters")
+	if not is_instance_valid(office_world) or not ("doors" in office_world):
+		return
+	for door_index in range(office_world.doors.size()):
+		var door: Dictionary = office_world.doors[door_index]
+		var door_label := str(door.get("label", "Pintu"))
+		if door_label.is_empty():
+			door_label = "Pintu"
+		_interactables.append({
+			"id": "free_door_%d" % door_index,
+			"label": "Pintu " + door_label,
+			"position": door.get("position", Vector3.ZERO),
+			"prompt": "Buka/tutup pintu " + door_label.to_lower(),
+			"kind": "door",
+			"door_index": door_index,
+		})
 
 # Interaction entry for a backend workstation. Station seat/camera/target
 # follow _add_workstation geometry: seat = P + (0, 0.05, 1.55),
@@ -984,7 +1004,18 @@ func _update_interaction_prompt() -> void:
 		_prompt_label.visible = false
 		_prompt_panel.visible = false
 		return
-	_prompt_label.text = str(target.get("prompt", "INTERACT"))
+	var prompt_text := str(target.get("prompt", "INTERACT"))
+	if str(target.get("kind", "")) == "door":
+		var office_world = get_node_or_null("BangkahHeadquarters")
+		var label_text := "Pintu"
+		var is_open := true
+		if is_instance_valid(office_world) and "doors" in office_world:
+			var idx: int = int(target.get("door_index", -1))
+			if idx >= 0 and idx < office_world.doors.size():
+				label_text = str(office_world.doors[idx].get("label", "")) if str(office_world.doors[idx].get("label", "")) != "" else "Pintu"
+				is_open = bool(office_world.doors[idx].get("open", true))
+		prompt_text = ("E · TUTUP PINTU — %s" if is_open else "E · BUKA PINTU — %s") % label_text
+	_prompt_label.text = prompt_text
 	_prompt_label.visible = true
 	_prompt_panel.visible = true
 
@@ -994,10 +1025,17 @@ func _nearest_target() -> Dictionary:
 	var eye_position: Vector3 = player.global_position + Vector3(0, 1.55, 0)
 	var view_forward: Vector3 = player.get_view_forward()
 	for item in _interactables:
+		# Kursi & pintu pakai jangkauan lebih besar + kerucut lebih longgar:
+		# pemain bisa jadi berdiri agak menyamping dari objeknya.
+		var item_kind := str(item.get("kind", ""))
+		var is_seat := item_kind in ["office", "meeting", "sofa"]
+		var is_door := item_kind == "door"
+		var reach_cap := 3.4 if is_door else (2.9 if is_seat else nearest_distance)
+		var cone_min := -0.45 if (is_seat or is_door) else 0.48
 		var target_position: Vector3 = item.position + Vector3(0, 0.85, 0)
 		var to_target := target_position - eye_position
 		var distance := to_target.length()
-		if distance < nearest_distance and distance > 0.01 and view_forward.dot(to_target.normalized()) > 0.48:
+		if distance < reach_cap and distance > 0.01 and view_forward.dot(to_target.normalized()) > cone_min:
 			nearest_distance = distance
 			nearest = item
 	for employee_id in npcs:
@@ -1029,6 +1067,9 @@ func _on_player_interact() -> void:
 	var target_id := str(target.get("id", ""))
 	if str(target.get("kind", "")) in ["office", "meeting", "sofa"]:
 		_take_free_seat(target)
+		return
+	if str(target.get("kind", "")) == "door":
+		_toggle_free_door(target)
 		return
 	if target_id == "employee":
 		_open_employee_chat(str(target.get("employee_id", "")))
@@ -1138,6 +1179,37 @@ func _leave_free_seat() -> void:
 		player.activity = "idle"
 	_free_seat_pivot = null
 	_show_toast("Kamu berdiri kembali. Kursi tetap menghadap posisi terakhir.")
+
+## Buka/tutup pintu: daun pintu dianimasikan lewat tween ke yaw tertutup atau
+## terbuka. State disimpan di registry doors milik office_environment.
+func _toggle_free_door(target: Dictionary) -> void:
+	var office_world = get_node_or_null("BangkahHeadquarters")
+	if not is_instance_valid(office_world) or not ("doors" in office_world):
+		return
+	var all_doors: Array = office_world.doors
+	var door_index: int = int(target.get("door_index", -1))
+	if door_index < 0 or door_index >= all_doors.size():
+		return
+	var door: Dictionary = all_doors[door_index]
+	var opening: bool = not bool(door.get("open", true))
+	# Hentikan tween lama bila toggling di tengah animasi.
+	for old_tween in door.get("tweens", []):
+		if old_tween is Tween and old_tween.is_valid():
+			old_tween.kill()
+	var active_tweens: Array = []
+	for leaf in door.get("leaves", []):
+		var leaf_node: Node = leaf.get("node", null)
+		if not (leaf_node is Node3D and is_instance_valid(leaf_node)):
+			continue
+		var target_yaw: float = float(leaf.get("open", 0.0)) if opening else float(leaf.get("closed", 0.0))
+		var swing_tween := create_tween()
+		swing_tween.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		swing_tween.tween_property(leaf_node, "rotation:y", target_yaw, 0.55)
+		active_tweens.append(swing_tween)
+	door["tweens"] = active_tweens
+	door["open"] = opening
+	var door_label := str(door.get("label", "Pintu"))
+	_show_toast(("%s terbuka lebar." if opening else "%s ditutup kembali.") % (door_label if not door_label.is_empty() else "Pintu"))
 
 ## Pivot kursi menyalin rotasi badan pemain (relatif terhadap yaw dasar
 ## kursinya), sehingga kursi berputar seperti kursi kantor sungguhan.
