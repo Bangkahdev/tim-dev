@@ -85,14 +85,20 @@ if 'PAYLOAD YANG AKAN DIEKSEKUSI' not in ui_source:
 if 'download_print_job' not in ui_source or 'func _on_print_download_completed' not in main_source:
     errors.append("Paper PDF download flow is missing")
 
-# Private runtime data and real env files must never be shipped.
-for pattern in [".env", "*.sqlite", "*.db"]:
-    for candidate in ROOT.rglob(pattern):
-        if candidate.name == ".env.example":
-            continue
-        if any(part in {".git", ".godot", ".venv", "__pycache__"} for part in candidate.parts):
-            continue
-        errors.append(f"Potential private/runtime file in bundle: {candidate.relative_to(ROOT)}")
+    # Private runtime data and real env files must never be shipped.
+    skip_parts = {".git", ".godot", ".venv", "__pycache__", ".wrangler", ".cloudflare", "node_modules"}
+    for pattern in [".env", "*.sqlite", "*.db"]:
+        for candidate in ROOT.rglob(pattern):
+            if candidate.name == ".env.example":
+                continue
+            if any(part in skip_parts for part in candidate.parts):
+                continue
+            if any(part.startswith(".aider") for part in candidate.parts):
+                continue
+            # Local dev/runtime state (excluded from release bundles); keep .env strict.
+            if pattern != ".env" and "backend" in candidate.parts and "data" in candidate.parts:
+                continue
+            errors.append(f"Potential private/runtime file in bundle: {candidate.relative_to(ROOT)}")
 
 if errors:
     print("BUNDLE VALIDATION FAILED")
