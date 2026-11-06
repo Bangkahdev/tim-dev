@@ -11,7 +11,9 @@ cd backend
 python -m pytest -q
 ```
 
-The final release candidate test run returned **56 passed**. The HTTP route smoke test was run against an isolated local server with a fake `crewai` import because the exercised data APIs do not invoke the model. It covered status, usage, task transitions and evidence, meetings, Paper, PDF generation/download, approvals, outbox, audit cursor and bearer-token enforcement.
+The security-hardening test run returned **125 passed**. `backend/tests/conftest.py` points `BANGKAH_DB_PATH` at a temporary database before any backend import, so the suite never touches real company data. Authentication tests install `bcrypt` from `backend/requirements.txt` (`pip install -r backend/requirements.txt`); if `bcrypt` is missing the auth tests fail with `ModuleNotFoundError`, which is an environment problem rather than an implementation result.
+
+The HTTP integration tests start the real handler on an ephemeral loopback port and cover anonymous access, invalid/expired/revoked/disabled sessions, all four roles, department scope, task ownership, unauthorized approvals, actor spoofing, legacy-token migration, login/logout and domain routing. A separate HTTP smoke test exercises company workflows with a fake `crewai` import because those data APIs do not invoke the model.
 
 ## Desktop runtime acceptance
 

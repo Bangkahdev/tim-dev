@@ -653,6 +653,70 @@ body.office-immersive .owner-controls-hint{display:block}
 </style>
 </head>
 <body>
+<div id="authGate" style="display:none;position:fixed;inset:0;z-index:9999;background:#101915f2;align-items:center;justify-content:center;padding:24px">
+  <form id="authForm" style="background:#1c2a24;border:1px solid #40564a;border-radius:14px;padding:26px;width:min(380px,100%);color:#eef3ec;display:flex;flex-direction:column;gap:12px">
+    <div style="font-size:20px;font-weight:800">Masuk ke Bangkah AI Office</div>
+    <div style="font-size:12px;color:#a8b5ab">Sesi perusahaan wajib. Tidak ada akses anonim.</div>
+    <input id="authUser" autocomplete="username" placeholder="Username" required style="padding:11px;border-radius:8px;border:1px solid #40564a;background:#121c17;color:#eef3ec">
+    <input id="authPass" type="password" autocomplete="current-password" placeholder="Kata sandi" required style="padding:11px;border-radius:8px;border:1px solid #40564a;background:#121c17;color:#eef3ec">
+    <button type="submit" style="padding:11px;border-radius:8px;border:0;background:#7fae8a;color:#102016;font-weight:800;cursor:pointer">Masuk</button>
+    <div id="authMessage" style="font-size:12px;color:#e0a58c;min-height:16px"></div>
+  </form>
+</div>
+<script>
+(function(){
+  const TOKEN_KEY='bangkah_session_token';
+  const nativeFetch=window.fetch.bind(window);
+  window.bangkahToken=()=>localStorage.getItem(TOKEN_KEY)||'';
+  window.bangkahSetToken=t=>{t?localStorage.setItem(TOKEN_KEY,t):localStorage.removeItem(TOKEN_KEY)};
+  window.bangkahShowLogin=()=>{const gate=document.getElementById('authGate');if(gate)gate.style.display='flex'};
+  window.bangkahHideLogin=()=>{const gate=document.getElementById('authGate');if(gate)gate.style.display='none'};
+  window.fetch=function(input,init){
+    init=init||{};
+    const url=typeof input==='string'?input:(input&&input.url)||'';
+    if(url.indexOf('/api/')===0 && url.indexOf('/api/auth/login')!==0){
+      const headers=new Headers(init.headers||{});
+      const token=window.bangkahToken();
+      if(token)headers.set('Authorization','Bearer '+token);
+      init=Object.assign({},init,{headers});
+    }
+    return nativeFetch(input,init).then(function(res){
+      if(res.status===401 && url.indexOf('/api/auth/login')!==0)window.bangkahShowLogin();
+      return res;
+    });
+  };
+  async function checkSession(){
+    const token=window.bangkahToken();
+    if(!token){window.bangkahShowLogin();return;}
+    try{
+      const res=await nativeFetch('/api/auth/me',{headers:{Authorization:'Bearer '+token}});
+      if(!res.ok){window.bangkahSetToken('');window.bangkahShowLogin();return;}
+      window.bangkahHideLogin();
+    }catch(e){window.bangkahShowLogin();}
+  }
+  document.addEventListener('DOMContentLoaded',function(){
+    const form=document.getElementById('authForm');
+    form.addEventListener('submit',async function(event){
+      event.preventDefault();
+      const message=document.getElementById('authMessage');
+      message.textContent='Memeriksa...';
+      try{
+        const res=await nativeFetch('/api/auth/login',{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({username:document.getElementById('authUser').value,
+                               password:document.getElementById('authPass').value})});
+        const data=await res.json();
+        if(!res.ok||!data.session)throw new Error((data.error&&data.error.message)||'Login gagal');
+        window.bangkahSetToken(data.session.token);
+        message.textContent='';
+        window.bangkahHideLogin();
+        location.reload();
+      }catch(error){message.textContent=error.message;}
+    });
+    checkSession();
+  });
+})();
+</script>
 <div class="app">
   <aside>
     <div class="brand"><div class="brandmark">B</div><div class="brandname">Bangkah<span> AI Office</span></div></div>

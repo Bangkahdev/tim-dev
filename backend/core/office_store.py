@@ -6,6 +6,8 @@ AI agents may request actions, but validated Python code performs the mutations.
 from __future__ import annotations
 
 import json
+import os
+import re
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -14,7 +16,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-DB_PATH = BASE_DIR / "data" / "office.db"
+DB_PATH = Path(os.getenv("BANGKAH_DB_PATH", "").strip() or (BASE_DIR / "data" / "office.db"))
 LOCK = threading.RLock()
 
 ROOMS = {
@@ -264,7 +266,8 @@ class OfficeStore:
         """Persist chat history for the team channel or one employee DM."""
         if channel_id != "team" and channel_id not in ROSTER:
             raise ValueError("Channel chat tidak dikenal.")
-        if sender_id != "owner" and sender_id not in ROSTER:
+        if sender_id != "owner" and sender_id not in ROSTER and not re.match(
+                r"^[A-Za-z0-9._-]{1,64}$", str(sender_id or "")):
             raise ValueError("Pengirim chat tidak dikenal.")
         content = str(content or "").strip()
         if not content or len(content) > 8000:

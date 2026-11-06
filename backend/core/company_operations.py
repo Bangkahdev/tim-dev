@@ -92,8 +92,9 @@ class CompanyOperations:
                     id TEXT PRIMARY KEY, action_type TEXT NOT NULL, summary TEXT NOT NULL,
                     payload_json TEXT NOT NULL, payload_sha256 TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'pending', reviewer TEXT,
-                    review_note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
-                    reviewed_at TEXT
+                    review_note TEXT NOT NULL DEFAULT '',
+                    created_by TEXT NOT NULL DEFAULT '', created_by_role TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL, reviewed_at TEXT
                 );
                 CREATE TABLE IF NOT EXISTS outbox_records (
                     id TEXT PRIMARY KEY, approval_id TEXT NOT NULL UNIQUE,
@@ -124,6 +125,10 @@ class CompanyOperations:
                 "last_attempt_at": "TEXT",
                 "resolution_note": "TEXT NOT NULL DEFAULT ''",
                 "resolved_by": "TEXT",
+            })
+            self._ensure_columns(db, "approval_records", {
+                "created_by": "TEXT NOT NULL DEFAULT ''",
+                "created_by_role": "TEXT NOT NULL DEFAULT ''",
             })
             for department in DEPARTMENTS:
                 db.execute("INSERT OR IGNORE INTO department_catalog(id,name,description) VALUES(?,?,?)",
@@ -276,7 +281,7 @@ class CompanyOperations:
         return next(x for x in self.meetings() if x["id"] == meeting_id)
 
     def create_paper(self, title, body, paper_type="memo", origin="owner", priority="normal",
-                     related_task_id=None, approval_id=None):
+                     related_task_id=None, approval_id=None, actor="owner"):
         title = str(title).strip()
         body = str(body).strip()
         if not title or len(title) > 240 or not body or len(body) > 30000:
@@ -298,7 +303,7 @@ class CompanyOperations:
                 VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                 (paper_id, title, str(paper_type)[:60], str(origin)[:120], priority, "unread",
                  body, related_task_id, approval_id, now, now))
-            self._event(db, "paper_created", "owner", paper_id, f"Paper dibuat: {title}")
+            self._event(db, "paper_created", actor, paper_id, f"Paper dibuat: {title}")
         return self.get_paper(paper_id)
 
     def list_papers(self, status=None, limit=100):
@@ -331,7 +336,7 @@ class CompanyOperations:
                         f"Paper '{row['title']}' berubah {row['status']} → {status}.")
         return self.get_paper(paper_id)
 
-    def create_approval(self, action_type, summary, payload, actor="owner"):
+    def create_approval(self, action_type, summary, payload, actor="owner", actor_role=""):
         if action_type not in APPROVAL_ACTIONS:
             raise ValueError("Jenis aksi approval tidak tersedia.")
         if not isinstance(payload, dict) or not payload:
@@ -342,10 +347,11 @@ class CompanyOperations:
         approval_id, now = "APR-" + uuid.uuid4().hex[:12].upper(), _now()
         with LOCK, self._db() as db:
             db.execute("""INSERT INTO approval_records
-                (id,action_type,summary,payload_json,payload_sha256,status,created_at)
-                VALUES(?,?,?,?,?,'pending',?)""",
+                (id,action_type,summary,payload_json,payload_sha256,status,
+                 created_by,created_by_role,created_at)
+                VALUES(?,?,?,?,?,'pending',?,?,?)""",
                 (approval_id, action_type, str(summary).strip()[:500] or action_type,
-                 canonical, digest, now))
+                 canonical, digest, str(actor)[:120], str(actor_role)[:30], now))
             self._event(db, "approval_requested", actor, approval_id,
                         f"Persetujuan diperlukan: {action_type} · {str(summary)[:300]}")
         return self.get_approval(approval_id, include_payload=True)
@@ -444,7 +450,7 @@ class CompanyOperations:
                     (id,approval_id,action_type,status,created_at,updated_at)
                     VALUES(?,?,?,'queued',?,?)""", (outbox_id, approval_id, row["action_type"], now, now))
             self._event(db, "approval_" + decision, reviewer, approval_id,
-                        f"Owner {decision}d: {row['summary']}")
+                        f"{reviewer} {decision}: {row['summary']}")
         return self.get_approval(approval_id)
 
     def list_outbox(self, limit=100):

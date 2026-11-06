@@ -38,11 +38,13 @@ See `API-REFERENCE.md` for request contracts.
 
 ## Authentication and network
 
-`BANGKAH_API_TOKEN` is optional for the loopback-only local desktop instance. When configured, every `/api/*` GET and POST request including PDF download requires `Authorization: Bearer ...`. The Godot settings panel accepts the token into memory for the current session and never writes it to disk. The Python server refuses direct non-loopback binding. For remote access, keep the service on loopback and place a TLS reverse proxy in front of it.
+Every `/api/*` route except `POST /api/auth/login` requires `Authorization: Bearer <session token>`. Sessions are created by username/password login, expire after `BANGKAH_SESSION_HOURS` (default 8), can be revoked, and are rejected for disabled accounts. Roles `owner`, `secretary`, `manager` and `employee` are enforced with department scope, task ownership and owner-only approval/outbox actions. Actor identity always comes from the session, never from the request body. The first owner is bootstrapped at server start. A shared `BANGKAH_API_TOKEN` only becomes an identity when `BANGKAH_LEGACY_TOKEN_ROLE` is set explicitly.
+
+The Python server refuses direct non-loopback binding. For remote access, keep the service on loopback and place a TLS reverse proxy in front of it, forwarding the Authorization header.
 
 ## Still outside this release
 
-- Owner account bootstrap, short-lived sessions, session revocation, multi-user roles and dynamic organization CRUD.
+- Public HTTP user-management APIs and dynamic organization CRUD (accounts are managed locally with `core.auth.sessions`).
 - WebSocket event replay, acknowledgements and reconnect snapshots. `/api/events` is cursor-based HTTP polling.
 - Full NavigationAgent3D / NavigationMesh navigation and persistent NPC movement state.
 - Full backend-enforced agent tool capabilities beyond the existing Orchestrator / OfficeTools allowlist.

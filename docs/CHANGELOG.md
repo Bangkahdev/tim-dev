@@ -1,5 +1,16 @@
 # Changelog
 
+## Authentication & RBAC security hardening
+
+- Removed the anonymous-Owner fallback. Every `/api/*` route except `POST /api/auth/login` now requires a verified session; missing, invalid, expired, revoked and disabled-account sessions return 401.
+- Added `GET /api/auth/me` and `POST /api/auth/logout`. Sessions expire after `BANGKAH_SESSION_HOURS` (default 8), are stored server-side and are revoked when an account is disabled.
+- Implemented the company role model `owner`, `secretary`, `manager`, `employee` (plus legacy `admin`) with route permissions, department scope, task assignment/ownership, project access and owner-only approval decisions.
+- Actor identity now always comes from the session. Hardcoded `owner`/`operator` actors and trust in request-body `actor` fields were removed from approvals, tasks, outbox, domain, infrastructure, knowledge and chat actions.
+- Fixed the `/api/domain/join` and `/api/domain/dns/record` route checks (slash counting replaced with exact route matching) and rewrote workstation route parsing.
+- Added the first-owner bootstrap: `BANGKAH_OWNER_PASSWORD`, or a generated password written to `backend/data/owner_auth_password.local`. The legacy `BANGKAH_API_TOKEN` is no longer an identity unless `BANGKAH_LEGACY_TOKEN_ROLE` is set explicitly.
+- Added the web login gate and an Authorization-aware fetch wrapper.
+- Validation: new unit and HTTP integration coverage for anonymous access, invalid/expired/revoked/disabled sessions, owner/secretary/manager/employee access, cross-department denial, task ownership, unauthorized approvals, actor spoofing, legacy token migration, login/logout and domain routing. Suite: 125 passed.
+
 ## Employee workshift slice — staffed workstations
 
 - Activated the seven employee workstation accounts (`lead`, `coo`, `architect`, `backend`, `api`, `frontend`, `qa`) bound 1:1 to their desks. Passwords are provisioned into `backend/data/employee_credentials.local`, the same local-secret pattern as the Owner credentials; `BANGKAH_EMPLOYEE_ACCOUNTS=0` freezes back to Owner-only login.

@@ -5,8 +5,12 @@ extends Node3D
 const WALL_H := 5.6			# exterior wall height
 const PART_H := 5.30		# interior partition glass height
 const CEIL_Y := 5.45		# acoustic ceiling panel plane
-const DOOR_H := 3.02		# door opening height
+const DOOR_H := 3.35		# door opening height (taller)
 const DOOR_W := 2.9			# door opening width
+const FLOOR_H := 6.2			# per-floor story height (slab-to-slab)
+const L1_Y := 0.0
+const L2_Y := FLOOR_H		# 6.2
+const L3_Y := FLOOR_H * 2.0	# 12.4
 
 ## Small-town district lives south-east of the headquarters. Employee homes and
 ## the company parking lot are visual/ambient spaces; they do not create backend
@@ -27,6 +31,11 @@ var _material_cache: Dictionary = {}
 var seats: Array[Dictionary] = []
 # Registrasi pintu interaktif: {"position", "label", "open", "leaves": [{"node", "closed", "open"}]}
 var doors: Array[Dictionary] = []
+# Kendaraan drivable (visual): {"id","label","position","yaw","color","kind"}
+var vehicles: Array[Dictionary] = []
+var _floor_y: float = 0.0
+# HQ perimeter trees collected in _build_landscape, rendered as MultiMesh in _build_town_district.
+var _trees_pending: Array[Vector3] = []
 
 const MAT := {
 	"concrete": Color("#b0bab3"),
@@ -61,23 +70,34 @@ func build() -> void:
 	_build_room_partitions()
 	_build_room_floors()
 	_build_ceiling_and_lighting()
+	# L1: lobby/reception + public/services (LANTAI 1)
+	_floor_y = L1_Y
 	_build_reception()
-	_build_owner_suite()
-	_build_secretary_office()
-	_build_management_offices()
-	_build_engineering_floor()
 	_build_meeting_room()
 	_build_api_lab()
 	_build_archive_and_print()
-	_build_pantry_and_lounge()
-	_build_free_seating()
+	_build_staff_pantry_lounge()
+	_build_free_seating_l1()
 	_build_information_boards()
-	_build_accent_walls()
-	_build_corridor_details()
-	_build_office_accessories()
+	_build_accent_walls_l1()
+	_build_floor_cores() # stairs+lift landings all floors
+	# L2: core employees / karyawan inti (LANTAI 2)
+	_floor_y = L2_Y
+	_build_secretary_office()
+	_build_management_offices()
+	_build_engineering_floor()
+	_build_free_seating_l2()
+	_build_accent_walls_l2()
+	# L3: Owner (LANTAI 3)
+	_floor_y = L3_Y
+	_build_owner_suite()
+	_build_owner_private_lounge()
+	_build_accent_walls_l3()
+	_floor_y = 0.0
 	_build_landscape()
 	_build_company_parking()
 	_build_town_district()
+	_build_wayfinding()
 	_add_dust_particles()
 
 func _mat(color: Color, roughness: float = 0.78, metallic: float = 0.0, transparent: bool = false, emission: Color = Color.BLACK) -> StandardMaterial3D:
@@ -144,7 +164,7 @@ func _box(label: String, position: Vector3, size: Vector3, color: Color, collisi
 	else:
 		root = Node3D.new()
 	root.name = label.replace(" ", "_")
-	root.position = position
+	root.position = position + (Vector3.ZERO if parent != null else Vector3(0, _floor_y, 0))
 	if parent != null:
 		parent.add_child(root)
 	else:
@@ -168,7 +188,7 @@ func _box(label: String, position: Vector3, size: Vector3, color: Color, collisi
 func _cylinder(label: String, position: Vector3, radius: float, height: float, color: Color, parent: Node3D = null, collision: bool = false, metallic: float = 0.0) -> Node3D:
 	var root: Node3D = StaticBody3D.new() if collision else Node3D.new()
 	root.name = label.replace(" ", "_")
-	root.position = position
+	root.position = position + (Vector3.ZERO if parent != null else Vector3(0, _floor_y, 0))
 	if parent != null:
 		parent.add_child(root)
 	else:
@@ -200,7 +220,7 @@ func _sphere(label: String, position: Vector3, radius: float, color: Color, scal
 	resource.rings = 8
 	mesh.mesh = resource
 	mesh.name = label.replace(" ", "_")
-	mesh.position = position
+	mesh.position = position + (Vector3.ZERO if parent != null else Vector3(0, _floor_y, 0))
 	mesh.scale = scale
 	mesh.material_override = _mat(color)
 	mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
@@ -210,10 +230,10 @@ func _sphere(label: String, position: Vector3, radius: float, color: Color, scal
 		add_child(mesh)
 	return mesh
 
-func _label(text_value: String, position: Vector3, size: float = 0.007, color: Color = Color("#f4f2e9"), parent: Node3D = null) -> Label3D:
+func _label(text_value: String, position: Vector3, size: float = 0.007, color: Color = Color("#f4f2e9"), parent: Node3D = null, y_off: float = 0.0) -> Label3D:
 	var label := Label3D.new()
 	label.text = text_value.to_upper()
-	label.position = position
+	label.position = position + Vector3(0, y_off, 0) + Vector3(0, y_off, 0) + Vector3(0, y_off, 0)
 	label.font_size = 38
 	label.outline_size = 9
 	label.modulate = color
@@ -221,6 +241,29 @@ func _label(text_value: String, position: Vector3, size: float = 0.007, color: C
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.no_depth_test = true
 	label.pixel_size = size
+	if parent != null:
+		parent.add_child(label)
+	else:
+		add_child(label)
+	return label
+
+
+## Flat painted text ("tali air") for road/sign logos — no 3D extrusion, no billboard.
+func _painted_text(text_value: String, position: Vector3, yaw: float = 0.0, size: float = 0.0045, color: Color = Color("#f4f2e9"), outline: Color = Color(0.05,0.08,0.07,0.85), parent: Node3D = null, y_off: float = 0.0) -> Label3D:
+	var label := Label3D.new()
+	label.name = "PaintedText"
+	label.text = text_value.to_upper()
+	label.position = position + Vector3(0, y_off + (0.0 if parent != null else _floor_y), 0)
+	label.rotation.y = yaw
+	label.font_size = 40
+	label.outline_size = 8
+	label.modulate = color
+	label.outline_modulate = outline
+	label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	label.no_depth_test = false
+	label.double_sided = true
+	label.pixel_size = size
+	label.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	if parent != null:
 		parent.add_child(label)
 	else:
@@ -255,10 +298,11 @@ func _raised_text(text_value: String, position: Vector3, yaw: float, letter_heig
 ## Papan informasi berdiri bebas: bingkai gelap, panel terang, header berwarna,
 ## dan isi multi-baris yang dibaca dari sisi lokal -Z.
 func _info_board(board_name: String, position: Vector3, yaw: float, title: String, lines: Array, width: float = 2.4, height: float = 2.1) -> void:
+	var pp := position + Vector3(0, _floor_y, 0)
 	var root := Node3D.new()
 	root.name = "%s_%02d" % [board_name, _door_sign_index]
 	_door_sign_index += 1
-	root.position = position
+	root.position = pp
 	root.rotation.y = yaw
 	add_child(root)
 	# Plinth dan dua tiang pendukung.
@@ -280,7 +324,7 @@ func _info_board(board_name: String, position: Vector3, yaw: float, title: Strin
 	title_label.outline_modulate = Color(0.06, 0.10, 0.08, 0.9)
 	title_label.pixel_size = 0.0040
 	title_label.no_depth_test = false
-	title_label.position = position + text_basis * Vector3(0, 1.75 + height * 0.5 - 0.22, 0.108)
+	title_label.position = pp + text_basis * Vector3(0, 1.75 + height * 0.5 - 0.22, 0.108)
 	title_label.rotation.y = yaw
 	add_child(title_label)
 	var body := Label3D.new()
@@ -294,46 +338,55 @@ func _info_board(board_name: String, position: Vector3, yaw: float, title: Strin
 	body.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	body.autowrap_mode = TextServer.AUTOWRAP_OFF
 	body.no_depth_test = false
-	body.position = position + text_basis * Vector3(0, 1.35, 0.09)
+	body.position = pp + text_basis * Vector3(0, 1.35, 0.09)
 	body.rotation.y = yaw
 	add_child(body)
 
-func _wall_segment_x(x1: float, x2: float, z: float, y: float, height: float, color: Color, glass: bool = false) -> void:
+func _wall_segment_x(x1: float, x2: float, z: float, y: float, height: float, color: Color, glass: bool = false, y_off: float = 0.0) -> void:
 	if x2 <= x1:
 		return
-	_box("Glass partition" if glass else "Interior wall", Vector3((x1 + x2) * 0.5, y, z), Vector3(x2 - x1, height, 0.16), color, true, null, 0.16 if glass else 0.84, 0.05 if glass else 0.0, glass)
+	_box("Glass partition" if glass else "Interior wall", Vector3((x1 + x2) * 0.5, y + y_off, z), Vector3(x2 - x1, height, 0.16), color, true, null, 0.16 if glass else 0.84, 0.05 if glass else 0.0, glass)
 	if glass:
+		# matte-black aluminum frame posts + 60cm frosted privacy band (mid-eye)
 		for x in [x1 + 0.08, x2 - 0.08]:
-			_box("Glass mullion", Vector3(x, y, z), Vector3(0.075, height, 0.20), Color("#758982"), false, null, 0.34, 0.48)
+			_box("Glass mullion", Vector3(x, y + y_off, z), Vector3(0.075, height, 0.20), Color("#1f2326"), false, null, 0.35, 0.38)
+		var bw: float = x2 - x1
+		if bw > 1.2:
+			_box("Glass privacy band", Vector3((x1+x2)*0.5, y_off + 1.55, z), Vector3(bw - 0.12, 0.60, 0.035), Color(0.78, 0.84, 0.82, 0.34), false, null, 0.22, 0.0, true)
+			_box("Privacy band line", Vector3((x1+x2)*0.5, y_off + 1.25, z), Vector3(bw - 0.16, 0.012, 0.04), Color(0.15,0.17,0.18,0.35), false, null, 0.4)
 
-func _wall_segment_z(x: float, z1: float, z2: float, y: float, height: float, color: Color, glass: bool = false) -> void:
+func _wall_segment_z(x: float, z1: float, z2: float, y: float, height: float, color: Color, glass: bool = false, y_off: float = 0.0) -> void:
 	if z2 <= z1:
 		return
-	_box("Glass partition" if glass else "Interior wall", Vector3(x, y, (z1 + z2) * 0.5), Vector3(0.16, height, z2 - z1), color, true, null, 0.16 if glass else 0.84, 0.05 if glass else 0.0, glass)
+	_box("Glass partition" if glass else "Interior wall", Vector3(x, y + y_off, (z1 + z2) * 0.5), Vector3(0.16, height, z2 - z1), color, true, null, 0.16 if glass else 0.84, 0.05 if glass else 0.0, glass)
 	if glass:
 		for z in [z1 + 0.08, z2 - 0.08]:
-			_box("Glass mullion", Vector3(x, y, z), Vector3(0.20, height, 0.075), Color("#758982"), false, null, 0.34, 0.48)
+			_box("Glass mullion", Vector3(x, y + y_off, z), Vector3(0.20, height, 0.075), Color("#1f2326"), false, null, 0.35, 0.38)
+		var bh: float = z2 - z1
+		if bh > 1.2:
+			_box("Glass privacy band", Vector3(x, y_off + 1.55, (z1+z2)*0.5), Vector3(0.035, 0.60, bh - 0.12), Color(0.78, 0.84, 0.82, 0.34), false, null, 0.22, 0.0, true)
+			_box("Privacy band line", Vector3(x, y_off + 1.25, (z1+z2)*0.5), Vector3(0.04, 0.012, bh - 0.16), Color(0.15,0.17,0.18,0.35), false, null, 0.4)
 
-func _partition_x_with_door(x1: float, x2: float, z: float, door_center: float, door_width: float = DOOR_W, door_label: String = "", swing_north: bool = true) -> void:
+func _partition_x_with_door(x1: float, x2: float, z: float, door_center: float, door_width: float = DOOR_W, door_label: String = "", swing_north: bool = true, y_off: float = 0.0) -> void:
 	var left_end := door_center - door_width * 0.5
 	var right_start := door_center + door_width * 0.5
-	_wall_segment_x(x1, left_end, z, PART_H * 0.5 + 0.02, PART_H, MAT.glass, true)
-	_wall_segment_x(right_start, x2, z, PART_H * 0.5 + 0.02, PART_H, MAT.glass, true)
+	_wall_segment_x(x1, left_end, z, PART_H * 0.5 + 0.02, PART_H, MAT.glass, true, y_off)
+	_wall_segment_x(right_start, x2, z, PART_H * 0.5 + 0.02, PART_H, MAT.glass, true, y_off)
 	# Frame kayu: post kiri/kanan + header, bukaan setinggi DOOR_H.
-	_box("Door frame left", Vector3(left_end + 0.03, DOOR_H * 0.5, z), Vector3(0.14, DOOR_H + 0.05, 0.28), Color("#5f7368"), false, null, 0.42, 0.45)
-	_box("Door frame right", Vector3(right_start - 0.03, DOOR_H * 0.5, z), Vector3(0.14, DOOR_H + 0.05, 0.28), Color("#5f7368"), false, null, 0.42, 0.45)
-	_box("Door header", Vector3(door_center, DOOR_H + 0.09, z), Vector3(door_width + 0.30, 0.18, 0.26), Color("#574132"), false, null, 0.50, 0.1)
+	_box("Door frame left", Vector3(left_end + 0.03, y_off + DOOR_H * 0.5, z), Vector3(0.14, DOOR_H + 0.05, 0.28), Color("#5f7368"), false, null, 0.42, 0.45)
+	_box("Door frame right", Vector3(right_start - 0.03, y_off + DOOR_H * 0.5, z), Vector3(0.14, DOOR_H + 0.05, 0.28), Color("#5f7368"), false, null, 0.42, 0.45)
+	_box("Door header", Vector3(door_center, y_off + DOOR_H + 0.09, z), Vector3(door_width + 0.30, 0.18, 0.26), Color("#574132"), false, null, 0.50, 0.1)
 	# Transom kaca susu di atas daun pintu sampai atap partisi.
 	var transom_h := PART_H - (DOOR_H + 0.18)
-	_box("Door transom", Vector3(door_center, DOOR_H + 0.18 + transom_h * 0.5, z),
+	_box("Door transom", Vector3(door_center, y_off + DOOR_H + 0.18 + transom_h * 0.5, z),
 		Vector3(door_width + 0.34, transom_h, 0.10), Color(0.72, 0.82, 0.78, 0.38), false, null, 0.28, 0.0, true)
 	# Daun pintu ganda membuka ajar (swing north = ke ruang utara). Daun
 	# didaftarkan ke registry `doors` supaya main.gd bisa membuka/menutupnya.
 	var open_amount := 0.62
-	var leaf_left := _add_door_leaf(Vector3(left_end, 0, z), 0.0, open_amount * (1.0 if swing_north else -1.0), door_width * 0.5 - 0.02)
-	var leaf_right := _add_door_leaf(Vector3(right_start, 0, z), PI, open_amount * (-1.0 if swing_north else 1.0), door_width * 0.5 - 0.02)
+	var leaf_left := _add_door_leaf(Vector3(left_end, y_off, z), 0.0, open_amount * (1.0 if swing_north else -1.0), door_width * 0.5 - 0.02)
+	var leaf_right := _add_door_leaf(Vector3(right_start, y_off, z), PI, open_amount * (-1.0 if swing_north else 1.0), door_width * 0.5 - 0.02)
 	doors.append({
-		"position": Vector3(door_center, 0.0, z),
+		"position": Vector3(door_center, y_off, z),
 		"label": door_label,
 		"open": true,
 		"leaves": [
@@ -342,24 +395,24 @@ func _partition_x_with_door(x1: float, x2: float, z: float, door_center: float, 
 		],
 	})
 	if door_label != "":
-		_add_door_sign(door_center, z, true, swing_north, door_label)
+		_add_door_sign(door_center, z, true, swing_north, door_label, y_off)
 
-func _partition_z_with_door(x: float, z1: float, z2: float, door_center: float, door_width: float = DOOR_W, door_label: String = "", open_east: bool = true) -> void:
+func _partition_z_with_door(x: float, z1: float, z2: float, door_center: float, door_width: float = DOOR_W, door_label: String = "", open_east: bool = true, y_off: float = 0.0) -> void:
 	var left_end := door_center - door_width * 0.5
 	var right_start := door_center + door_width * 0.5
-	_wall_segment_z(x, z1, left_end, PART_H * 0.5 + 0.02, PART_H, MAT.glass, true)
-	_wall_segment_z(x, right_start, z2, PART_H * 0.5 + 0.02, PART_H, MAT.glass, true)
-	_box("Door frame left", Vector3(x, DOOR_H * 0.5, left_end + 0.03), Vector3(0.28, DOOR_H + 0.05, 0.14), Color("#5f7368"), false, null, 0.42, 0.45)
-	_box("Door frame right", Vector3(x, DOOR_H * 0.5, right_start - 0.03), Vector3(0.28, DOOR_H + 0.05, 0.14), Color("#5f7368"), false, null, 0.42, 0.45)
-	_box("Door header", Vector3(x, DOOR_H + 0.09, door_center), Vector3(0.26, 0.18, door_width + 0.30), Color("#574132"), false, null, 0.50, 0.1)
+	_wall_segment_z(x, z1, left_end, PART_H * 0.5 + 0.02, PART_H, MAT.glass, true, y_off)
+	_wall_segment_z(x, right_start, z2, PART_H * 0.5 + 0.02, PART_H, MAT.glass, true, y_off)
+	_box("Door frame left", Vector3(x, y_off + DOOR_H * 0.5, left_end + 0.03), Vector3(0.28, DOOR_H + 0.05, 0.14), Color("#5f7368"), false, null, 0.42, 0.45)
+	_box("Door frame right", Vector3(x, y_off + DOOR_H * 0.5, right_start - 0.03), Vector3(0.28, DOOR_H + 0.05, 0.14), Color("#5f7368"), false, null, 0.42, 0.45)
+	_box("Door header", Vector3(x, y_off + DOOR_H + 0.09, door_center), Vector3(0.26, 0.18, door_width + 0.30), Color("#574132"), false, null, 0.50, 0.1)
 	var transom_h := PART_H - (DOOR_H + 0.18)
-	_box("Door transom", Vector3(x, DOOR_H + 0.18 + transom_h * 0.5, door_center),
+	_box("Door transom", Vector3(x, y_off + DOOR_H + 0.18 + transom_h * 0.5, door_center),
 		Vector3(0.10, transom_h, door_width + 0.34), Color(0.72, 0.82, 0.78, 0.38), false, null, 0.28, 0.0, true)
 	var open_amount := 0.62
-	var leaf_left := _add_door_leaf(Vector3(x, 0, left_end), -PI * 0.5, open_amount * (1.0 if open_east else -1.0), door_width * 0.5 - 0.02)
-	var leaf_right := _add_door_leaf(Vector3(x, 0, right_start), PI * 0.5, open_amount * (-1.0 if open_east else 1.0), door_width * 0.5 - 0.02)
+	var leaf_left := _add_door_leaf(Vector3(x, y_off, left_end), -PI * 0.5, open_amount * (1.0 if open_east else -1.0), door_width * 0.5 - 0.02)
+	var leaf_right := _add_door_leaf(Vector3(x, y_off, right_start), PI * 0.5, open_amount * (-1.0 if open_east else 1.0), door_width * 0.5 - 0.02)
 	doors.append({
-		"position": Vector3(x, 0.0, door_center),
+		"position": Vector3(x, y_off, door_center),
 		"label": door_label,
 		"open": true,
 		"leaves": [
@@ -368,7 +421,7 @@ func _partition_z_with_door(x: float, z1: float, z2: float, door_center: float, 
 		],
 	})
 	if door_label != "":
-		_add_door_sign(x, door_center, false, not open_east, door_label)
+		_add_door_sign(x, door_center, false, not open_east, door_label, y_off)
 
 ## Daun pintu ganda: pivot di engsel, panel kayu dengan pegangan kuningan di
 ## kedua sisi. Membuka ajar yang terlihat arsitiktural namun tidak menghalangi
@@ -414,64 +467,220 @@ func _add_door_leaf(hinge: Vector3, bearing: float, open_offset: float, leaf_len
 		leaf.add_child(handle)
 	return leaf
 
-## Plakat nama ruangan di atas header pintu, sisi belakang partisi dipilih oleh
-## caller (corridor side).
-func _add_door_sign(wall_pos: float, along_pos: float, axis_x: bool, face_south_or_east: bool, text: String) -> void:
-	var plate_position := Vector3(wall_pos, DOOR_H + 0.42, along_pos)
-	var offset := 0.15
+## Plakat nama ruangan di samping/atas header pintu (micro-detail, corridor side).
+## Node names keep "Door sign plate/trim" so headless registry checks remain stable.
+func _add_door_sign(wall_pos: float, along_pos: float, axis_x: bool, face_south_or_east: bool, text: String, y_off: float = 0.0) -> void:
+	var plate_position := Vector3(wall_pos, DOOR_H + 0.36, along_pos)
+	var offset := 0.16
 	if axis_x:
 		plate_position.z += offset if face_south_or_east else -offset
 	else:
 		plate_position.x += offset if face_south_or_east else -offset
-	_box("Door sign plate %02d" % _door_sign_index, plate_position, Vector3(1.7, 0.36, 0.035) if axis_x else Vector3(0.035, 0.36, 1.7), Color("#3f5a4e"), false, null, 0.35, 0.28)
-	_box("Door sign trim %02d" % _door_sign_index, plate_position, Vector3(1.5, 0.24, 0.04) if axis_x else Vector3(0.04, 0.24, 1.5), Color("#283b33"), false, null, 0.30, 0.35)
+	var psize := Vector3(1.62, 0.30, 0.028) if axis_x else Vector3(0.028, 0.30, 1.62)
+	var tsize := Vector3(1.52, 0.22, 0.034) if axis_x else Vector3(0.034, 0.22, 1.52)
+	# Sleek black aluminum plate + subtle emissive edge (premium signage)
+	_box("Door sign plate %02d" % _door_sign_index, plate_position, psize, Color("#1f2326"), false, null, 0.28, 0.55)
+	_box("Door sign trim %02d" % _door_sign_index, plate_position, tsize, Color("#2a3034"), false, null, 0.24, 0.45, false, Color("#203840"))
+	var eg := Vector3(1.56, 0.012, 0.02) if axis_x else Vector3(0.02, 0.012, 1.56)
+	_box("Door sign glow", plate_position + Vector3(0, -0.145, 0), eg, Color("#2aa8c8"), false, null, 0.2, 0.0, false, Color("#38c8e8"))
 	_door_sign_index += 1
 	var label := Label3D.new()
 	label.text = text.to_upper()
-	label.font_size = 44
-	label.outline_size = 6
-	label.modulate = Color("#ece6d4")
-	label.outline_modulate = Color(0.05, 0.09, 0.07, 0.95)
-	label.pixel_size = 0.0042
+	label.font_size = 40
+	label.outline_size = 4
+	label.modulate = Color("#eaf2f6")
+	label.outline_modulate = Color(0.02, 0.03, 0.04, 0.95)
+	label.pixel_size = 0.0038
 	label.no_depth_test = false
-	# Label3D punya muka teks +Z lokal (sama seperti TextMesh): putar yaw agar
-	# muka teks benar menunjuk sisi koridor/timur.
 	if axis_x:
 		label.rotation.y = 0.0 if face_south_or_east else PI
 	else:
-		# Untuk dinding sisi timur: mukanya menuju +X butuh yaw +PI/2.
 		label.rotation.y = PI * 0.5 if face_south_or_east else -PI * 0.5
 	if axis_x:
-		label.position = plate_position + Vector3(0, 0, 0.030 if face_south_or_east else -0.030)
+		label.position = plate_position + Vector3(0, 0, 0.026 if face_south_or_east else -0.026)
 	else:
-		label.position = plate_position + Vector3(0.030 if face_south_or_east else -0.030, 0, 0)
+		label.position = plate_position + Vector3(0.026 if face_south_or_east else -0.026, 0, 0)
 	add_child(label)
 
 func _build_site() -> void:
-	_box("Site ground", Vector3(0, -0.62, 0), Vector3(150, 0.7, 150), Color("#839582"), true)
-	# Extend the site to the small-town district east/south-east of HQ.
-	_box("Town ground", Vector3(TOWN_ORIGIN.x + 8.0, -0.62, TOWN_ORIGIN.z + 18.0), Vector3(120, 0.7, 110), Color("#7f917d"), true)
-	_box("HQ apron", Vector3(0, -0.27, 0), Vector3(98, 0.18, 92), Color("#adb5aa"), false)
-	_box("Main foundation", Vector3(0, -0.10, 0), Vector3(86, 0.24, 82), Color("#89958e"), true)
-	_box("Road south", Vector3(0, -0.20, 55), Vector3(100, 0.12, 13), Color("#5b6663"), false)
-	_box("Road east spur", Vector3(76.0, -0.20, 55), Vector3(78, 0.12, 13), Color("#5b6663"), false)
-	_box("Road marking", Vector3(0, -0.12, 55), Vector3(90, 0.025, 0.16), Color("#e7d8ad"), false)
-	_box("Road marking east", Vector3(76.0, -0.12, 55), Vector3(72, 0.025, 0.16), Color("#e7d8ad"), false)
-	_box("Town main street", Vector3(TOWN_ORIGIN.x + 10.0, -0.20, 47.5), Vector3(10.5, 0.12, 72), Color("#596460"), false)
-	_box("Town street marking", Vector3(TOWN_ORIGIN.x + 10.0, -0.12, 47.5), Vector3(0.14, 0.025, 66), Color("#e7d8ad"), false)
-	# Company parking (south apron, east of the visitor walk) — employees park and walk in.
-	for x in [22.0, 26.4, 30.8, 35.2]:
-		_box("Parking bay", Vector3(x, -0.105, 47.0), Vector3(0.12, 0.025, 8.2), Color("#eee8d5"), false)
-		_box("Parking bay", Vector3(x, -0.105, 47.0), Vector3(3.8, 0.02, 0.12), Color("#eee8d5"), false)
-	_box("Parking walkway", Vector3(16.0, -0.015, 47.2), Vector3(2.8, 0.07, 9.2), Color("#bcc4ba"), false)
-	_box("Entry walkway", Vector3(0, -0.015, 43.5), Vector3(15, 0.07, 12), Color("#c4c9bf"), false)
-	for z in [38.5, 40.5, 42.5]:
-		_box("Walkway joint", Vector3(0, 0.026, z), Vector3(14, 0.018, 0.045), Color("#9ca69c"), false)
-	# Sidewalk connecting HQ to the town district.
-	_box("Town sidewalk", Vector3(58.0, -0.015, 47.5), Vector3(32, 0.07, 3.2), Color("#bec7be"), false)
-	for x in [52.0, 58.0, 64.0]:
-		_box("Sidewalk joint", Vector3(x, 0.026, 47.5), Vector3(0.045, 0.018, 3.0), Color("#9ca69c"), false)
+	# =========================================================================
+	# CITY MASTER PLAN — Bangkah City (zoned, grid-aligned, beautiful)
+	# Zones:  HQ (corporate) | Residential (perumahan) | Commercial (perdagangan)
+	# All roads on a clean meter grid; sidewalks, curbs, crosswalks, streetlights.
+	# =========================================================================
+	var ground := Color("#7f917d")
+	var asphalt := Color("#4f5855")
+	var asphalt_dark := Color("#424a46")
+	var line := Color("#efe4c2")
+	var curb := Color("#aeb8b1")
+	var pave := Color("#c9d1c6")
+	var pave_dark := Color("#bcc6bc")
 
+	# --- City ground plane ---
+	_box("City ground", Vector3(62, -0.35, 32), Vector3(300, 0.7, 300), ground, true)
+
+	# =========================================================================
+	# ZONE A — BOULEVARD UTAMA (east-west, south edge of city)
+	# 6-lane divided boulevard with median, curbs, sidewalks, streetlights.
+	# =========================================================================
+	var blvd_z := 55.0
+	_box("Boulevard main", Vector3(62, -0.06, blvd_z), Vector3(300, 0.12, 16.0), asphalt, false)
+	# Median strip (green)
+	_box("Boulevard median", Vector3(62, -0.02, blvd_z), Vector3(300, 0.04, 2.4), Color("#6f8b6d"), false)
+	# Curbs
+	_box("Boulevard curb N", Vector3(62, 0.0, blvd_z - 8.0), Vector3(300, 0.07, 1.0), curb, false)
+	_box("Boulevard curb S", Vector3(62, 0.0, blvd_z + 8.0), Vector3(300, 0.07, 1.0), curb, false)
+	# Center line dashes
+	for lx in range(-120, 150, 10):
+		_box("Blvd center dash", Vector3(float(lx), 0.012, blvd_z), Vector3(4.0, 0.01, 0.20), line, false)
+	# Sidewalks (both sides)
+	_box("Boulevard sidewalk N", Vector3(62, -0.02, blvd_z - 9.6), Vector3(300, 0.05, 3.2), pave, true)
+	_box("Boulevard sidewalk S", Vector3(62, -0.02, blvd_z + 9.6), Vector3(300, 0.05, 3.2), pave, true)
+	# Street trees along boulevard (every 14m)
+	for tx in range(-110, 120, 14):
+		_add_tree(Vector3(float(tx), 0, blvd_z - 11.5))
+		_add_tree(Vector3(float(tx), 0, blvd_z + 11.5))
+
+	# =========================================================================
+	# ZONE B — TOWN SPINE (north-south, connects boulevard to town districts)
+	# =========================================================================
+	var tx := TOWN_ORIGIN.x + 14.0
+	var tz_start := TOWN_ORIGIN.z + 8.0
+	var tz_end := TOWN_ORIGIN.z + 112.0
+	_box("Town spine", Vector3(tx, -0.06, (tz_start + tz_end) * 0.5), Vector3(10.5, 0.12, tz_end - tz_start), asphalt, false)
+	_box("Town spine curb W", Vector3(tx - 5.35, 0.0, (tz_start + tz_end) * 0.5), Vector3(0.6, 0.07, tz_end - tz_start), curb, false)
+	_box("Town spine curb E", Vector3(tx + 5.35, 0.0, (tz_start + tz_end) * 0.5), Vector3(0.6, 0.07, tz_end - tz_start), curb, false)
+	for lz in range(int(tz_start), int(tz_end), 7):
+		_box("Town dash", Vector3(tx, 0.012, float(lz)), Vector3(0.16, 0.01, 3.0), line, false)
+	# Sidewalks (both sides of spine)
+	_box("Town sidewalk W", Vector3(tx + 3.2, -0.02, (tz_start + tz_end) * 0.5), Vector3(2.2, 0.05, tz_end - tz_start), pave, true)
+	_box("Town sidewalk E", Vector3(tx + 16.5, -0.02, (tz_start + tz_end) * 0.5), Vector3(2.2, 0.05, tz_end - tz_start), pave, true)
+	# Street lamps along spine
+	for lz in range(int(tz_start) + 6, int(tz_end), 16):
+		_add_street_lamp(Vector3(tx + 19.0, 0.0, float(lz)))
+
+	# =========================================================================
+	# ZONE C — RESIDENTIAL DISTRICT (west of town spine, north of boulevard)
+	# Grid-aligned housing blocks with quiet streets and front yards.
+	# =========================================================================
+	var res_west_x := TOWN_ORIGIN.x - 28.0
+	var res_east_x := TOWN_ORIGIN.x + 20.0
+	var res_street_z := [24.0, 48.0, 72.0, 96.0]
+	# East-west residential streets
+	for rz in res_street_z:
+		var rz_abs: float = TOWN_ORIGIN.z + rz
+		_box("Res street", Vector3((res_west_x + res_east_x) * 0.5, -0.06, rz_abs), Vector3(72.0, 0.11, 7.0), asphalt_dark, false)
+		_box("Res curb N", Vector3((res_west_x + res_east_x) * 0.5, 0.0, rz_abs - 3.2), Vector3(72.0, 0.07, 0.5), curb, false)
+		_box("Res curb S", Vector3((res_west_x + res_east_x) * 0.5, 0.0, rz_abs + 3.2), Vector3(72.0, 0.07, 0.5), curb, false)
+		for rx in range(int(res_west_x) + 6, int(res_east_x), 8):
+			_box("Res dash", Vector3(float(rx), 0.012, rz_abs), Vector3(3.0, 0.01, 0.16), line, false)
+	# North-south residential access (connects to town spine)
+	_box("Res access N-S", Vector3(res_east_x - 6.0, -0.06, (tz_start + tz_end) * 0.5), Vector3(10.0, 0.11, tz_end - tz_start), asphalt_dark, false)
+	for lz in range(int(tz_start), int(tz_end), 8):
+		_box("Res access dash", Vector3(res_east_x - 6.0, 0.012, float(lz)), Vector3(0.16, 0.01, 3.2), line, false)
+	# House front yards & approach walks (aligned to home grid)
+	for off in [Vector2(0, 0), Vector2(24, 0), Vector2(0, 22), Vector2(24, 22), Vector2(0, 44), Vector2(24, 44), Vector2(12, 66)]:
+		var hb := TOWN_ORIGIN + Vector3(off.x, 0, off.y)
+		_box("House lawn", Vector3(hb.x + 6.0, -0.04, hb.z + 7.0), Vector3(12.0, 0.04, 12.0), Color("#8fa58d"), false)
+		_box("House walk", Vector3(hb.x + 6.0, -0.02, hb.z + 13.2), Vector3(2.4, 0.05, 5.2), pave, true)
+		_add_tree(Vector3(hb.x + 2.5, 0, hb.z + 2.5))
+		_add_tree(Vector3(hb.x + 11.5, 0, hb.z + 2.5))
+
+	# =========================================================================
+	# ZONE D — COMMERCIAL DISTRICT (east of town spine, around market + mall)
+	# =========================================================================
+	var mc: Vector3 = market_layout().get("center", TOWN_ORIGIN + Vector3(28, 0, 92))
+	var kc: Vector3 = kopdes_layout().get("center", TOWN_ORIGIN + Vector3(46, 0, 58))
+	var mbase: Vector3 = owner_mansion_layout().get("base", TOWN_ORIGIN + Vector3(44, 0, -10))
+
+	# Market connector street (east-west, links town spine to market)
+	_box("Market connector", Vector3((res_east_x + mc.x) * 0.5, -0.06, TOWN_ORIGIN.z + 92.0), Vector3(48.0, 0.12, 9.0), asphalt_dark, false)
+	_box("Market connector curb N", Vector3((res_east_x + mc.x) * 0.5, 0.0, TOWN_ORIGIN.z + 87.5), Vector3(48.0, 0.07, 0.5), curb, false)
+	_box("Market connector curb S", Vector3((res_east_x + mc.x) * 0.5, 0.0, TOWN_ORIGIN.z + 96.5), Vector3(48.0, 0.07, 0.5), curb, false)
+	for lx in range(int(res_east_x) + 8, int(mc.x) - 6, 8):
+		_box("Market dash", Vector3(float(lx), 0.012, TOWN_ORIGIN.z + 92.0), Vector3(3.0, 0.01, 0.16), line, false)
+
+	# Mall forecourt (drop-off + plaza in front of Kopdes Mall)
+	_box("Mall forecourt", Vector3(kc.x, -0.02, kc.z + 16.0), Vector3(34.0, 0.05, 10.0), pave, true)
+	_box("Mall forecourt border", Vector3(kc.x, -0.01, kc.z + 11.0), Vector3(34.0, 0.04, 1.0), curb, false)
+	_box("Mall forecourt border S", Vector3(kc.x, -0.01, kc.z + 21.0), Vector3(34.0, 0.04, 1.0), curb, false)
+	# Mall parking lot (neat bays)
+	_box("Mall parking lot", Vector3(kc.x, -0.035, kc.z + 28.0), Vector3(60.0, 0.07, 14.0), Color("#aeb7ae"), true)
+	for px in range(-26, 27, 5):
+		_box("Mall bay line", Vector3(kc.x + float(px), 0.015, kc.z + 28.0), Vector3(0.12, 0.01, 11.0), Color("#f0f1ea"), false)
+
+	# Mansion avenue (grand approach to Owner's mansion, west-east)
+	_box("Mansion avenue", Vector3(mbase.x - 6.0, -0.06, mbase.z + 8.0), Vector3(14.0, 0.12, 44.0), asphalt_dark, false)
+	_box("Mansion avenue curb W", Vector3(mbase.x - 12.7, 0.0, mbase.z + 30.0), Vector3(0.6, 0.07, 44.0), curb, false)
+	_box("Mansion avenue curb E", Vector3(mbase.x + 0.7, 0.0, mbase.z + 30.0), Vector3(0.6, 0.07, 44.0), curb, false)
+	for lz in range(int(mbase.z) + 14, int(mbase.z) + 48, 8):
+		_box("Mansion dash", Vector3(mbase.x - 6.0, 0.012, float(lz)), Vector3(0.18, 0.01, 3.2), line, false)
+	_box("Mansion walk", Vector3(mbase.x, -0.02, mbase.z + 13.5), Vector3(4.0, 0.05, 8.6), pave, true)
+	# Grand trees flanking mansion avenue
+	for lz in range(int(mbase.z) + 16, int(mbase.z) + 44, 10):
+		_add_tree(Vector3(mbase.x - 10.0, 0.0, float(lz)))
+		_add_tree(Vector3(mbase.x - 2.0, 0.0, float(lz)))
+
+	# =========================================================================
+	# ZONE E — HQ CORPORATE CAMPUS (center, fronting boulevard)
+	# =========================================================================
+	_box("HQ apron", Vector3(0, -0.09, 0), Vector3(104, 0.18, 96), Color("#adb5aa"), false)
+	_box("HQ foundation", Vector3(0, -0.12, 0), Vector3(90, 0.24, 86), Color("#89958e"), true)
+	# HQ access road (from boulevard to HQ entrance)
+	_box("HQ access road", Vector3(24, -0.06, 47.0), Vector3(22, 0.12, 10.0), asphalt_dark, false)
+	_box("HQ access curb", Vector3(24, 0.0, 42.6), Vector3(22, 0.07, 0.55), curb, false)
+	_box("HQ front walk", Vector3(0, -0.02, 43.8), Vector3(18, 0.05, 13), pave, true)
+	_box("HQ to parking walk", Vector3(16.0, -0.02, 47.2), Vector3(3.4, 0.05, 10.4), pave, true)
+	# HQ parking lot (neat bays, employee-named)
+	_box("HQ parking lot", Vector3(28.6, -0.04, 47.0), Vector3(20.0, 0.08, 11.0), Color("#5b6460"), true)
+	for x in [22.0, 26.4, 30.8, 35.2]:
+		_box("Parking bay side", Vector3(x, 0.012, 47.0), Vector3(0.12, 0.01, 9.0), Color("#f2efe4"), false)
+		_box("Parking bay back", Vector3(x, 0.012, 51.4), Vector3(4.2, 0.01, 0.12), Color("#f2efe4"), false)
+		_box("Parking bay front", Vector3(x, 0.012, 42.6), Vector3(4.2, 0.01, 0.12), Color("#f2efe4"), false)
+	# Street lamps at HQ entrance
+	_add_street_lamp(Vector3(-6.0, 0.0, 49.0))
+	_add_street_lamp(Vector3(6.0, 0.0, 49.0))
+
+	# =========================================================================
+	# CROSSWALKS (raised 1cm to avoid z-fighting; at every major intersection)
+	# =========================================================================
+	var cross_zs := [blvd_z, TOWN_ORIGIN.z + 24.0, TOWN_ORIGIN.z + 48.0, TOWN_ORIGIN.z + 72.0, TOWN_ORIGIN.z + 96.0, TOWN_ORIGIN.z + 112.0, 66.2]
+	for zx in cross_zs:
+		for sidx in range(-3, 4):
+			_box("Crosswalk", Vector3(tx, 0.012, zx + 3.2 + float(sidx) * 0.5), Vector3(6.4, 0.01, 0.26), line, false)
+
+	# =========================================================================
+	# CITY ENTRY MONUMENT (at boulevard + town spine corner)
+	# =========================================================================
+	_box("City monument base", Vector3(TOWN_ORIGIN.x - 32.0, 1.3, blvd_z + 18.0), Vector3(7.0, 0.12, 3.0), Color("#6b776f"), false)
+	_box("City monument", Vector3(TOWN_ORIGIN.x - 32.0, 3.2, blvd_z + 18.0), Vector3(6.4, 3.0, 2.4), Color("#42584c"), false)
+	_painted_text("KOTA BANGKAH", Vector3(TOWN_ORIGIN.x - 32.0, 4.1, blvd_z + 18.06), 0.0, 0.008, Color("#e8fbff"), Color(0.05, 0.12, 0.14, 0.35))
+	_painted_text("JL. BANGKAH RAYA", Vector3(TOWN_ORIGIN.x - 32.0, 3.6, blvd_z + 18.06), 0.0, 0.0034, Color("#9ad7c2"), Color(0, 0, 0, 0))
+
+func _add_street_lamp(position: Vector3) -> void:
+	# Single decorative street lamp (pole + warm head + OmniLight).
+	var root := Node3D.new()
+	root.name = "StreetLamp"
+	root.position = position
+	add_child(root)
+	_box("Lamp pole", Vector3(0, 1.8, 0), Vector3(0.07, 3.6, 0.07), Color("#6b7871"), false, root, 0.55)
+	_box("Lamp head", Vector3(0, 3.72, 0), Vector3(0.5, 0.12, 0.26), Color("#ded6c2"), false, root, 0.28, 0.05, false, Color("#f3e4bf"))
+	var sl := OmniLight3D.new()
+	sl.position = position + Vector3(-0.2, 3.55, 0)
+	sl.light_color = Color("#ffe9c2")
+	sl.light_energy = 0.14
+	sl.omni_range = 8.5
+	sl.shadow_enabled = false
+	add_child(sl)
+
+func _add_plant(position: Vector3, scale_value: float = 1.0) -> void:
+	var p := position + Vector3(0, _floor_y, 0)
+	_cylinder("Decorative planter", p + Vector3(0, 0.32 * scale_value, 0), 0.42 * scale_value, 0.62 * scale_value, Color("#9c8268"))
+	_cylinder("Planter soil", p + Vector3(0, 0.64 * scale_value, 0), 0.35 * scale_value, 0.06, Color("#493e31"))
+	for i in range(6):
+		var angle := TAU * float(i) / 6.0
+		_sphere("Plant foliage", p + Vector3(cos(angle) * 0.28 * scale_value, 1.05 * scale_value + float(i % 2) * 0.16, sin(angle) * 0.28 * scale_value), 0.34 * scale_value, Color("#6f9275"), Vector3(1.0, 1.25, 0.84))
+	_sphere("Plant crown", p + Vector3(0, 1.36 * scale_value, 0), 0.32 * scale_value, Color("#88a886"), Vector3(1.0, 1.3, 1.0))
 
 func _add_dust_particles() -> void:
 	var dust := GPUParticles3D.new()
@@ -504,222 +713,321 @@ func _add_dust_particles() -> void:
 	add_child(dust)
 
 func _build_shell() -> void:
-	_box("Office floor slab", Vector3(0, 0, 0), Vector3(84, 0.22, 80), MAT.floor, true)
-	# Exterior walls, raised to a double-height office proportion.
-	_box("North exterior wall", Vector3(0, WALL_H * 0.5, -40), Vector3(84, WALL_H, 0.34), MAT.wall, true)
-	_box("West exterior wall", Vector3(-42, WALL_H * 0.5, 0), Vector3(0.34, WALL_H, 80), MAT.wall, true)
-	_box("East exterior wall", Vector3(42, WALL_H * 0.5, 0), Vector3(0.34, WALL_H, 80), MAT.wall, true)
+	# 3-story company building shell (L1/L2/L3). Interior room/seat/door registries
+	# are rebuilt per-floor below; this builds the physical envelope + slabs.
+	var total_h := FLOOR_H * 3.0 + 3.8
+	_box("Office floor slab L1", Vector3(0, -0.11, 0), Vector3(84, 0.22, 80), MAT.floor, true)
+	# Upper floor slabs with openings for stair (east) and lift (west) cores.
+	_build_floor_slab("L2 slab", L2_Y - 0.11)
+	_build_floor_slab("L3 slab", L3_Y - 0.11)
+	_box("Roof slab", Vector3(0, L3_Y + FLOOR_H + 2.0, 0), Vector3(84, 0.22, 80), Color("#8f9b94"), true)
+	_box("Lift headroom band", Vector3(13.8, L3_Y + FLOOR_H + 1.0, 10.7), Vector3(8.5, 2.0, 6.0), Color("#9aa6a0"), false, null, 0.7)
+	# Exterior walls (full 3-story height)
+	for wy in [WALL_H * 0.5, WALL_H * 0.5 + FLOOR_H, WALL_H * 0.5 + FLOOR_H * 2.0]:
+		_box("North exterior wall", Vector3(0, wy, -40), Vector3(84, WALL_H, 0.34), MAT.wall, true)
+		_box("West exterior wall", Vector3(-42, wy, 0), Vector3(0.34, WALL_H, 80), MAT.wall, true)
+		_box("East exterior wall", Vector3(42, wy, 0), Vector3(0.34, WALL_H, 80), MAT.wall, true)
 	_wall_segment_x(-42, -5.2, 40, WALL_H * 0.5, WALL_H, MAT.wall, false)
 	_wall_segment_x(5.2, 42, 40, WALL_H * 0.5, WALL_H, MAT.wall, false)
-	_box("Entrance canopy", Vector3(0, 4.15, 42.8), Vector3(20, 0.38, 5.4), Color("#344b43"), true)
-	for x in [-9.1, 9.1]:
-		_box("Canopy pillar", Vector3(x, 2.05, 43.6), Vector3(0.38, 4.1, 0.38), Color("#73857c"), true)
-	# Full-height windows along side and rear facades.
-	for x in [-34, -25, -16, -7, 2, 11, 20, 29, 38]:
-		_box("North glazing", Vector3(x, 2.45, -39.78), Vector3(5.6, 3.4, 0.06), MAT.glass, false, null, 0.16, 0.12, true)
-		_box("North window sill", Vector3(x, 0.78, -39.68), Vector3(5.8, 0.10, 0.20), Color("#9ca9a2"), false)
-		_box("North glazing header", Vector3(x, 4.28, -39.78), Vector3(5.6, 0.10, 0.12), Color("#7d8b84"), false)
-	for z in [-32, -21, -10, 1, 12, 23, 34]:
-		for x in [-41.78, 41.78]:
-			_box("Side glazing", Vector3(x, 2.45, z), Vector3(0.06, 3.4, 7.3), MAT.glass, false, null, 0.16, 0.12, true)
-			_box("Side window sill", Vector3(x * 0.999, 0.78, z), Vector3(0.20, 0.1, 7.5), Color("#9ca9a2"), false)
-			_box("Side glazing header", Vector3(x * 0.999, 4.28, z), Vector3(0.12, 0.10, 7.3), Color("#7d8b84"), false)
-	# South lobby storefront glass and sliding doors, plus a clerestory band
-	# above the shopfront so the expanded lobby stays bright.
+	_wall_segment_x(-42, 42, 40, WALL_H * 0.5 + FLOOR_H, WALL_H, MAT.wall, false)
+	_wall_segment_x(-42, 42, 40, WALL_H * 0.5 + FLOOR_H * 2.0, WALL_H, MAT.wall, false)
+	# Entrance canopy upgraded in _build_exterior_facade (kept out of shell to avoid z-fighting).
+		# Glazing bands per floor (north/side). South/front facade articulated in _build_exterior_facade.
+	for fl: int in [0, 1, 2]:
+		var fy := fl * FLOOR_H
+		for x in [-34, -25, -16, -7, 2, 11, 20, 29, 38]:
+			_box("North glazing", Vector3(x, fy + 2.45, -39.78), Vector3(5.6, 3.4, 0.06), MAT.glass, false, null, 0.16, 0.12, true)
+			_box("North window sill", Vector3(x, fy + 0.78, -39.68), Vector3(5.8, 0.10, 0.20), Color("#9ca9a2"), false)
+			_box("North glazing header", Vector3(x, fy + 4.28, -39.78), Vector3(5.6, 0.10, 0.12), Color("#7d8b84"), false)
+		for z in [-32, -21, -10, 1, 12, 23, 34]:
+			for x in [-41.78, 41.78]:
+				_box("Side glazing", Vector3(x, fy + 2.45, z), Vector3(0.06, 3.4, 7.3), MAT.glass, false, null, 0.16, 0.12, true)
+	# L1 lobby storefront kept (base envelope); L2/L3 front articulated by facade.
 	for x in [-15, -10, -5, 5, 10, 15]:
 		_box("Lobby storefront glass", Vector3(x, 2.0, 39.78), Vector3(4.55, 3.0, 0.07), MAT.glass, false, null, 0.12, 0.1, true)
-		_box("Storefront mullion", Vector3(x, 2.0, 39.68), Vector3(0.09, 3.15, 0.16), Color("#71847b"), false, null, 0.35, 0.5)
+		_box("Storefront mullion", Vector3(x, 2.0, 39.68), Vector3(0.09, 3.15, 0.16), Color("#2a2a2a"), false, null, 0.35, 0.55)
 		_box("Lobby clerestory glass", Vector3(x, 4.5, 39.78), Vector3(4.55, 1.8, 0.07), MAT.glass, false, null, 0.12, 0.1, true)
-		_box("Clerestory mullion", Vector3(x, 4.5, 39.68), Vector3(0.09, 1.95, 0.16), Color("#71847b"), false, null, 0.35, 0.5)
 	_box("Entry left door", Vector3(-2.25, 1.7, 39.5), Vector3(2.0, 3.25, 0.11), Color(0.44, 0.65, 0.65, 0.34), false, null, 0.12, 0.1, true)
 	_box("Entry right door", Vector3(2.25, 1.7, 39.5), Vector3(2.0, 3.25, 0.11), Color(0.44, 0.65, 0.65, 0.34), false, null, 0.12, 0.1, true)
 	_box("Entry transom glass", Vector3(0, 4.5, 39.78), Vector3(4.4, 1.8, 0.07), MAT.glass, false, null, 0.12, 0.1, true)
-	_box("Entry pull left", Vector3(-1.25, 1.7, 39.38), Vector3(0.05, 1.15, 0.08), Color("#c5aa7a"), false, null, 0.28, 0.75)
-	_box("Entry pull right", Vector3(1.25, 1.7, 39.38), Vector3(0.05, 1.15, 0.08), Color("#c5aa7a"), false, null, 0.28, 0.75)
-	# Structural columns and a visible roof edge keep the building architectural, not a floating floorplan.
+	# Vertical black matte mullion grid over L1 storefront (visual articulation).
+	for mx in [-17.5, -12.5, -7.5, -2.5, 2.5, 7.5, 12.5, 17.5]:
+		if absf(mx) < 3.0:
+			continue
+		_box("L1 facade mullion", Vector3(mx, 2.75, 39.86), Vector3(0.10, 5.1, 0.10), Color("#1f2224"), false, null, 0.32, 0.55)
+	# Structural columns through 3 stories
 	for x in [-39, -20, 0, 20, 39]:
 		for z in [-37, -18, 4, 25, 37]:
-			_box("Structural column", Vector3(x, WALL_H * 0.5, z), Vector3(0.42, WALL_H, 0.42), Color("#c5cec7"), true)
-	_box("North roof edge", Vector3(0, 5.62, -40), Vector3(84, 0.30, 0.52), Color("#718179"), false)
-	_box("West roof edge", Vector3(-42, 5.62, 0), Vector3(0.52, 0.30, 80), Color("#718179"), false)
-	_box("East roof edge", Vector3(42, 5.62, 0), Vector3(0.52, 0.30, 80), Color("#718179"), false)
-	_box("South roof edge", Vector3(0, 5.62, 40), Vector3(84, 0.30, 0.52), Color("#718179"), false)
-	# Papan nama perusahaan eksterior: panel perunggu + huruf timbul (embossed).
-	_box("Exterior logo panel", Vector3(0, 4.95, 40.44), Vector3(14.0, 1.62, 0.14), Color("#2f4339"), false, null, 0.34, 0.55)
-	_box("Exterior logo trim", Vector3(0, 4.20, 40.44), Vector3(14.0, 0.10, 0.16), Color("#c2a36e"), false, null, 0.32, 0.7)
-	_raised_text("BANGKAH", Vector3(0, 5.06, 40.53), 0, 0.66, 0.09, Color("#e8d3a0"))
-	_label("HEADQUARTERS", Vector3(0, 4.56, 40.53), 0.0056, Color("#dbe4d8"))
+			_box("Structural column", Vector3(x, total_h * 0.5 - 0.2, z), Vector3(0.42, total_h, 0.42), Color("#c5cec7"), true)
+	var top := L3_Y + FLOOR_H + 2.02
+	_box("North roof edge", Vector3(0, top, -40), Vector3(84, 0.30, 0.52), Color("#718179"), false)
+	_box("West roof edge", Vector3(-42, top, 0), Vector3(0.52, 0.30, 80), Color("#718179"), false)
+	_box("East roof edge", Vector3(42, top, 0), Vector3(0.52, 0.30, 80), Color("#718179"), false)
+	_box("South roof edge", Vector3(0, top, 40), Vector3(84, 0.30, 0.52), Color("#718179"), false)
+	# extend envelope to raised roof (lift headroom)
+	var ext_y := L3_Y + FLOOR_H + 1.0
+	_box("Upper ext N", Vector3(0, ext_y, -40), Vector3(84, 2.0, 0.34), MAT.wall, false)
+	_box("Upper ext W", Vector3(-42, ext_y, 0), Vector3(0.34, 2.0, 80), MAT.wall, false)
+	_box("Upper ext E", Vector3(42, ext_y, 0), Vector3(0.34, 2.0, 80), MAT.wall, false)
+	_box("Upper ext S", Vector3(0, ext_y, 40), Vector3(84, 2.0, 0.34), MAT.wall, false)
+	# Old low front sign removed (replaced by 3F articulated facade + canopy + L3 emissive brand).
+	# Floor markers on exterior
+	for i in range(3):
+		_painted_text("L%d" % (i+1), Vector3(38.5, i*FLOOR_H + 4.8, 40.2), 0.0, 0.008, Color("#f0dfb0"), Color(0,0,0,0))
 
-## Eksterior yang lebih representatif: cornice/parasoleil, pilaster, pencahayaan
-## fasad, teras masuk berlapis, dan penanda perusahaan — tanpa mengubah footprint
-## interior yang sudah dipakai koordinat meja/karyawan.
+func _build_floor_slab(label_s: String, y: float) -> void:
+	# Core opening: 2 tangga (naik/turun) + lift tinggi, berdampingan (x ~ 9.0..18.2, z ~ 5.8..15.8)
+	_box(label_s + " N", Vector3(0, y, -17.1), Vector3(84, 0.22, 45.8), MAT.floor, true)
+	_box(label_s + " S", Vector3(0, y, 27.9), Vector3(84, 0.22, 24.2), MAT.floor, true)
+	_box(label_s + " W", Vector3(-16.5, y, 10.8), Vector3(51.0, 0.22, 10.0), MAT.floor, true)
+	_box(label_s + " E", Vector3(30.1, y, 10.8), Vector3(23.8, 0.22, 10.0), MAT.floor, true)
+
 func _build_exterior_facade() -> void:
-	# Cornice / parapet band di atas roof edge agar massa bangunan lebih tegas.
-	for side in [{"pos": Vector3(0, 5.92, -40.18), "size": Vector3(84.6, 0.34, 0.70)},
-			{"pos": Vector3(0, 5.92, 40.18), "size": Vector3(84.6, 0.34, 0.70)},
-			{"pos": Vector3(-42.18, 5.92, 0), "size": Vector3(0.70, 0.34, 80.6)},
-			{"pos": Vector3(42.18, 5.92, 0), "size": Vector3(0.70, 0.34, 80.6)}]:
-		_box("Cornice band", side["pos"], side["size"], Color("#607269"), false, null, 0.58, 0.08)
-	# Vertical pilasters pada fasad depan (selatan) untuk ritme arsitektur.
-	for x in [-30.0, -20.0, -10.0, 10.0, 20.0, 30.0]:
-		_box("Facade pilaster", Vector3(x, 2.95, 40.22), Vector3(0.55, 5.55, 0.28), Color("#e6dfd2"), false, null, 0.76)
-		_box("Pilaster cap", Vector3(x, 5.72, 40.28), Vector3(0.72, 0.18, 0.42), Color("#c8b996"), false, null, 0.48, 0.12)
-	# Sunshade fins di atas glazing samping — memberi bayangan dan kedalaman.
-	for x in [-34, -25, -16, -7, 2, 11, 20, 29, 38]:
-		_box("North sunshade", Vector3(x, 4.62, -40.28), Vector3(5.8, 0.10, 0.62), Color("#5f7268"), false, null, 0.55, 0.18)
-	for z in [-32, -21, -10, 1, 12, 23, 34]:
-		_box("West sunshade", Vector3(-42.28, 4.62, z), Vector3(0.62, 0.10, 7.5), Color("#5f7268"), false, null, 0.55, 0.18)
-		_box("East sunshade", Vector3(42.28, 4.62, z), Vector3(0.62, 0.10, 7.5), Color("#5f7268"), false, null, 0.55, 0.18)
-	# Layered entrance terrace + planter boxes framing the lobby doors.
-	_box("Entrance terrace", Vector3(0, 0.05, 44.8), Vector3(18.0, 0.18, 4.2), Color("#c9d0c6"), false, null, 0.62)
-	_box("Terrace step", Vector3(0, -0.02, 46.9), Vector3(20.0, 0.08, 1.2), Color("#b9c2b8"), false, null, 0.64)
-	for x in [-12.5, 12.5]:
-		_box("Terrace planter", Vector3(x, 0.48, 44.8), Vector3(3.6, 0.75, 1.6), Color("#8d9f92"), false, null, 0.78)
-		_add_plant(Vector3(x, 0.78, 44.8), 0.88)
-	# Warm facade uplights (subtle, no shadow cost explosion).
-	for x in [-18.0, -6.0, 6.0, 18.0]:
-		_box("Facade sconce", Vector3(x, 0.55, 40.35), Vector3(0.22, 0.42, 0.16), Color("#d8c79a"), false, null, 0.25, 0.2, false, Color("#f0ddb0"))
-		var sconce := OmniLight3D.new()
-		sconce.position = Vector3(x, 0.72, 41.2)
-		sconce.light_color = Color("#ffe8bf")
-		sconce.light_energy = 0.18
-		sconce.omni_range = 4.8
-		sconce.shadow_enabled = false
-		add_child(sconce)
-	# Rooftop mechanical/green accent volumes (visual only) for skyline depth.
-	_box("Roof accent north", Vector3(-18.0, 6.25, -24.0), Vector3(14.0, 0.95, 8.0), Color("#7f9188"), false, null, 0.7)
-	_box("Roof accent east", Vector3(24.0, 6.18, 10.0), Vector3(10.0, 0.82, 12.0), Color("#7a8d84"), false, null, 0.7)
-	for px in [-22.0, -18.0, -14.0]:
-		_add_plant(Vector3(px, 6.72, -24.0), 0.55)
-	# Feature frame around the entrance glazing.
-	_box("Entrance frame top", Vector3(0, 3.52, 39.95), Vector3(8.8, 0.22, 0.26), Color("#6b7f74"), false, null, 0.42, 0.22)
-	_box("Entrance frame left", Vector3(-4.3, 1.9, 39.95), Vector3(0.22, 3.4, 0.26), Color("#6b7f74"), false, null, 0.42, 0.22)
-	_box("Entrance frame right", Vector3(4.3, 1.9, 39.95), Vector3(0.22, 3.4, 0.26), Color("#6b7f74"), false, null, 0.42, 0.22)
+	# 3-floor HQ facade: articulate each level (L1 glass/warm, L2 ribbon+louvers,
+	# L3 dark slate + panoramic/cantilever balcony) without altering interior/
+	# registries. Visual-only overlay in front of shell (z > 40).
+	var base := Color("#e6e0d4")      # off-white / soft warm
+	var slate := Color("#2c302e")     # dark charcoal panels
+	var louver := Color("#232628")
+	var mullion := Color("#1f2224")
+	var wood := Color("#6b4a2e")
+	var brass := Color("#c7a85a")
+	var accent := Color("#6aa8a0")    # tech cyan/teal accent
+	var smoked := Color(0.10, 0.13, 0.16, 0.58)
+	var clear := Color(0.58, 0.76, 0.82, 0.22)
+	var fz := 40.22 # front face overlay
+	# Base plinth & floor bands (readable 3-floor articulation)
+	_box("HQ plinth", Vector3(0, 0.34, 0), Vector3(85.4, 0.52, 81.4), Color("#8e9a93"), true, null, 0.62)
+	for by in [FLOOR_H - 0.06, FLOOR_H * 2.0 - 0.06, FLOOR_H * 3.0 - 0.06]:
+		_box("Floor band", Vector3(0, by, fz + 0.02), Vector3(84.6, 0.24, 0.16), slate, false, null, 0.45, 0.12)
+		_box("Band brass inlay", Vector3(0, by + 0.14, fz + 0.11), Vector3(84.0, 0.03, 0.03), brass, false, null, 0.25, 0.55)
+	# Off-white base field behind accents (non-colliding overlay)
+	_box("Facade base L2", Vector3(0, L2_Y + 2.8, fz), Vector3(84.2, 5.4, 0.10), base, false, null, 0.78)
+	_box("Facade base L3", Vector3(0, L3_Y + 2.8, fz), Vector3(84.2, 5.4, 0.10), slate, false, null, 0.62)
+
+	# --- L1: clear storefront feel + black matte mullion grid + warm wood entrance ---
+	_box("L1 transom strip", Vector3(0, 5.15, fz + 0.06), Vector3(84.2, 0.55, 0.06), slate, false, null, 0.5)
+	for x in [-36.0, -28.0, -20.0, 20.0, 28.0, 36.0]:
+		_box("L1 side glass", Vector3(x, 2.25, fz + 0.08), Vector3(6.8, 4.6, 0.06), clear, false, null, 0.08, 0.08, true)
+	# vertical mullion grid (~2m rhythm) across L1, skip entry
+	for mx in range(-40, 41, 2):
+		var mxf := float(mx)
+		if absf(mxf) < 5.5:
+			continue
+		_box("L1 mullion", Vector3(mxf, 2.75, fz + 0.14), Vector3(0.09, 5.2, 0.09), mullion, false, null, 0.3, 0.55)
+	# fluted warm-wood entrance frame (welcoming) + emissive trim
+	for sx in [-6.2, 6.2]:
+		_box("Entrance wood frame", Vector3(sx, 2.65, fz + 0.12), Vector3(1.4, 5.1, 0.22), wood, false, null, 0.5)
+		for fx in [-0.45, -0.15, 0.15, 0.45]:
+			_box("Wood flute", Vector3(sx + fx, 2.65, fz + 0.25), Vector3(0.08, 4.9, 0.05), wood.darkened(0.12), false, null, 0.55)
+	_box("Entrance header wood", Vector3(0, 5.05, fz + 0.12), Vector3(13.8, 0.9, 0.22), wood, false, null, 0.5)
+	_box("Entrance cyan line", Vector3(0, 4.58, fz + 0.26), Vector3(13.2, 0.05, 0.03), accent, false, null, 0.2, 0.0, false, accent)
+
+	# --- L2: ribbon windows + dark slate piers + black sunshade louvers ---
+	var l2wy := L2_Y + 2.55
+	# slate accent piers between window bays
+	for px in [-38.0, -30.0, -22.0, -14.0, 14.0, 22.0, 30.0, 38.0]:
+		_box("L2 slate pier", Vector3(px, L2_Y + 2.8, fz + 0.08), Vector3(2.6, 5.1, 0.12), slate, false, null, 0.58)
+	# long ribbon windows (smoked glass) in bays
+	for bay in [[-34.0, 5.4], [-26.0, 5.4], [-18.0, 5.4], [18.0, 5.4], [26.0, 5.4], [34.0, 5.4]]:
+		var bx := float(bay[0]); var bw := float(bay[1])
+		_box("L2 ribbon glass", Vector3(bx, l2wy, fz + 0.14), Vector3(bw, 2.25, 0.06), smoked, false, null, 0.08, 0.06, true)
+		# sunshade louver blades projecting out (texture/depth)
+		for ly in [-0.85, -0.35, 0.15, 0.65]:
+			_box("L2 louver", Vector3(bx, l2wy + ly, fz + 0.42), Vector3(bw + 0.2, 0.06, 0.55), louver, false, null, 0.55, 0.15)
+		_box("L2 louver frame", Vector3(bx, l2wy, fz + 0.22), Vector3(bw + 0.3, 2.4, 0.08), mullion, false, null, 0.35, 0.45)
+
+	# --- L3: dark slate + panoramic center glass + cantilever balcony (breaks box) ---
+	_box("L3 slate face", Vector3(0, L3_Y + 2.8, fz + 0.04), Vector3(84.2, 5.2, 0.08), slate, false, null, 0.6)
+	# panoramic glass band (center/owner side) + corner glazing
+	_box("L3 panoramic glass", Vector3(-18.0, L3_Y + 2.75, fz + 0.14), Vector3(30.0, 3.2, 0.06), smoked, false, null, 0.06, 0.05, true)
+	_box("L3 panoramic mullion", Vector3(-18.0, L3_Y + 2.75, fz + 0.18), Vector3(0.10, 3.2, 0.06), mullion, false, null, 0.3, 0.55)
+	_box("L3 corner glass L", Vector3(-38.5, L3_Y + 2.75, fz + 0.14), Vector3(5.5, 3.0, 0.06), clear, false, null, 0.08, 0.06, true)
+	_box("L3 corner glass R", Vector3(38.5, L3_Y + 2.75, fz + 0.14), Vector3(5.5, 3.0, 0.06), clear, false, null, 0.08, 0.06, true)
+	# fluted wood support accent near L3
+	_box("L3 wood accent", Vector3(-2.0, L3_Y + 2.8, fz + 0.10), Vector3(1.6, 5.0, 0.16), wood, false, null, 0.5)
+	# Cantilevered Owner balcony projecting outward (visual, breaks monolith)
+	var bcx := -29.5
+	_box("Owner ext balcony deck", Vector3(bcx, L3_Y + 0.10, 41.85), Vector3(6.2, 0.16, 3.3), wood, true, null, 0.55)
+	_box("Owner ext balcony soffit", Vector3(bcx, L3_Y - 0.02, 41.85), Vector3(6.2, 0.08, 3.3), slate, false, null, 0.5)
+	_box("Owner ext rail glass front", Vector3(bcx, L3_Y + 1.05, 43.45), Vector3(6.0, 1.1, 0.06), Color(0.78,0.88,0.94,0.18), false, null, 0.06, 0.02, true)
+	_box("Owner ext rail glass L", Vector3(bcx - 3.0, L3_Y + 1.05, 41.85), Vector3(0.06, 1.1, 3.2), Color(0.78,0.88,0.94,0.18), false, null, 0.06, 0.02, true)
+	_box("Owner ext rail glass R", Vector3(bcx + 3.0, L3_Y + 1.05, 41.85), Vector3(0.06, 1.1, 3.2), Color(0.78,0.88,0.94,0.18), false, null, 0.06, 0.02, true)
+	_box("Owner ext rail cap", Vector3(bcx, L3_Y + 1.62, 43.45), Vector3(6.1, 0.05, 0.10), mullion, false, null, 0.3, 0.45)
+	_painted_text("BALKON EKSEKUTIF", Vector3(bcx, L3_Y + 1.15, 43.52), 0.0, 0.0026, Color("#eef4f0"), Color(0,0,0,0))
+
+	# --- Thin-edge steel canopy + wood soffit + warm downlights ---
+	_box("Drive canopy", Vector3(0, 4.55, 44.1), Vector3(23.0, 0.16, 7.8), slate, true, null, 0.4, 0.22)
+	_box("Canopy wood soffit", Vector3(0, 4.44, 44.1), Vector3(22.2, 0.10, 7.1), wood.darkened(0.05), false, null, 0.55)
+	_box("Canopy fascia front", Vector3(0, 4.48, 48.0), Vector3(23.0, 0.22, 0.10), mullion, false, null, 0.35, 0.3)
+	_box("Canopy fascia accent", Vector3(0, 4.34, 48.06), Vector3(22.6, 0.05, 0.04), accent, false, null, 0.2, 0.0, false, accent)
+	for x in [-10.6, -3.6, 3.6, 10.6]:
+		_box("Canopy post", Vector3(x, 2.25, 47.2), Vector3(0.34, 4.5, 0.34), mullion, true, null, 0.4, 0.35)
+	# warm downlights under canopy
+	for dx in [-8.0, -4.0, 0.0, 4.0, 8.0]:
+		_box("Canopy downlight", Vector3(dx, 4.36, 44.4), Vector3(0.28, 0.03, 0.28), Color("#f7e7c2"), false, null, 0.2, 0.0, false, Color("#ffe3b0"))
+		var dl := OmniLight3D.new()
+		dl.position = Vector3(dx, 4.25, 45.2)
+		dl.light_color = Color("#ffdca0"); dl.light_energy = 0.22; dl.omni_range = 7.5
+		dl.shadow_enabled = false
+		add_child(dl)
+
+	# --- 3D emissive branding (day/night readable) ---
+	_box("L3 brand backer", Vector3(18.0, L3_Y + 3.9, fz + 0.10), Vector3(20.0, 1.35, 0.16), Color("#1f2a27"), false, null, 0.3, 0.4)
+	_painted_text("BANGKAH HEADQUARTERS", Vector3(18.0, L3_Y + 3.95, fz + 0.22), 0.0, 0.0105, Color("#e8fbff"), Color(0.05,0.12,0.14,0.35))
+	_box("Brand emissive bar", Vector3(18.0, L3_Y + 3.35, fz + 0.18), Vector3(18.5, 0.07, 0.05), accent, false, null, 0.2, 0.0, false, accent)
+	# keep existing L1 sign feel minimal (replaced by canopy/wood header); add subtle HQ marker
+	# Exterior Digital Totem near drop-off (welcome screen)
+	_box("Ext totem base", Vector3(-9.5, 0.30, 45.2), Vector3(0.65, 0.6, 0.45), Color("#1f2326"), false, null, 0.35, 0.4)
+	_box("Ext totem frame", Vector3(-9.5, 1.45, 45.2), Vector3(0.80, 1.9, 0.12), Color("#14181b"), false, null, 0.25, 0.45)
+	_box("Ext totem screen", Vector3(-9.5, 1.45, 45.27), Vector3(0.68, 1.68, 0.03), Color("#0b1820"), false, null, 0.12, 0.0, false, Color("#2aa8c8"))
+	_painted_text("WELCOME", Vector3(-9.5, 1.85, 45.30), 0.0, 0.0034, Color("#e6fbff"), Color(0,0,0,0))
+	_painted_text("BANGKAH HQ", Vector3(-9.5, 1.45, 45.30), 0.0, 0.0026, Color("#9ad7c2"), Color(0,0,0,0))
+
+	# Facade up-lighting (dramatic night)
+	for lx in [-30.0, -15.0, 0.0, 15.0, 30.0]:
+		_box("Uplight housing", Vector3(lx, 0.12, 40.55), Vector3(0.35, 0.08, 0.18), Color("#2a2f2d"), false)
+		var ul := SpotLight3D.new()
+		ul.position = Vector3(lx, 0.18, 41.0)
+		ul.rotation_degrees = Vector3(-105, 0, 0)
+		ul.light_color = Color("#dfeee8"); ul.light_energy = 0.0; ul.spot_range = 22.0; ul.spot_angle = 32.0
+		ul.shadow_enabled = false
+		add_child(ul)
+	# Corner massing stays light
+	for c in [Vector3(-41.6, 2.9, 39.6), Vector3(41.6, 2.9, 39.6), Vector3(-41.6, 2.9, -39.6), Vector3(41.6, 2.9, -39.6)]:
+		_box("Corner pier", c, Vector3(1.1, 5.5, 1.1), Color("#d3ccbf"), false, null, 0.74)
+	# Roadside sign retained
+	_box("Road sign post L", Vector3(-18.5, 1.45, 49.5), Vector3(0.16, 2.9, 0.16), Color("#6a776f"), false, null, 0.5)
+	_box("Road sign post R", Vector3(-15.5, 1.45, 49.5), Vector3(0.16, 2.9, 0.16), Color("#6a776f"), false, null, 0.5)
+	_box("Road sign board", Vector3(-17.0, 2.55, 49.5), Vector3(3.6, 1.4, 0.14), Color("#f2f1ea"), false, null, 0.45)
+	_box("Road sign header", Vector3(-17.0, 3.05, 49.56), Vector3(3.6, 0.38, 0.06), accent, false, null, 0.35)
+	_painted_text("BANGKAH HQ", Vector3(-17.0, 2.65, 49.61), 0.0, 0.0038, Color("#2f4339"), Color(0,0,0,0))
+	_painted_text("← PARKIR  |  MASUK →", Vector3(-17.0, 2.25, 49.61), 0.0, 0.0024, Color("#3a4a42"), Color(0,0,0,0))
+	# Rooftop units raised to true 3F roof level
+	var rfy := L3_Y + FLOOR_H + 0.85
+	_box("Roof unit A", Vector3(-18.0, rfy, -20.0), Vector3(10.0, 1.2, 6.0), Color("#8a9790"), false, null, 0.7)
+	_box("Roof unit B", Vector3(22.0, rfy - 0.1, 12.0), Vector3(8.0, 1.0, 9.0), Color("#849188"), false, null, 0.7)
+	_box("Stair bulkhead", Vector3(34.0, rfy + 0.25, -30.0), Vector3(5.5, 1.7, 6.5), Color("#c9d0c6"), false, null, 0.75)
 
 func _build_room_partitions() -> void:
-	# North executive wing: Owner, Secretary, Management and Architecture.
-	# Semua pintu membuka KE DALAM ruangan yang dilabelinya (tidak menyapu koridor).
-	_partition_z_with_door(-19.5, -39.8, -20.0, -29.5, DOOR_W, "OWNER OFFICE", false)
-	_partition_z_with_door(-2.0, -39.8, -20.0, -29.5, DOOR_W, "SECRETARIAT", false)
-	_partition_z_with_door(18.5, -39.8, -20.0, -29.5, DOOR_W, "ARCHITECTURE", true)
-	_partition_x_with_door(-39.8, -19.8, -20.0, -29.5, DOOR_W, "OWNER OFFICE", true)
-	_partition_x_with_door(-19.2, -2.2, -20.0, -10.8, DOOR_W, "SECRETARIAT", true)
-	_partition_x_with_door(-1.8, 18.2, -20.0, 8.0, DOOR_W, "MANAGEMENT", true)
-	_partition_x_with_door(18.8, 39.8, -20.0, 29.0, DOOR_W, "ARCHITECTURE", true)
-	# Engineering wing, meeting room, public lobby, QA, backend and API lab.
-	_partition_z_with_door(-19.5, -19.8, 4.0, -7.0, DOOR_W, "FRONTEND", false)
-	_partition_z_with_door(6.5, -19.8, 4.0, -7.0, DOOR_W, "BACKEND", true)
-	_partition_z_with_door(18.5, -19.8, 4.0, -7.0, DOOR_W, "API LAB", true)
-	_partition_x_with_door(-39.8, -19.8, 4.0, -29.5, DOOR_W, "BOARDROOM", false)
-	_partition_x_with_door(-19.2, 6.2, 4.0, -6.5, DOOR_W, "QA ENGINEERING", true)
-	_partition_x_with_door(6.8, 18.2, 4.0, 13.0, DOOR_W, "BACKEND", true)
-	_partition_x_with_door(18.8, 39.8, 4.0, 29.0, DOOR_W, "API LAB", true)
-	# South rooms: archive/print remain; area selatan-tengah menyatu dengan
-	# LOBBY (dinding lama x=-19.8..18.8 dihapus) supaya lobi lebih luas.
-	_partition_z_with_door(-19.5, 4.0, 25.0, 14.5, DOOR_W, "BOARDROOM", false)
-	_partition_z_with_door(18.5, 4.0, 25.0, 14.5, DOOR_W, "API LAB", true)
-	_partition_x_with_door(-39.8, -19.8, 25.0, -29.5, DOOR_W, "ARCHIVE & PRINT", false)
-	_partition_x_with_door(18.8, 39.8, 25.0, 29.0, DOOR_W, "PANTRY & LOUNGE", false)
-	# Pemisah ruang pribadi owner dari lobby baru.
-	_partition_z_with_door(-0.5, 25.0, 39.8, 32.5, DOOR_W, "OWNER LOUNGE", true)
-	_partition_x_with_door(-19.8, -0.5, 25.0, -12.5, 3.1, "OWNER SUITE", false)
-	# Frosted lower bands and door signage details.
+	# 3-floor HQ: L3 Owner, L2 core employees, L1 public/services. SAME 20 doors, same order/count.
+	# L3 (Owner)
+	_partition_z_with_door(-19.5, -39.8, -20.0, -29.5, DOOR_W, "RUANG OWNER", false, L3_Y) #1
+	# L2 (core employees)
+	_partition_z_with_door(-2.0, -39.8, -20.0, -29.5, DOOR_W, "SEKRETARIAT", false, L2_Y) #2
+	_partition_z_with_door(18.5, -39.8, -20.0, -29.5, DOOR_W, "ARSITEKTUR SISTEM", true, L2_Y) #3
+	# L3
+	_partition_x_with_door(-39.8, -19.8, -20.0, -29.5, DOOR_W, "RUANG OWNER", true, L3_Y) #4
+	# L2
+	_partition_x_with_door(-19.2, -2.2, -20.0, -10.8, DOOR_W, "SEKRETARIAT", true, L2_Y) #5
+	_partition_x_with_door(-1.8, 18.2, -20.0, 8.0, DOOR_W, "MANAJEMEN INTI", true, L2_Y) #6
+	_partition_x_with_door(18.8, 39.8, -20.0, 29.0, DOOR_W, "ARSITEKTUR SISTEM", true, L2_Y) #7
+	_partition_z_with_door(-19.5, -19.8, 4.0, -7.0, DOOR_W, "FRONTEND & DESAIN", false, L2_Y) #8
+	_partition_z_with_door(6.5, -19.8, 4.0, -7.0, DOOR_W, "BACKEND ENGINEERING", true, L2_Y) #9
+	# L1
+	_partition_z_with_door(18.5, -19.8, 4.0, -7.0, DOOR_W, "LAB API & INFRA", true, L1_Y) #10
+	_partition_x_with_door(-39.8, -19.8, 4.0, -29.5, DOOR_W, "RUANG RAPAT / BOARDROOM", false, L1_Y) #11
+	# L2
+	_partition_x_with_door(-19.2, 6.2, 4.0, -6.5, DOOR_W, "QA & TEST LAB", true, L2_Y) #12
+	_partition_x_with_door(6.8, 18.2, 4.0, 13.0, DOOR_W, "BACKEND ENGINEERING", true, L2_Y) #13
+	# L1
+	_partition_x_with_door(18.8, 39.8, 4.0, 29.0, DOOR_W, "LAB API & INFRA", true, L1_Y) #14
+	_partition_z_with_door(-19.5, 4.0, 25.0, 14.5, DOOR_W, "RUANG RAPAT / BOARDROOM", false, L1_Y) #15
+	_partition_z_with_door(18.5, 4.0, 25.0, 14.5, DOOR_W, "LAB API & INFRA", true, L1_Y) #16
+	_partition_x_with_door(-39.8, -19.8, 25.0, -29.5, DOOR_W, "ARSIP & CETAK", false, L1_Y) #17
+	_partition_x_with_door(18.8, 39.8, 25.0, 29.0, DOOR_W, "PANTRY & LOUNGE", false, L1_Y) #18
+	# L3 (Owner private)
+	_partition_z_with_door(-0.5, 25.0, 39.8, 32.5, DOOR_W, "LOUNGE PRIBADI OWNER", true, L3_Y) #19
+	_partition_x_with_door(-19.8, -0.5, 25.0, -12.5, 3.1, "SUITE OWNER", false, L3_Y) #20
 	for x in [-29, -11, 8, 29]:
-		_box("Glass privacy band", Vector3(x, 0.62, -20.0), Vector3(2.2, 0.36, 0.19), Color(0.72, 0.78, 0.73, 0.56), false, null, 0.28, 0.0, true)
+		_box("Glass privacy band", Vector3(x, L2_Y + 0.62, -20.0), Vector3(2.2, 0.36, 0.19), Color(0.72, 0.78, 0.73, 0.56), false, null, 0.28, 0.0, true)
+
+	
 
 func _build_room_floors() -> void:
-	# Distinct materials make the department layout readable at player height.
+	# 3-floor finishes: L1 public/services, L2 core employees, L3 Owner.
 	var carpet_tex = _create_noise_texture(128, Color("#9ca99a"), 0.05)
 	var carpet_mat = StandardMaterial3D.new()
-	carpet_mat.albedo_texture = carpet_tex
-	carpet_mat.roughness = 0.94
-	carpet_mat.metallic = 0.0
-	carpet_mat.uv1_scale = Vector3(4.0, 4.0, 1.0)
+	carpet_mat.albedo_texture = carpet_tex; carpet_mat.roughness = 0.94; carpet_mat.metallic = 0.0; carpet_mat.uv1_scale = Vector3(4.0, 4.0, 1.0)
 	_material_cache["carpet"] = carpet_mat
-
 	var stone_tex = _create_grid_texture(128, Color("#c8c4b8"), Color("#d3d2c8"), 32)
 	var stone_mat = StandardMaterial3D.new()
-	stone_mat.albedo_texture = stone_tex
-	stone_mat.roughness = 0.35
-	stone_mat.metallic = 0.05
-	stone_mat.uv1_scale = Vector3(6.0, 6.0, 1.0)
+	stone_mat.albedo_texture = stone_tex; stone_mat.roughness = 0.35; stone_mat.metallic = 0.05; stone_mat.uv1_scale = Vector3(6.0, 6.0, 1.0)
 	_material_cache["stone"] = stone_mat
-
 	var tile_tex = _create_grid_texture(128, Color("#b8b4a8"), Color("#c6c8bf"), 32)
 	var tile_mat = StandardMaterial3D.new()
-	tile_mat.albedo_texture = tile_tex
-	tile_mat.roughness = 0.28
-	tile_mat.metallic = 0.08
-	tile_mat.uv1_scale = Vector3(5.0, 5.0, 1.0)
+	tile_mat.albedo_texture = tile_tex; tile_mat.roughness = 0.28; tile_mat.metallic = 0.08; tile_mat.uv1_scale = Vector3(5.0, 5.0, 1.0)
 	_material_cache["tile"] = tile_mat
-
 	var carpet_material: StandardMaterial3D = _material_cache["carpet"]
 	var stone_material: StandardMaterial3D = _material_cache["stone"]
 	var tile_material: StandardMaterial3D = _material_cache["tile"]
-
-	_box("Owner carpet", Vector3(-29.5, 0.126, -29.7), Vector3(18.0, 0.035, 17.8), Color("#9ca99a"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
-	_box("Secretary carpet", Vector3(-10.8, 0.126, -29.7), Vector3(16.5, 0.035, 17.8), Color("#b2b9ad"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
-	_box("Manager carpet", Vector3(8.0, 0.126, -29.7), Vector3(19.8, 0.035, 17.8), Color("#aab5a9"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
-	_box("Architect carpet", Vector3(29.0, 0.126, -29.7), Vector3(20.4, 0.035, 17.8), Color("#a8b4bb"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
-	_box("Frontend carpet", Vector3(-29.5, 0.126, -7.8), Vector3(18.0, 0.035, 21.0), Color("#b1aaa0"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
-	_box("QA carpet", Vector3(-6.5, 0.126, -7.8), Vector3(25.0, 0.035, 21.0), Color("#a9b8ad"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
-	_box("Backend carpet", Vector3(24.0, 0.126, -7.8), Vector3(30.0, 0.035, 21.0), Color("#a9b1ad"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
-	_box("Meeting carpet", Vector3(-29.5, 0.126, 14.5), Vector3(18.0, 0.035, 20.0), Color("#a8a2b0"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
-	_box("Lobby stone floor", Vector3(-0.4, 0.126, 14.5), Vector3(38.0, 0.035, 20.0), Color("#d3d2c8"), false, null, 0.38, 0.05, false, Color.BLACK, stone_material)
-	_box("API lab floor", Vector3(29.0, 0.126, 14.5), Vector3(20.0, 0.035, 20.0), Color("#a8b6b8"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
-	_box("Archive floor", Vector3(-29.5, 0.126, 32.0), Vector3(18.0, 0.035, 14.0), Color("#b9ad9e"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
-	_box("Owner lounge floor", Vector3(-10.0, 0.126, 32.0), Vector3(18.7, 0.035, 14.0), Color("#b0987e"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
-	_box("Staff lounge floor", Vector3(9.0, 0.126, 32.0), Vector3(18.5, 0.035, 14.0), Color("#b9c6b8"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
-	_box("Pantry tile floor", Vector3(30.0, 0.126, 32.0), Vector3(23.5, 0.035, 14.0), Color("#c6c8bf"), false, null, 0.32, 0.08, false, Color.BLACK, tile_material)
-	# Flooring insets / transition strips.
-	for z in [-19.75, 4.2, 25.2]:
-		_box("Floor transition strip", Vector3(0, 0.15, z), Vector3(82, 0.045, 0.22), Color("#7e8b81"), false, null, 0.5, 0.18)
+	# L3 Owner (Design Bible): walnut herringbone (work) + Black Marquina feel (command) + warm lounge
+	_box("Owner marquina zone L3", Vector3(-29.5, L3_Y + 0.018, -34.8), Vector3(16.5, 0.035, 6.8), Color("#1a1d20"), false, null, 0.12, 0.04)
+	_box("Owner walnut herringbone L3", Vector3(-29.5, L3_Y + 0.018, -27.2), Vector3(16.5, 0.035, 10.2), Color("#8B5A2B"), false, null, 0.58, 0.02)
+	_box("Owner lounge floor L3", Vector3(-10.0, L3_Y + 0.018, 32.0), Vector3(18.7, 0.035, 14.0), Color("#8B5A2B"), false, null, 0.58, 0.02)
+	# L2 core employees (darker carpet tile for focus/sound)
+	for d in [["Secretary carpet L2",Vector3(-10.8,L2_Y+0.018,-29.7),Vector3(16.5,0.035,17.8),Color("#6f7872")],
+		["Manager carpet L2",Vector3(8.0,L2_Y+0.018,-29.7),Vector3(19.8,0.035,17.8),Color("#68746d")],
+		["Architect carpet L2",Vector3(29.0,L2_Y+0.018,-29.7),Vector3(20.4,0.035,17.8),Color("#66727a")],
+		["Frontend carpet L2",Vector3(-29.5,L2_Y+0.018,-7.8),Vector3(18.0,0.035,21.0),Color("#6e6862")],
+		["QA carpet L2",Vector3(-6.5,L2_Y+0.018,-7.8),Vector3(25.0,0.035,21.0),Color("#67756b")],
+		["Backend carpet L2",Vector3(24.0,L2_Y+0.018,-7.8),Vector3(30.0,0.035,21.0),Color("#656f6a")]]:
+		_box(d[0],d[1],d[2],d[3],false,null,0.94,0.0,false,Color.BLACK,carpet_material)
+	# L1 public/services (polished lobby stone/terrazzo, SSR-friendly) — Design Bible
+	_box("Meeting carpet L1", Vector3(-29.5, L1_Y + 0.018, 14.5), Vector3(18.0, 0.035, 20.0), Color("#7a7582"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
+	_box("Lobby stone floor L1", Vector3(-0.4, L1_Y + 0.018, 14.5), Vector3(38.0, 0.035, 20.0), Color("#e6e2d8"), false, null, 0.14, 0.03, false, Color.BLACK, stone_material)
+	_box("API lab floor L1", Vector3(29.0, L1_Y + 0.018, 14.5), Vector3(20.0, 0.035, 20.0), Color("#8a9698"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
+	_box("Archive floor L1", Vector3(-29.5, L1_Y + 0.018, 32.0), Vector3(18.0, 0.035, 14.0), Color("#a89c8e"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
+	_box("Staff lounge floor L1", Vector3(9.0, L1_Y + 0.018, 32.0), Vector3(18.5, 0.035, 14.0), Color("#a0ada0"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
+	_box("Pantry tile floor L1", Vector3(30.0, L1_Y + 0.018, 32.0), Vector3(23.5, 0.035, 14.0), Color("#d4d2c8"), false, null, 0.22, 0.06, false, Color.BLACK, tile_material)
+	var _fys: Array[float] = [L1_Y, L2_Y, L3_Y]
+	for fy: float in _fys:
+		for z in [-19.75, 4.2, 25.2]:
+			_box("Floor transition strip", Vector3(0, fy + 0.058, z), Vector3(82, 0.045, 0.22), Color("#7e8b81"), false, null, 0.5, 0.18)
 
 func _build_ceiling_and_lighting() -> void:
-	# Suspended acoustic ceiling: the roof is now present from first-person eye level.
-	# Individual panels leave narrow service gaps and recessed light channels.
-	for z in [-37.5, -18.5, 4.0, 25.0, 37.5]:
-		_box("Ceiling cross beam", Vector3(0, 5.22, z), Vector3(82, 0.18, 0.32), Color("#87948d"), false, null, 0.72, 0.12)
-	for x in [-40, -19.5, -2.0, 18.5, 40]:
-		_box("Ceiling spine", Vector3(x, 5.22, 0), Vector3(0.28, 0.18, 78), Color("#87948d"), false, null, 0.72, 0.12)
-	for tile_x in range(-38, 39, 4):
-		for tile_z in range(-37, 38, 5):
-			_box("Acoustic ceiling panel", Vector3(float(tile_x) + 2.0, CEIL_Y, float(tile_z) + 2.5), Vector3(3.70, 0.075, 4.68), Color("#e2e5df"), false, null, 0.92)
-	# HVAC return grilles add scale and break up the broad ceiling plane.
-	for point in [Vector3(-34,5.39,-27), Vector3(-14,5.39,-27), Vector3(8,5.39,-27), Vector3(30,5.39,-27), Vector3(-33,5.39,-4), Vector3(5,5.39,-4), Vector3(31,5.39,16), Vector3(8,5.39,34)]:
-		_box("HVAC ceiling grille", point, Vector3(0.95, 0.018, 0.42), Color("#87918c"), false, null, 0.62, 0.22)
-	var light_points := [Vector3(-29,-29, -28), Vector3(-10,-29,-28), Vector3(8,-29,-28), Vector3(29,-29,-28), Vector3(-29,-7,-7), Vector3(-6,-7,-7), Vector3(24,-7,-7), Vector3(-29, -7, 15), Vector3(-1,-7,15), Vector3(29,-7,15), Vector3(8,-7,33)]
-	for i in range(light_points.size()):
-		var point = light_points[i]
-		_box("Linear ceiling light", Vector3(point.x, CEIL_Y - 0.30, point.z), Vector3(4.6, 0.12, 0.55), Color("#f4f0df"), false, null, 0.22, 0.0, false, Color("#f5e8d0"))
-		var light := OmniLight3D.new()
-		light.position = Vector3(point.x, 4.72, point.z)
-		light.light_color = Color("#fff0d8")
-		light.light_energy = 0.42
-		light.omni_range = 11.0
-		# Enable shadows on alternating lights for quality without perf overhead.
-		light.shadow_enabled = i % 2 == 0
-		if light.shadow_enabled:
-			light.shadow_blur = 2.0
-		add_child(light)
-	# Lobby feature pendant lights, two rows across the expanded lobby.
+	# Per-floor ceilings/lighting (3 floors) + perimeter shadow gap/cove (tali air).
+	var _fys: Array[float] = [L1_Y, L2_Y, L3_Y]
+	for fy: float in _fys:
+		for z in [-37.5, -18.5, 4.0, 25.0, 37.5]:
+			_box("Ceiling cross beam", Vector3(0, fy + 5.22, z), Vector3(82, 0.18, 0.32), Color("#87948d"), false, null, 0.72, 0.12)
+		for x in [-40, -19.5, -2.0, 18.5, 40]:
+			_box("Ceiling spine", Vector3(x, fy + 5.22, 0), Vector3(0.28, 0.18, 78), Color("#87948d"), false, null, 0.72, 0.12)
+		# drop-ceiling perimeter shadow gap (keliling)
+		for zg in [-39.6, 39.6]:
+			_box("Ceiling shadow gap", Vector3(0, fy + 5.32, zg), Vector3(83.0, 0.035, 0.06), Color("#1a1f1d"), false, null, 0.9)
+			_box("Cove light", Vector3(0, fy + 5.28, zg + (-0.08 if zg > 0 else 0.08)), Vector3(78.0, 0.02, 0.05), Color("#f2dcb0"), false, null, 0.2, 0.0, false, Color("#ffe0a8"))
+		for xg in [-41.6, 41.6]:
+			_box("Ceiling shadow gap S", Vector3(xg, fy + 5.32, 0), Vector3(0.06, 0.035, 79.0), Color("#1a1f1d"), false, null, 0.9)
+		for tile_x in range(-38, 39, 4):
+			for tile_z in range(-37, 38, 5):
+				_box("Acoustic ceiling panel", Vector3(float(tile_x) + 2.0, fy + CEIL_Y, float(tile_z) + 2.5), Vector3(3.70, 0.075, 4.68), Color("#e2e5df"), false, null, 0.92)
+		for pt in [Vector3(-34,5.39,-27), Vector3(-14,5.39,-27), Vector3(8,5.39,-27), Vector3(30,5.39,-27), Vector3(-33,5.39,-4), Vector3(5,5.39,-4), Vector3(31,5.39,16), Vector3(8,5.39,34)]:
+			_box("HVAC ceiling grille", Vector3(pt.x, fy + pt.y, pt.z), Vector3(0.95, 0.018, 0.42), Color("#87918c"), false, null, 0.62, 0.22)
+		var light_points := [Vector3(-29,0,-29), Vector3(-10,0,-29), Vector3(8,0,-29), Vector3(29,0,-29), Vector3(-29,0,-7), Vector3(-6,0,-7), Vector3(24,0,-7), Vector3(-29,0,15), Vector3(-1,0,15), Vector3(29,0,15), Vector3(8,0,33)]
+		for i in range(light_points.size()):
+			var lp: Vector3 = light_points[i]
+			_box("Linear ceiling light", Vector3(lp.x, fy + CEIL_Y - 0.30, lp.z), Vector3(4.6, 0.12, 0.55), Color("#f4f0df"), false, null, 0.22, 0.0, false, Color("#f5e8d0"))
+			var light := OmniLight3D.new()
+			light.position = Vector3(lp.x, fy + 4.72, lp.z)
+			light.light_color = Color("#fff0d8"); light.light_energy = 0.38; light.omni_range = 10.5
+			light.shadow_enabled = (i % 3 == 0 and fy == L1_Y)
+			add_child(light)
+	# Lobby ring LED pendants only on L1 (grand)
 	for pendant_z in [15.0, 24.0, 31.5]:
 		for x in [-7.0, 0.0, 7.0]:
-			_cylinder("Pendant stem", Vector3(x, 4.14, pendant_z), 0.035, 2.45, Color("#596b63"))
-			_cylinder("Pendant shade", Vector3(x, 2.90, pendant_z), 0.46, 0.18, Color("#d5c49e"), null, false, 0.2)
-			# Emissive shade material for warm glow.
-			_box("Pendant glow", Vector3(x, 2.84, pendant_z), Vector3(0.38, 0.06, 0.38), Color("#f5e0b8"), false, null, 0.22, 0.0, false, Color("#f8ecca"))
+			_cylinder("Pendant stem", Vector3(x, L1_Y + 4.14, pendant_z), 0.035, 2.45, Color("#596b63"))
+			_cylinder("Pendant shade", Vector3(x, L1_Y + 2.90, pendant_z), 0.46, 0.18, Color("#d5c49e"), null, false, 0.2)
+			_box("Pendant glow", Vector3(x, L1_Y + 2.84, pendant_z), Vector3(0.38, 0.06, 0.38), Color("#f5e0b8"), false, null, 0.22, 0.0, false, Color("#f8ecca"))
 			var pendant_light := OmniLight3D.new()
-			pendant_light.position = Vector3(x, 2.76, pendant_z)
-			pendant_light.light_color = Color("#ffe8c8")
-			pendant_light.light_energy = 0.35
-			pendant_light.omni_range = 5.5
-			pendant_light.shadow_enabled = false
+			pendant_light.position = Vector3(x, L1_Y + 2.76, pendant_z)
+			pendant_light.light_color = Color("#ffe8c8"); pendant_light.light_energy = 0.35; pendant_light.omni_range = 5.5
 			add_child(pendant_light)
 
 func _add_workstation(position: Vector3, title: String, wood: Color = Color("#9c8062"), dual_monitor: bool = true, rotation_y: float = 0.0) -> void:
+	var p := position + Vector3(0, _floor_y, 0)
 	var root := Node3D.new()
-	root.position = position
+	root.position = p
 	root.rotation.y = rotation_y
 	add_child(root)
 	# Desk top, apron and four metal legs.
@@ -728,18 +1036,20 @@ func _add_workstation(position: Vector3, title: String, wood: Color = Color("#9c
 	for x in [-1.22, 1.22]:
 		for z in [-0.55, 0.55]:
 			_box("Desk metal leg", Vector3(x, 0.39, z), Vector3(0.10, 0.76, 0.10), Color("#58635e"), false, root, 0.3, 0.62)
+	# Cable tray (under-desk, tidy core-team look) — visual only
+	_box("Cable tray", Vector3(0, 0.52, -0.18), Vector3(2.15, 0.06, 0.22), Color("#2C302E"), false, root, 0.45, 0.25)
 	# Drawer unit.
 	_box("Desk drawer cabinet", Vector3(-1.02, 0.42, -0.30), Vector3(0.48, 0.78, 0.92), Color("#8b735c"), true, root)
 	for y in [0.24, 0.47, 0.70]:
 		_box("Drawer face", Vector3(-1.02, y, 0.18), Vector3(0.40, 0.17, 0.035), Color("#b89b79"), false, root)
 		_box("Drawer handle", Vector3(-1.02, y, 0.145), Vector3(0.18, 0.035, 0.035), Color("#d0b783"), false, root, 0.25, 0.65)
-	# Monitor arm and displays.
-	_cylinder("Monitor stand", Vector3(0, 1.01, -0.43), 0.055, 0.32, Color("#65716c"), root, false, 0.5)
+	# Monitor arm and bezel-less displays.
+	_cylinder("Monitor stand", Vector3(0, 1.01, -0.43), 0.045, 0.30, Color("#65716c"), root, false, 0.5)
+	_box("Monitor arm bar", Vector3(0, 1.18, -0.44), Vector3(1.25, 0.04, 0.05), Color("#2C302E"), false, root, 0.35, 0.35)
 	var monitor_positions := [Vector3(-0.52, 1.43, -0.44), Vector3(0.52, 1.43, -0.44)] if dual_monitor else [Vector3(0, 1.43, -0.44)]
 	for monitor_pos in monitor_positions:
-		_box("Monitor bezel", monitor_pos, Vector3(0.94, 0.68, 0.12), Color("#25333a"), false, root, 0.33, 0.18)
-		_box("Monitor display", monitor_pos + Vector3(0, 0, 0.069), Vector3(0.82, 0.55, 0.025), Color("#29444a"), false, root, 0.24, 0.08, false, Color("#315e55"))
-		_box("Monitor status bar", monitor_pos + Vector3(0, -0.21, 0.086), Vector3(0.65, 0.025, 0.012), Color("#9fc5a9"), false, root, 0.25, 0.0, false, Color("#78b58e"))
+		_box("Monitor shell", monitor_pos, Vector3(0.92, 0.60, 0.035), Color("#1a1f22"), false, root, 0.3, 0.2)
+		_box("Monitor display", monitor_pos + Vector3(0, 0, 0.022), Vector3(0.88, 0.56, 0.012), Color("#29444a"), false, root, 0.18, 0.06, false, Color("#315e55"))
 	# Keyboard, mouse, notebook, mug and desk accessories.
 	_box("Keyboard", Vector3(0.02, 0.94, 0.27), Vector3(0.86, 0.045, 0.30), Color("#35434a"), false, root, 0.45, 0.12)
 	_box("Keyboard keys", Vector3(0.02, 0.966, 0.27), Vector3(0.76, 0.012, 0.22), Color("#aeb8ad"), false, root, 0.62)
@@ -752,9 +1062,7 @@ func _add_workstation(position: Vector3, title: String, wood: Color = Color("#9c
 	_cylinder("Desk lamp base", Vector3(-1.03, 0.96, -0.42), 0.18, 0.06, Color("#69766f"), root, false, 0.45)
 	_cylinder("Desk lamp neck", Vector3(-1.03, 1.17, -0.42), 0.035, 0.42, Color("#69766f"), root, false, 0.5)
 	_cylinder("Desk lamp shade", Vector3(-1.03, 1.39, -0.42), 0.20, 0.11, Color("#c7ad80"), root, false, 0.3)
-	# Emissive lamp glow.
 	_box("Lamp glow", Vector3(-1.03, 1.36, -0.42), Vector3(0.28, 0.04, 0.28), Color("#f5e8c8"), false, root, 0.22, 0.0, false, Color("#f8edcc"))
-	# Desk lamp warm pool of light.
 	var desk_lamp := OmniLight3D.new()
 	desk_lamp.position = Vector3(-1.03, 1.30, -0.42)
 	desk_lamp.light_color = Color("#ffe8b8")
@@ -762,11 +1070,10 @@ func _add_workstation(position: Vector3, title: String, wood: Color = Color("#9c
 	desk_lamp.omni_range = 3.0
 	desk_lamp.shadow_enabled = false
 	root.add_child(desk_lamp)
-	# Ergonomic chair and floor mat. Chair faces the monitor (-Z).
-	var chair_position := position + root.transform.basis * Vector3(0, 0, 1.55)
+	# Ergonomic chair and floor mat. Chair faces the monitor (-Z). (SEAT REGISTRY PRESERVED)
+	var chair_position := p + root.transform.basis * Vector3(0, 0, 1.55)
 	_add_office_chair(chair_position, Color("#52675f"), rotation_y, title.split("  /  ")[0] + " · Chair")
 	_box("Desk floor mat", Vector3(0, 0.145, 1.45), Vector3(2.1, 0.025, 1.95), Color("#737f78"), false, root)
-	_label(title, Vector3(0, 2.35, -0.04), 0.0055, Color("#f3f1e8"), root)
 	# Workstation label only visible when player is close — keeps the office clean.
 	var ws_label: Label3D = _label(title, Vector3(0, 2.35, -0.04), 0.0055, Color("#f3f1e8"), root)
 	ws_label.set("visibility_range_end", 6.0)
@@ -775,10 +1082,11 @@ func _add_workstation(position: Vector3, title: String, wood: Color = Color("#9c
 func _add_office_chair(position: Vector3, color: Color = Color("#52675f"), facing: float = 0.0, seat_label: String = "Kursi Kantor") -> void:
 	# Kursi kantor swivel: SEMUA kursi punya dudukan/sandaran penuh dan teregistrasi
 	# sebagai titik duduk bebas. Pivot "ChairSwivel" berputar mengikuti pemain.
+	var p := position + Vector3(0, _floor_y, 0)
 	var root := Node3D.new()
 	root.name = "OfficeChair_%02d" % _office_chair_index
 	_office_chair_index += 1
-	root.position = position
+	root.position = p
 	root.rotation.y = facing
 	add_child(root)
 	_cylinder("Chair gas lift", Vector3(0, 0.20, 0), 0.045, 0.20, Color("#889291"), root, false, 0.55)
@@ -796,11 +1104,11 @@ func _add_office_chair(position: Vector3, color: Color = Color("#52675f"), facin
 	for x in [-0.54, 0.54]:
 		_box("Chair arm support", Vector3(x, 0.74, -0.02), Vector3(0.10, 0.42, 0.12), Color("#485852"), false, swivel)
 		_box("Chair arm pad", Vector3(x, 0.94, 0.04), Vector3(0.19, 0.08, 0.58), Color("#3e5049"), false, swivel)
-	seats.append({"position": Vector3(position.x, 0.0, position.z), "yaw": facing, "kind": "office", "pivot": swivel, "label": seat_label})
+	seats.append({"position": Vector3(p.x, p.y, p.z), "yaw": facing, "kind": "office", "pivot": swivel, "label": seat_label})
 
-func _add_shelf(position: Vector3, width: float, height: float, depth: float, label_text: String) -> void:
+func _add_shelf(position: Vector3, width: float, height: float, depth: float, label_text: String, y_off: float = 0.0) -> void:
 	var root := Node3D.new()
-	root.position = position
+	root.position = position + Vector3(0, y_off + _floor_y, 0)
 	add_child(root)
 	_box("Shelf side", Vector3(-width * 0.5, height * 0.5, 0), Vector3(0.12, height, depth), Color("#866a50"), true, root)
 	_box("Shelf side", Vector3(width * 0.5, height * 0.5, 0), Vector3(0.12, height, depth), Color("#866a50"), true, root)
@@ -813,46 +1121,75 @@ func _add_shelf(position: Vector3, width: float, height: float, depth: float, la
 	_label(label_text, Vector3(0, height + 0.42, 0), 0.005, Color("#f0ede3"), root)
 
 func _build_reception() -> void:
-	# Lobby tamu: dinding brand di ujung utara area resepsionis dengan teks
-	# timbul, meja resepsionis menghadap pintu masuk, dan lounge simetris.
-	_box("Reception brand wall", Vector3(0, 2.65, 17.4), Vector3(22.0, 4.8, 0.30), Color("#32493f"), true)
+	# L1 Zone A (Public Impression): feature wall, floating reception desk, waiting lounge.
+	var slate := Color("#2c302e"); var oak := Color("#8a6a46"); var cyan := Color("#44d8e8")
+	_box("Reception brand wall", Vector3(0, 2.65, 17.4), Vector3(22.0, 4.8, 0.30), slate, true, null, 0.55)
+	# fluted vertical oak/metal accent bands
 	for x in range(-10, 11):
-		_box("Brand wall slat", Vector3(float(x) * 1.05, 2.65, 17.58), Vector3(0.05, 4.55, 0.05), Color("#44615a"), false)
-		_box("Brand wall slat cap", Vector3(float(x) * 1.05, 4.98, 17.58), Vector3(0.09, 0.06, 0.10), Color("#5b7266"), false)
-	# Papan nama perusahaan: huruf timbul (embossed) menghadap pintu masuk.
-	_raised_text("BANGKAH", Vector3(0, 3.16, 17.66), 0, 0.84, 0.10, Color("#e2c98c"))
-	_label("Teknologi  ·  Engineering  ·  Inovasi", Vector3(0, 2.30, 17.70), 0.0052, Color("#d6dfd4"))
-	# Meja resepsionis: sisi tampil menghadap tamu (+Z / pintu masuk).
-	_box("Reception counter front", Vector3(0, 0.86, 20.8), Vector3(11.2, 1.55, 1.05), Color("#80664e"), true)
-	_box("Reception counter side left", Vector3(-5.25, 0.86, 19.95), Vector3(0.70, 1.55, 1.75), Color("#80664e"), true)
-	_box("Reception counter side right", Vector3(5.25, 0.86, 19.95), Vector3(0.70, 1.55, 1.75), Color("#80664e"), true)
-	_box("Reception counter stone top", Vector3(0, 1.68, 20.72), Vector3(11.6, 0.16, 1.48), Color("#d6c6ad"), false, null, 0.24, 0.08)
-	_box("Reception brand strip", Vector3(0, 0.88, 21.35), Vector3(6.8, 0.18, 0.045), Color("#c2a36e"), false)
-	for x in [-4.8, -3.9, -3.0, -2.1, -1.2, -0.3, 0.6, 1.5, 2.4, 3.3, 4.2, 5.1]:
-		_box("Counter fluting", Vector3(x, 0.85, 21.36), Vector3(0.055, 1.28, 0.045), Color("#b89a74"), false)
-	_label("VISITOR CHECK-IN", Vector3(0, 1.55, 21.40), 0.0052, Color("#fff7e6"))
-	# Terminal & perlengkapan di sisi staf (sisi utara meja).
-	_box("Reception monitor bezel", Vector3(0, 2.03, 20.30), Vector3(1.55, 0.88, 0.14), Color("#29383d"), false, null, 0.3, 0.16)
-	_box("Reception monitor screen", Vector3(0, 2.04, 20.21), Vector3(1.34, 0.68, 0.025), Color("#31534b"), false, null, 0.2, 0.0, false, Color("#5e9b7c"))
-	_box("Reception keyboard", Vector3(-1.0, 1.80, 20.75), Vector3(0.85, 0.04, 0.28), Color("#46524e"), false)
-	_box("Visitor sign-in book", Vector3(1.35, 1.80, 20.72), Vector3(0.72, 0.06, 0.48), Color("#d2c5a9"), false)
-	_cylinder("Reception pen cup", Vector3(2.1, 1.88, 20.45), 0.12, 0.25, Color("#5b7168"))
-	# Meja logo: aksen etalase di atas brand wall.
-	_box("Brand wall shelf", Vector3(0, 1.06, 17.95), Vector3(9.4, 0.10, 0.62), Color("#8a6f52"), false)
-	for x in [-4.2, 4.2]:
-		_box("Brand shelf bracket", Vector3(x, 0.58, 17.95), Vector3(0.08, 0.95, 0.10), Color("#5e7266"), false)
-	# Lounge tamu simetris: dua sofa saling menghadap meja kopi di tengah.
-	_add_lounge_sofa(Vector3(-7.2, 0, 15.0), PI * 0.5, Color("#738a80"), 2.6)
-	_add_lounge_sofa(Vector3(7.2, 0, 15.0), -PI * 0.5, Color("#738a80"), 2.6)
-	_box("Lobby coffee table", Vector3(0, 0.46, 15.0), Vector3(3.0, 0.18, 1.55), Color("#a98562"), false)
-	_box("Lobby coffee tray", Vector3(0, 0.58, 15.0), Vector3(2.4, 0.05, 1.1), Color("#7b6856"), false)
-	for x in [-11.2, 11.2]:
-		_add_plant(Vector3(x, 0, 10.0), 1.15)
-		_box("Visitor side table", Vector3(x, 0.38, 17.6), Vector3(1.0, 0.12, 0.8), Color("#9d8365"), false)
+		var col: Color = oak.darkened(0.08) if absi(x) % 2 == 0 else slate.lightened(0.06)
+		_box("Brand wall slat", Vector3(float(x) * 1.05, 2.65, 17.58), Vector3(0.06, 4.55, 0.05), col, false, null, 0.5)
+	# Backlit 3D logo BANGKAH (cyan glow)
+	_box("Backlit logo panel", Vector3(0, 3.22, 17.62), Vector3(8.4, 1.15, 0.06), Color("#14181b"), false, null, 0.25, 0.5)
+	_box("Logo glow bar", Vector3(0, 2.72, 17.66), Vector3(7.8, 0.05, 0.04), cyan, false, null, 0.2, 0.0, false, cyan)
+	_painted_text("BANGKAH", Vector3(0, 3.22, 17.70), 0.0, 0.019, Color("#e8fbff"), Color(0.02,0.06,0.08,0.4))
+	_label("HEADQUARTERS  ·  TECHNOLOGY  ·  ENGINEERING", Vector3(0, 2.45, 17.72), 0.0046, Color("#b9d8d8"))
+	# Floating curved reception desk: marble top + fluted oak base + under-desk warm glow
+	_box("Reception base oak", Vector3(0, 0.62, 20.85), Vector3(10.6, 1.05, 0.95), oak, true, null, 0.52)
+	_box("Reception base curve L", Vector3(-5.6, 0.62, 20.5), Vector3(1.3, 1.05, 0.8), oak, true, null, 0.52)
+	_box("Reception base curve R", Vector3(5.6, 0.62, 20.5), Vector3(1.3, 1.05, 0.8), oak, true, null, 0.52)
+	for fx in range(-10, 11):
+		_box("Reception flute", Vector3(float(fx)*0.5, 0.62, 21.34), Vector3(0.06, 0.95, 0.03), oak.darkened(0.14), false, null, 0.58)
+	_box("Reception marble top", Vector3(0, 1.22, 20.78), Vector3(11.8, 0.14, 1.45), Color("#f3efe6"), false, null, 0.14, 0.03)
+	_box("Reception underglow", Vector3(0, 0.12, 20.7), Vector3(10.0, 0.03, 0.9), Color("#f0d8a8"), false, null, 0.2, 0.0, false, Color("#ffd9a0"))
+	_box("Reception brand strip", Vector3(0, 0.72, 21.38), Vector3(6.8, 0.10, 0.03), cyan, false, null, 0.2, 0.0, false, cyan)
+	_label("VISITOR CHECK-IN", Vector3(0, 1.12, 21.45), 0.0048, Color("#fff7e6"))
+	_box("Reception monitor bezel", Vector3(0, 1.62, 20.30), Vector3(1.55, 0.88, 0.14), Color("#29383d"), false)
+	_box("Reception monitor screen", Vector3(0, 1.63, 20.21), Vector3(1.34, 0.68, 0.025), Color("#31534b"), false, null, 0.2, 0.0, false, Color("#5e9b7c"))
+	_box("Reception keyboard", Vector3(-1.0, 1.32, 20.75), Vector3(0.85, 0.04, 0.28), Color("#46524e"), false)
+	_box("Visitor sign-in book", Vector3(1.35, 1.32, 20.72), Vector3(0.72, 0.06, 0.48), Color("#d2c5a9"), false)
+
+	# Zone B: Security turnstiles (flap barrier feel) — centered, clear 3m+ clearance to core
+	for tx in [-2.6, 0.0, 2.6]:
+		_box("Turnstile housing", Vector3(tx, 0.52, 15.2), Vector3(0.55, 1.02, 0.95), Color("#1f2326"), true, null, 0.3, 0.35)
+		_box("Turnstile glass flap", Vector3(tx, 0.78, 14.78), Vector3(0.05, 0.62, 0.55), Color(0.72,0.84,0.90,0.22), false, null, 0.06, 0.02, true)
+		_box("Turnstile reader", Vector3(tx+0.30, 0.88, 15.0), Vector3(0.08, 0.18, 0.10), Color("#0f1416"), false, null, 0.25, 0.0, false, Color("#52c49a"))
+		_box("Turnstile arrow", Vector3(tx, 1.08, 14.72), Vector3(0.22, 0.08, 0.02), Color("#52c49a"), false, null, 0.2, 0.0, false, Color("#62d4aa"))
+	_box("Turnstile rail", Vector3(0, 0.52, 15.2), Vector3(7.2, 0.06, 0.06), Color("#2a3034"), false, null, 0.35, 0.35)
+	# Digital Directory Totem beside turnstile (relocated off center)
+	_box("Directory totem base", Vector3(5.4, 0.35, 15.2), Vector3(0.65, 0.7, 0.45), Color("#1f2326"), false, null, 0.35, 0.4)
+	_box("Directory totem frame", Vector3(5.4, 1.55, 15.2), Vector3(0.82, 2.0, 0.12), Color("#14181b"), false, null, 0.25, 0.45)
+	_box("Directory totem screen", Vector3(5.4, 1.55, 15.27), Vector3(0.70, 1.78, 0.03), Color("#0d1a20"), false, null, 0.12, 0.0, false, Color("#2aa8c8"))
+	_painted_text("DIRECTORY / PETA", Vector3(5.4, 1.95, 15.30), 0.0, 0.0022, Color("#dff8ff"), Color(0,0,0,0))
+	_painted_text("L1 LAYANAN  L2 TIM  L3 OWNER", Vector3(5.4, 1.45, 15.30), 0.0, 0.0016, Color("#9ad7c2"), Color(0,0,0,0))
+
+	# Zone A: Waiting lounge — cognac/charcoal leather low-profile, wool rug, marble coffee table, textured plants
+	_box("Lobby wool rug", Vector3(0, 0.155, 10.8), Vector3(14.5, 0.04, 5.8), Color("#5a5f63"), false, null, 0.95)
+	_add_lounge_sofa(Vector3(-5.8, 0, 10.8), PI * 0.5, Color("#3a3f43"), 3.0) # charcoal leather
+	_add_lounge_sofa(Vector3(5.8, 0, 10.8), -PI * 0.5, Color("#8a5a3a"), 3.0) # cognac leather
+	_box("Lobby coffee table base", Vector3(0, 0.34, 10.8), Vector3(0.9, 0.32, 0.9), Color("#1f2326"), false, null, 0.3, 0.25)
+	_box("Lobby coffee table top", Vector3(0, 0.52, 10.8), Vector3(2.2, 0.08, 1.35), Color("#2a2f33"), false, null, 0.14, 0.04) # dark marble
+	for x in [-10.5, 10.5]:
+		_box("Planter box tall", Vector3(x, 0.55, 10.8), Vector3(0.85, 1.05, 0.85), Color("#b7bdb6"), false, null, 0.55)
+		_add_plant(Vector3(x, 1.05, 10.8), 1.05) # Monstera/textured feel (procedural)
+	# Centerpiece linear pendant over reception/waiting (replaces scattered feel) + track lights by turnstile
+	_box("Lobby linear pendant", Vector3(0, 4.75, 15.8), Vector3(8.5, 0.06, 0.26), Color("#1f2326"), false, null, 0.3, 0.25)
+	_box("Lobby linear glow", Vector3(0, 4.71, 15.8), Vector3(8.1, 0.03, 0.18), Color("#f4e6c8"), false, null, 0.2, 0.0, false, Color("#ffe6b8"))
+	_box("Track rail", Vector3(0, 5.15, 15.2), Vector3(6.5, 0.04, 0.08), Color("#1f2326"), false, null, 0.35, 0.4)
+	for sx in [-2.4, 0.0, 2.4]:
+		_box("Track spot", Vector3(sx, 5.08, 15.2), Vector3(0.18, 0.12, 0.12), Color("#2a3034"), false, null, 0.3, 0.35)
+		var sl := SpotLight3D.new()
+		sl.position = Vector3(sx, 5.0, 15.2)
+		sl.rotation_degrees = Vector3(-90, 0, 0)
+		sl.light_color = Color("#fff0d8"); sl.light_energy = 0.22; sl.spot_range = 7.0; sl.spot_angle = 38.0
+		sl.shadow_enabled = false
+		add_child(sl)
+	# Perimeter ceiling shadow gap (tali air) L1 lobby
+	_box("Lobby shadow gap", Vector3(0, 5.32, 39.62), Vector3(36.0, 0.03, 0.05), Color("#1a1f1d"), false, null, 0.9)
 
 func _add_lounge_sofa(position: Vector3, rotation_y: float, color: Color, width: float = 2.8) -> void:
+	var p := position + Vector3(0, _floor_y, 0)
 	var root := Node3D.new()
-	root.position = position
+	root.position = p
 	root.rotation.y = rotation_y
 	add_child(root)
 	_box("Sofa base", Vector3(0, 0.40, 0), Vector3(width, 0.72, 1.04), color, false, root)
@@ -864,34 +1201,96 @@ func _add_lounge_sofa(position: Vector3, rotation_y: float, color: Color, width:
 	# Registrasi dua titik duduk sofa; pemain menghadap +z lokal (yaw = PI
 	# terhadap rotasi sofa) supaya tepat duduk menghadap ruangan.
 	for sx in [width * 0.24, -width * 0.24]:
-		var world_sit := Vector3(position.x + cos(rotation_y) * sx, 0.0, position.z - sin(rotation_y) * sx)
+		var world_sit := Vector3(p.x + cos(rotation_y) * sx, p.y, p.z - sin(rotation_y) * sx)
 		seats.append({"position": world_sit, "yaw": rotation_y + PI, "kind": "sofa", "pivot": null, "label": "Sofa"})
 
 func _build_owner_suite() -> void:
-	_label("OWNER  /  PRIVATE OFFICE", Vector3(-29.5, 3.55, -38.1), 0.006)
-	_box("Owner office feature wall", Vector3(-29.5, 2.0, -38.95), Vector3(16.5, 3.8, 0.16), Color("#435c50"), true)
-	_box("Owner office crest", Vector3(-29.5, 2.75, -38.82), Vector3(5.2, 1.05, 0.12), Color("#b69b70"), false)
-	_label("BANGKAH  /  OWNER", Vector3(-29.5, 2.73, -38.72), 0.007)
-	# Main executive desk with return, triple displays and visitor seating.
-	_add_workstation(Vector3(-29.3, 0, -31.3), "OWNER  /  WORKSTATION", Color("#6f5945"), true)
-	_box("Owner desk return", Vector3(-33.2, 0.72, -30.4), Vector3(1.25, 1.4, 2.6), Color("#745a43"), true)
-	_box("Owner desk return top", Vector3(-33.2, 1.46, -30.4), Vector3(1.38, 0.12, 2.72), Color("#c8aa83"), false)
-	_add_lounge_sofa(Vector3(-29.5, 0, -22.5), 0.0, Color("#60796e"), 3.6)
-	_box("Owner coffee table", Vector3(-29.5, 0.44, -25.0), Vector3(2.5, 0.16, 1.15), Color("#a98461"), false)
-	_add_plant(Vector3(-37.1, 0, -22.5), 0.95)
-	_add_plant(Vector3(-21.9, 0, -22.5), 0.95)
+	# L3 Executive Suite (mewah/modern, terisi rapi). Seat/workstation registries PRESERVED.
+	_label("LANTAI 3  /  EXECUTIVE SUITE  /  OWNER", Vector3(-29.5, 3.55, -38.1), 0.006)
+	var walnut := Color("#6b4a2e"); var matte := Color("#1f2326"); var slate := Color("#2c302e")
+	var brass := Color("#c7a85a"); var smoke := Color(0.18,0.20,0.22,0.35); var leather := Color("#3b3028")
+	# Fluted/slate feature wall + cove warm strip (modern, not old)
+	_box("Owner fluted wall", Vector3(-29.5, 2.0, -38.95), Vector3(16.8, 3.9, 0.18), slate, true)
+	for fx in range(-8,9):
+		_box("Flute", Vector3(-29.5 + fx*1.0, 2.0, -38.84), Vector3(0.10, 3.7, 0.06), Color("#343a36"), false)
+	_box("Cove LED warm", Vector3(-29.5, 3.78, -38.78), Vector3(14.5, 0.06, 0.06), Color("#f2d9a6"), false, null, 0.2, 0.0, false, Color("#ffdca0"))
+	_box("Owner crest", Vector3(-29.5, 3.05, -38.82), Vector3(4.8, 0.85, 0.10), walnut, false)
+	_painted_text("BANGKAH  /  OWNER", Vector3(-29.5, 3.05, -38.74), 0.0, 0.0065, Color("#f0dfb0"), Color(0,0,0,0))
+	# Floor zoning: polished dark marble (work) + dark walnut herringbone feel (lounge)
+	_box("Marble work zone", Vector3(-29.5, 0.16, -31.2), Vector3(16.5, 0.03, 11.5), Color("#232628"), false, null, 0.12, 0.02)
+	_box("Walnut lounge zone", Vector3(-29.5, 0.16, -24.2), Vector3(16.5, 0.03, 6.8), Color("#4a3523"), false, null, 0.55)
+	_box("Area rug", Vector3(-29.5, 0.185, -24.0), Vector3(8.5, 0.02, 4.2), Color("#4a4f53"), false, null, 0.92)
+	# A) EXECUTIVE WORKSTATION (seat/workstation PRESERVED at -29.3,0,-31.3 / OWNER-PC-001)
+	_add_workstation(Vector3(-29.3, 0, -31.3), "OWNER  /  EXECUTIVE DESK", walnut, true)
+	# Design Bible: floating curved walnut desk (visual overlay; seat/ID unchanged)
+	_box("Exec desk slab", Vector3(-29.3, 0.79, -31.25), Vector3(5.4, 0.11, 2.3), walnut, false, null, 0.44)
+	_box("Exec desk curve L", Vector3(-31.75, 0.79, -30.85), Vector3(1.5, 0.11, 1.6), walnut, false, null, 0.44)
+	_box("Exec desk curve R", Vector3(-26.85, 0.79, -30.85), Vector3(1.5, 0.11, 1.6), walnut, false, null, 0.44)
+	_box("Desk underglow", Vector3(-29.3, 0.63, -31.25), Vector3(4.8, 0.03, 1.9), Color("#FFD166"), false, null, 0.2, 0.0, false, Color("#FFD166"))
+	# Wall Monitor Array — 6 bezel-less AI/server displays (visual; workstation/registry unchanged)
+	_box("Monitor array panel", Vector3(-29.5, 2.35, -38.72), Vector3(11.2, 2.5, 0.10), matte, false)
+	for mi in range(6):
+		var mx := -33.8 + float(mi) * 1.72
+		var ec: Color = [Color("#00FFFF"),Color("#55d6b0"),Color("#6aa8ff"),Color("#00FFFF"),Color("#55d6b0"),Color("#6aa8ff")][mi]
+		_box("Wall monitor shell", Vector3(mx, 2.35, -38.65), Vector3(1.62, 1.95, 0.025), Color("#0a0f12"), false, null, 0.18)
+		_box("Wall monitor", Vector3(mx, 2.35, -38.63), Vector3(1.56, 1.88, 0.012), Color("#0f171a"), false, null, 0.14, 0.0, false, ec)
+	_label("COMMAND CENTER · AI / SERVER / OMNISERVE", Vector3(-29.5, 3.72, -38.58), 0.0042, Color("#00FFFF"))
+	_box("Chair premium headrest", Vector3(-29.3, 1.55, -29.9), Vector3(0.62, 0.22, 0.10), leather, false, null, 0.7)
+	# B) PRIVATE LOUNGE & ENTERTAINMENT (keep existing sofa seat registration)
+	_add_lounge_sofa(Vector3(-29.5, 0, -22.5), 0.0, Color("#7a5230"), 3.8) # cognac leather, PRESERVES 2 sofa seats
+	_box("Stagger table A", Vector3(-30.4, 0.42, -24.6), Vector3(1.5, 0.08, 1.1), Color("#1f2326"), false, null, 0.1, 0.02) # black marble
+	_box("Stagger table B", Vector3(-28.6, 0.34, -24.9), Vector3(1.3, 0.08, 1.0), Color("#ece7dc"), false, null, 0.12, 0.02)
+	# OLED + fluted entertainment wall
+	_box("Entertainment fluted", Vector3(-29.5, 2.0, -20.55), Vector3(9.5, 3.2, 0.12), Color("#3a3028"), false)
+	_box("OLED TV", Vector3(-29.5, 2.25, -20.46), Vector3(4.8, 2.2, 0.05), Color("#101418"), false, null, 0.12, 0.0, false, Color("#2a5a6a"))
+	_box("TV bias light", Vector3(-29.5, 2.25, -20.42), Vector3(5.0, 2.4, 0.02), Color("#f0d8a8"), false, null, 0.2, 0.0, false, Color("#ffd9a0"))
+	_box("Soundbar", Vector3(-29.5, 1.05, -20.44), Vector3(3.2, 0.12, 0.10), matte, false, null, 0.3, 0.2)
+	# Biometric reader by suite entry (visual)
+	_box("Biometric panel", Vector3(-20.2, 1.45, -19.9), Vector3(0.12, 0.22, 0.08), Color("#14181b"), false, null, 0.25, 0.4)
+	_box("Biometric glow", Vector3(-20.2, 1.45, -19.85), Vector3(0.08, 0.14, 0.02), Color("#2aa8c8"), false, null, 0.2, 0.0, false, Color("#44d8ff"))
+	_box("PC glass rig", Vector3(-33.6, 0.95, -21.4), Vector3(0.9, 1.5, 0.8), smoke, false, null, 0.08, 0.02, true)
+	_box("Rig glow", Vector3(-33.6, 1.0, -21.38), Vector3(0.6, 0.9, 0.02), Color("#6ad0ff"), false, null, 0.2, 0.0, false, Color("#58c8ff"))
+	# C) MINI BAR & COFFEE CORNER
+	_box("Mini bar counter", Vector3(-22.4, 0.95, -35.8), Vector3(3.4, 0.14, 1.2), Color("#1c1f22"), false, null, 0.12, 0.05)
+	_box("Bar waterfall", Vector3(-22.4, 0.48, -36.4), Vector3(3.4, 0.96, 0.10), Color("#1c1f22"), false, null, 0.12, 0.05)
+	_box("Espresso", Vector3(-23.2, 1.28, -35.8), Vector3(0.55, 0.55, 0.55), Color("#7a8488"), false, null, 0.25, 0.6)
+	_box("Under fridge", Vector3(-21.5, 0.55, -35.8), Vector3(0.9, 1.0, 0.9), smoke, false, null, 0.08, 0.02, true)
+	_box("Glass rack", Vector3(-22.4, 1.85, -36.1), Vector3(2.2, 0.08, 0.35), matte, false)
+	for gx in [-23.0,-22.4,-21.8]: _box("Goblet", Vector3(gx, 1.65, -36.05), Vector3(0.08,0.28,0.08), Color(0.85,0.9,0.95,0.35), false, null, 0.05,0.0,true)
+	# D) TROPHY & HOBBY GALLERY (floating shelves, backlit)
+	for sd in [[1.2,3.8],[2.0,3.2],[2.8,2.6]]:
+		var sy: float = float(sd[0]); var sw: float = float(sd[1])
+		_box("Floating shelf", Vector3(-37.2, sy, -27.5), Vector3(0.35, 0.06, sw), walnut, false)
+		_box("Shelf backlight", Vector3(-37.05, sy-0.05, -27.5), Vector3(0.02, 0.02, sw-0.2), Color("#ffd9a0"), false, null, 0.2, 0.0, false, Color("#ffc978"))
+	_box("Plaque", Vector3(-37.05, 1.45, -28.6), Vector3(0.03, 0.45, 0.35), Color("#d7c08a"), false, null, 0.25, 0.4)
+	_box("Cert frame", Vector3(-37.05, 2.25, -28.8), Vector3(0.03, 0.55, 0.42), matte, false)
+	_box("Keyboard display", Vector3(-37.05, 2.95, -27.2), Vector3(0.18, 0.08, 0.55), Color("#2a2f33"), false)
+	_add_plant(Vector3(-37.3, 0, -22.2), 1.35) # Monstera-like large corner plant
+	_add_plant(Vector3(-21.6, 0, -22.2), 1.1)
+	# Keep STRATEGY shelf + command markers (relocated already) and tray (PRESERVED coords)
 	_add_shelf(Vector3(-37.2, 0.18, -34.3), 2.2, 2.5, 0.8, "STRATEGY")
-	# Paper tray on the right side of the desk, visible as a physical object.
+	# Command center side array kept as accent (separate from wall array above)
+	_box("Command frame side", Vector3(-21.1, 2.25, -30.0), Vector3(0.12, 2.8, 8.5), Color("#3a4542"), false)
+	for mz in [-33.2,-31.1,-29.0,-26.9]:
+		for my in [1.55,2.35,3.15]:
+			_box("Side cmd", Vector3(-21.02, my, mz), Vector3(0.03, 0.62, 1.55), Color("#1f3b3a"), false, null, 0.18, 0.0, false, Color("#4bbf9a"))
+	# En-suite + Balcony (frameless sliding glass door + railing to city view)
+	_box("En-suite frame", Vector3(-38.7, 1.35, -34.5), Vector3(0.10, 2.7, 1.6), walnut, false)
+	_label("EN-SUITE", Vector3(-38.58, 2.55, -34.5), 0.0038, Color("#e8dcc8"))
+	_box("Balcony sliding glass", Vector3(-29.5, 1.55, -20.32), Vector3(4.2, 3.0, 0.08), Color(0.72,0.84,0.90,0.18), false, null, 0.06, 0.02, true)
+	_box("Balcony frame", Vector3(-29.5, 3.08, -20.32), Vector3(4.4, 0.10, 0.12), matte, false)
+	# Balcony outside (on L3 edge) — simple outdoor deck with glass railing
+	_box("Balcony deck", Vector3(-29.5, L3_Y + 0.06 - _floor_y, -18.6), Vector3(5.6, 0.12, 3.2), Color("#6a5a48"), true)
+	_box("Balcony rail glass", Vector3(-29.5, L3_Y + 1.05 - _floor_y, -17.05), Vector3(5.4, 1.1, 0.06), Color(0.78,0.88,0.94,0.18), false, null, 0.06, 0.02, true)
+	for bx in [-31.9,-27.1]: _box("Balcony chair", Vector3(bx, L3_Y + 0.42 - _floor_y, -18.6), Vector3(0.9,0.55,0.9), Color("#8a7a66"), true)
+	_box("Balcony table", Vector3(-29.5, L3_Y + 0.38 - _floor_y, -18.6), Vector3(0.7,0.08,0.7), Color("#d8d2c6"), false)
+	_label("BALKON PRIBADI", Vector3(-29.5, L3_Y + 1.35 - _floor_y, -17.15), 0.0036, Color("#eaf2ee"))
+	# Paper tray (PRESERVED position relative to workstation/main interactable)
 	_box("Owner in tray base", Vector3(-27.2, 1.05, -31.25), Vector3(0.90, 0.16, 0.78), Color("#536b61"), false)
 	_box("Owner in tray left", Vector3(-27.66, 1.24, -31.25), Vector3(0.07, 0.34, 0.82), Color("#c0c7bc"), false)
 	_box("Owner in tray right", Vector3(-26.74, 1.24, -31.25), Vector3(0.07, 0.34, 0.82), Color("#c0c7bc"), false)
-	for i in range(4):
-		_box("Paper stack in tray", Vector3(-27.2, 1.16 + float(i) * 0.035, -31.25), Vector3(0.70, 0.025, 0.61), Color("#f0eee3"), false)
+	for i in range(4): _box("Paper stack in tray", Vector3(-27.2, 1.16 + float(i) * 0.035, -31.25), Vector3(0.70, 0.025, 0.61), Color("#f0eee3"), false)
 	_label("INBOX TRAY", Vector3(-27.2, 1.72, -31.25), 0.0038, Color("#e8efe7"))
-	# Display wall, framed certificates and acoustic panels.
-	for x in [-35.4, -29.5, -23.6]:
-		_box("Executive wall art frame", Vector3(x, 2.3, -21.0), Vector3(2.2, 1.35, 0.09), Color("#6a7c70"), false)
-		_box("Executive wall art", Vector3(x, 2.3, -20.93), Vector3(1.98, 1.12, 0.035), Color("#c6cfc4"), false)
 
 func _build_secretary_office() -> void:
 	_label("EXECUTIVE SECRETARY", Vector3(-10.5, 3.55, -38.1), 0.006)
@@ -907,9 +1306,14 @@ func _build_secretary_office() -> void:
 	_box("Secretary pinboard", Vector3(-10.8, 2.35, -38.71), Vector3(4.28, 1.48, 0.035), Color("#b8c4b5"), false)
 	for x in [-12.2, -10.8, -9.4]:
 		_box("Agenda card", Vector3(x, 2.35, -38.66), Vector3(0.95, 1.10, 0.04), Color("#e4d7b8"), false)
+	# Standing agenda board near lift/stair landing (L2, visual) + directory hint
+	_box("Agenda stand post", Vector3(-1.2, 0.75, -21.6), Vector3(0.08, 1.5, 0.08), Color("#2a3034"), false, null, 0.3, 0.45)
+	_box("Agenda stand board", Vector3(-1.2, 1.55, -21.52), Vector3(1.5, 1.0, 0.06), Color("#1f2326"), false, null, 0.28, 0.4)
+	_box("Agenda stand screen", Vector3(-1.2, 1.55, -21.48), Vector3(1.34, 0.84, 0.03), Color("#142028"), false, null, 0.15, 0.0, false, Color("#4aa8a0"))
+	_painted_text("AGENDA PERUSAHAAN", Vector3(-1.2, 1.82, -21.45), PI, 0.0024, Color("#eaf6f2"), Color(0,0,0,0))
 
 func _build_management_offices() -> void:
-	_label("ENGINEERING  /  LEADERSHIP", Vector3(8.0, 3.5, -38.1), 0.006)
+	_label("LANTAI 2  /  CORE LEADERSHIP", Vector3(8.0, 3.5, -38.1), 0.006)
 	# Arman and Sinta occupy an open management suite with planning boards.
 	_add_workstation(Vector3(5.8, 0, -31.3), "ARMAN  /  LEAD MANAGER", Color("#876d54"), true)
 	_add_workstation(Vector3(13.2, 0, -31.3), "SINTA  /  PROJECT MANAGER", Color("#8e7763"), true)
@@ -965,19 +1369,27 @@ func _build_engineering_floor() -> void:
 	_add_plant(Vector3(10.0, 0, -2.2), 0.85)
 
 func _build_meeting_room() -> void:
-	_label("BOARDROOM  /  MEETING ROOM", Vector3(-29.5, 3.45, 4.4), 0.0057)
+	_label("LANTAI 1  /  MAIN BOARDROOM", Vector3(-29.5, 3.45, 4.4), 0.0057)
 	var table_center := Vector3(-29.5, 0, 14.3)
-	_box("Boardroom table top", table_center + Vector3(0, 0.82, 0), Vector3(10.8, 0.18, 3.1), Color("#886b50"), true)
-	for x in [-4.7, 4.7]:
-		for z in [-1.1, 1.1]:
-			_box("Boardroom table pedestal", table_center + Vector3(x, 0.4, z), Vector3(0.28, 0.78, 0.28), Color("#586a62"), false)
-	# Ten physically placed chairs support a full engineering review with room
-	# for the Owner and observers. Seats align with the local meeting positions.
+	# Oval-feel boardroom table (layered) + leather chairs (registry preserved: 10 seats)
+	_box("Boardroom table top", table_center + Vector3(0, 0.82, 0), Vector3(10.2, 0.16, 3.0), Color("#6f563f"), true, null, 0.38)
+	_box("Boardroom table cap L", table_center + Vector3(-5.1, 0.82, 0), Vector3(1.1, 0.16, 2.4), Color("#6f563f"), false, null, 0.38)
+	_box("Boardroom table cap R", table_center + Vector3(5.1, 0.82, 0), Vector3(1.1, 0.16, 2.4), Color("#6f563f"), false, null, 0.38)
+	for x in [-4.2, 4.2]:
+		_box("Boardroom table pedestal", table_center + Vector3(x, 0.4, 0), Vector3(0.32, 0.78, 1.2), Color("#2f3538"), false, null, 0.35, 0.25)
+	# 10 chairs (same count/positions/yaws as before)
 	for x in [-4.2, -2.1, 0.0, 2.1, 4.2]:
 		_add_meeting_chair(table_center + Vector3(x, 0, -2.55), PI)
 		_add_meeting_chair(table_center + Vector3(x, 0, 2.55), 0.0)
-	_box("Boardroom display frame", Vector3(-29.5, 2.2, 5.05), Vector3(6.3, 2.25, 0.18), Color("#33464c"), false)
-	_box("Boardroom display screen", Vector3(-29.5, 2.2, 4.93), Vector3(5.92, 1.9, 0.03), Color("#28464b"), false, null, 0.18, 0.0, false, Color("#477f76"))
+	# Reeded-glass partition feel overlay on boardroom front (privacy, light passes)
+	_box("Boardroom reeded glass", Vector3(-29.5, 2.1, 4.28), Vector3(14.5, 3.6, 0.05), Color(0.78,0.84,0.82,0.22), false, null, 0.18, 0.0, true)
+	for rx in range(-7, 8):
+		_box("Reed", Vector3(-29.5 + float(rx)*0.95, 2.1, 4.31), Vector3(0.06, 3.5, 0.02), Color(0.88,0.92,0.90,0.28), false, null, 0.14, 0.0, true)
+	_box("Boardroom display frame", Vector3(-29.5, 2.2, 5.05), Vector3(6.6, 2.35, 0.18), Color("#1f2326"), false, null, 0.3, 0.35)
+	_box("Boardroom display screen", Vector3(-29.5, 2.2, 4.93), Vector3(6.2, 2.0, 0.03), Color("#142028"), false, null, 0.16, 0.0, false, Color("#3a7a8a"))
+	# Linear pendant above table
+	_box("Boardroom linear pendant", Vector3(-29.5, 3.25, 14.3), Vector3(7.5, 0.06, 0.22), Color("#1f2326"), false, null, 0.3, 0.25)
+	_box("Boardroom linear glow", Vector3(-29.5, 3.21, 14.3), Vector3(7.2, 0.03, 0.16), Color("#f4e6c8"), false, null, 0.2, 0.0, false, Color("#ffe6b8"))
 	_box("Boardroom whiteboard frame", Vector3(-38.7, 1.9, 15.0), Vector3(0.13, 2.2, 6.5), Color("#6e7b74"), false)
 	_box("Boardroom whiteboard", Vector3(-38.61, 1.9, 15.0), Vector3(0.03, 1.92, 6.2), Color("#e6e9e1"), false)
 	_box("Boardroom credenza", Vector3(-29.5, 0.7, 23.2), Vector3(8.0, 1.35, 0.72), Color("#7b6856"), true)
@@ -985,8 +1397,9 @@ func _build_meeting_room() -> void:
 		_cylinder("Meeting water bottle", Vector3(x, 1.49, 23.2), 0.10, 0.42, Color("#91b2af"), null, false, 0.1)
 
 func _add_meeting_chair(position: Vector3, rotation_y: float) -> void:
+	var p := position + Vector3(0, _floor_y, 0)
 	var root := Node3D.new()
-	root.position = position
+	root.position = p
 	root.rotation.y = rotation_y
 	add_child(root)
 	# Kursi rapat dengan pivot swivel supaya bisa ikut berputar saat pemain
@@ -1000,22 +1413,25 @@ func _add_meeting_chair(position: Vector3, rotation_y: float) -> void:
 	for x in [-0.35, 0.35]:
 		for z in [-0.28, 0.28]:
 			_box("Meeting chair leg", Vector3(x, 0.27, z), Vector3(0.08, 0.55, 0.08), Color("#596a63"), false, root, 0.35, 0.5)
-	seats.append({"position": position, "yaw": rotation_y, "kind": "meeting", "pivot": swivel, "label": "Kursi Rapat"})
+	seats.append({"position": Vector3(p.x, p.y, p.z), "yaw": rotation_y, "kind": "meeting", "pivot": swivel, "label": "Kursi Rapat"})
 
 func _build_api_lab() -> void:
 	_label("API  /  INFRASTRUCTURE LAB", Vector3(29.0, 3.45, 4.4), 0.0057)
 	_add_workstation(Vector3(29.0, 0, 12.65), "NAYA  /  API SPECIALIST", Color("#987f5b"), true)
-	# Two compact server racks and diagnostics board.
+	# Server racks, glowing LEDs (cyan/tech), diagnostics — visual; workstation/seat preserved.
+	var rack := Color("#344247"); var ledc := Color("#00FFFF")
 	for x in [21.0, 24.0, 37.0]:
-		_box("Infrastructure rack", Vector3(x, 1.35, 22.0), Vector3(1.8, 2.65, 0.95), Color("#344247"), true)
-		for level in range(5):
-			var y := 0.48 + float(level) * 0.43
-			_box("Rack equipment", Vector3(x, y, 21.49), Vector3(1.52, 0.32, 0.06), Color("#202f35"), false)
-			for led in range(4):
-				_sphere("Rack LED", Vector3(x - 0.55 + float(led) * 0.17, y, 21.43), 0.035, Color("#73c49a"), Vector3.ONE)
-	_box("API topology board", Vector3(30.0, 2.4, 24.65), Vector3(7.2, 1.55, 0.12), Color("#334a48"), false)
+		_box("Infrastructure rack", Vector3(x, 1.35, 22.0), Vector3(1.8, 2.65, 0.95), rack, true, null, 0.45, 0.2)
+		for level in range(6):
+			var y := 0.42 + float(level) * 0.38
+			_box("Rack equipment", Vector3(x, y, 21.49), Vector3(1.52, 0.28, 0.06), Color("#202f35"), false)
+			for led in range(5):
+				var lc: Color = ledc if (level+led)%3!=0 else Color("#52ff9a")
+				_sphere("Rack LED", Vector3(x - 0.58 + float(led) * 0.145, y, 21.44), 0.028, lc, Vector3.ONE)
+	_box("API topology board frame", Vector3(30.0, 2.4, 24.65), Vector3(7.4, 1.65, 0.14), Color("#1f2326"), false, null, 0.3, 0.4)
+	_box("API topology board", Vector3(30.0, 2.4, 24.56), Vector3(7.1, 1.38, 0.04), Color("#0f1820"), false, null, 0.2, 0.0, false, Color("#1e5060"))
 	for x in [27.0, 29.0, 31.0, 33.0]:
-		_box("API topology node", Vector3(x, 2.4, 24.55), Vector3(0.75, 0.48, 0.04), Color("#a6c2ad"), false)
+		_box("API topology node", Vector3(x, 2.4, 24.52), Vector3(0.75, 0.48, 0.03), Color("#7fd4d8"), false, null, 0.2, 0.0, false, Color("#3aa8b0"))
 
 func _build_archive_and_print() -> void:
 	_label("COMPANY ARCHIVE  /  PRINT ROOM", Vector3(-29.5, 3.45, 25.8), 0.0057)
@@ -1035,11 +1451,9 @@ func _build_archive_and_print() -> void:
 	_box("Archive counter top", Vector3(-27.4, 1.50, 29.5), Vector3(5.3, 0.14, 1.05), Color("#c4a984"), false)
 	_add_plant(Vector3(-21.5, 0, 37.3), 0.8)
 
-func _build_pantry_and_lounge() -> void:
-	_label("PANTRY  /  STAFF LOUNGE", Vector3(10.0, 3.45, 25.8), 0.0057)
-	# Ruang pribadi Owner (sebelumnya Promotion studio yang kosong): ruang
-	# santai privat dengan area duduk, perpustakaan, kitchenette dan TV.
-	_label("OWNER  /  RUANG PRIBADI", Vector3(-10.0, 3.45, 25.8), 0.0054)
+func _build_owner_private_lounge() -> void:
+	# L3 — Ruang pribadi Owner
+	_label("LANTAI 3  /  OWNER  /  RUANG PRIBADI", Vector3(-10.0, 3.45, 25.8), 0.0054)
 	_box("Owner lounge accent wall", Vector3(-10.0, 1.95, 39.72), Vector3(18.6, 3.7, 0.10), Color("#6b4a38"), false)
 	_box("Owner lounge accent trim", Vector3(-10.0, 0.42, 39.66), Vector3(18.6, 0.10, 0.05), Color("#c5a366"), false)
 	_box("Owner lounge rug", Vector3(-10.0, 0.16, 32.0), Vector3(15.0, 0.06, 9.0), Color("#7c5f4a"), false)
@@ -1049,107 +1463,72 @@ func _build_pantry_and_lounge() -> void:
 	_box("Owner lounge table top", Vector3(-10.0, 0.80, 32.6), Vector3(3.45, 0.12, 1.55), Color("#c8aa83"), false)
 	_cylinder("Owner lounge mug", Vector3(-10.8, 0.97, 32.4), 0.09, 0.14, Color("#e7e1d4"))
 	_box("Owner lounge book stack", Vector3(-9.2, 0.90, 32.8), Vector3(0.55, 0.16, 0.40), Color("#5e756a"), false)
-	# TV wall panel di seberang sofa.
 	_box("Owner lounge TV frame", Vector3(-10.0, 2.05, 25.45), Vector3(5.4, 1.95, 0.14), Color("#2f3f3c"), false)
 	_box("Owner lounge TV screen", Vector3(-10.0, 2.05, 25.36), Vector3(5.05, 1.62, 0.03), Color("#1c2f36"), false, null, 0.18, 0.0, false, Color("#3f6d68"))
 	_box("Owner lounge TV bar", Vector3(-10.0, 1.18, 25.40), Vector3(3.2, 0.08, 0.05), Color("#35464a"), false)
-	# Perpustakaan pribadi.
 	_add_shelf(Vector3(-17.5, 0.16, 36.5), 3.4, 2.65, 0.9, "PERPUSTAKAAN PRIBADI")
 	_add_shelf(Vector3(-17.5, 0.16, 29.5), 3.4, 2.65, 0.9, "KOLEKSI")
-	# Kitchenette pribadi.
 	_box("Owner kitchenette cabinet", Vector3(-3.4, 0.72, 36.5), Vector3(3.6, 1.42, 1.05), Color("#7c6853"), false)
 	_box("Owner kitchenette countertop", Vector3(-3.4, 1.48, 36.35), Vector3(3.8, 0.14, 1.25), Color("#d3cbb9"), false)
 	_box("Owner kitchenette kettle", Vector3(-3.9, 1.75, 36.2), Vector3(0.34, 0.42, 0.34), Color("#3b4e4b"), false)
 	_cylinder("Owner kitchenette mug", Vector3(-3.1, 1.62, 36.2), 0.09, 0.14, Color("#e7e1d4"))
 	_box("Owner mini fridge", Vector3(-1.9, 0.65, 38.3), Vector3(0.9, 1.25, 0.85), Color("#c4cbc6"), false, null, 0.28, 0.3)
-	# Lampu lantai hangat + tanaman + dekorasi.
 	_cylinder("Owner floor lamp pole", Vector3(-4.4, 0.85, 28.5), 0.045, 1.6, Color("#596b63"))
 	_box("Owner floor lamp glow", Vector3(-4.4, 1.72, 28.5), Vector3(0.42, 0.10, 0.42), Color("#f5e0b8"), false, null, 0.22, 0.0, false, Color("#f8ecca"))
 	var owner_lamp := OmniLight3D.new()
-	owner_lamp.position = Vector3(-4.4, 1.85, 28.5)
-	owner_lamp.light_color = Color("#ffe8c8")
-	owner_lamp.light_energy = 0.38
-	owner_lamp.omni_range = 7.0
-	owner_lamp.shadow_enabled = false
+	owner_lamp.position = Vector3(-4.4, _floor_y + 1.85, 28.5)
+	owner_lamp.light_color = Color("#ffe8c8"); owner_lamp.light_energy = 0.38; owner_lamp.omni_range = 7.0
 	add_child(owner_lamp)
-	_add_plant(Vector3(-18.0, 0, 26.5), 0.95)
-	_add_plant(Vector3(-2.8, 0, 26.5), 0.95)
-	_add_plant(Vector3(-18.0, 0, 38.5), 1.05)
+	_add_plant(Vector3(-18.0, 0, 26.5), 0.95); _add_plant(Vector3(-2.8, 0, 26.5), 0.95); _add_plant(Vector3(-18.0, 0, 38.5), 1.05)
 	_add_framed_poster(Vector3(-19.62, 2.1, 32.5), Color("#c5a366"), "OWNER")
 	_add_wall_clock(Vector3(-10.0, 3.0, 39.65))
 	_box("Owner lounge sideboard", Vector3(-2.9, 0.72, 29.5), Vector3(3.2, 1.38, 0.70), Color("#8b735c"), false)
 	_box("Owner lounge sideboard top", Vector3(-2.9, 1.46, 29.5), Vector3(3.4, 0.12, 0.84), Color("#c8aa83"), false)
 	_cylinder("Owner lounge vase", Vector3(-3.6, 1.72, 29.5), 0.16, 0.30, Color("#5e756a"))
 	_box("Owner lounge book pile", Vector3(-2.2, 1.62, 29.5), Vector3(0.5, 0.22, 0.36), Color("#7889a8"), false)
-	# Kitchen run: upper cabinets, counter, sink, fridge, coffee and microwave.
-	_box("Pantry lower cabinets", Vector3(29.0, 0.72, 36.5), Vector3(18.5, 1.42, 1.10), Color("#8d7b68"), true)
-	_box("Pantry countertop", Vector3(29.0, 1.48, 36.35), Vector3(18.8, 0.14, 1.30), Color("#d3cbb9"), false)
-	for x in [22.0, 27.0, 32.0, 37.0]:
-		_box("Pantry upper cabinet", Vector3(x, 2.55, 38.25), Vector3(3.8, 1.15, 0.52), Color("#a18d74"), false)
-		_box("Pantry cabinet handle", Vector3(x, 2.52, 37.96), Vector3(0.42, 0.045, 0.06), Color("#d1b987"), false, null, 0.3, 0.55)
+
+func _build_staff_pantry_lounge() -> void:
+	# L1 — Pantry & staff lounge
+	_label("LANTAI 1  /  PANTRY  /  STAFF LOUNGE", Vector3(10.0, 3.45, 25.8), 0.0057)
+	# Pantry/coffee — keeps `coffee` interactable anchor (22.5,0,34.8 in main.gd) coherent.
+	_box("Pantry island bar", Vector3(27.5, 0.88, 29.0), Vector3(9.0, 1.62, 1.45), Color("#3a3f43"), true, null, 0.4)
+	_box("Pantry island top", Vector3(27.5, 1.73, 29.0), Vector3(9.25, 0.16, 1.65), Color("#d8d2c8"), false, null, 0.2, 0.06)
+	_box("Coffee machine", Vector3(22.5, 2.00, 36.05), Vector3(1.0, 0.92, 0.80), Color("#2C302E"), false, null, 0.35, 0.25)
+	_box("Coffee machine screen", Vector3(22.5, 2.15, 35.62), Vector3(0.58, 0.25, 0.035), Color("#89b7a3"), false, null, 0.18, 0.0, false, Color("#00FFFF"))
 	_box("Pantry sink", Vector3(34.0, 1.58, 36.15), Vector3(1.8, 0.08, 0.75), Color("#7b8c86"), false, null, 0.2, 0.48)
 	_cylinder("Pantry faucet", Vector3(34.0, 1.89, 35.8), 0.045, 0.54, Color("#bcc7c1"), null, false, 0.85)
-	_box("Coffee machine", Vector3(22.5, 2.00, 36.05), Vector3(1.0, 0.92, 0.80), Color("#3b4e4b"), false)
-	_box("Coffee machine screen", Vector3(22.5, 2.15, 35.62), Vector3(0.58, 0.25, 0.035), Color("#89b7a3"), false, null, 0.18, 0.0, false, Color("#5a9b7d"))
 	_box("Microwave", Vector3(26.0, 2.0, 36.05), Vector3(1.25, 0.72, 0.78), Color("#77847f"), false)
 	_box("Refrigerator", Vector3(38.5, 1.45, 31.8), Vector3(1.7, 2.75, 1.55), Color("#c4cbc6"), true, null, 0.28, 0.3)
-	_box("Fridge handle", Vector3(37.72, 1.55, 31.1), Vector3(0.07, 0.75, 0.08), Color("#77857f"), false, null, 0.3, 0.6)
-	# Dining island and stools.
-	_box("Pantry island", Vector3(27.5, 0.88, 29.0), Vector3(9.0, 1.62, 1.45), Color("#92775b"), true)
-	_box("Pantry island stone top", Vector3(27.5, 1.73, 29.0), Vector3(9.25, 0.16, 1.65), Color("#d8d0be"), false)
 	for x in [24.2, 27.5, 30.8]:
 		_cylinder("Bar stool stem", Vector3(x, 0.55, 26.9), 0.075, 0.98, Color("#65736d"), null, false, 0.55)
 		_cylinder("Bar stool seat", Vector3(x, 1.08, 26.9), 0.42, 0.14, Color("#61796e"))
-	# Lounge zone with a softer rug and small group seating.
+	# Staff lounge — sofas use cognac/charcoal palette (seats preserved via _add_lounge_sofa)
 	_box("Lounge rug", Vector3(9.0, 0.16, 32.0), Vector3(16.0, 0.06, 9.5), Color("#87998d"), false)
-	_add_lounge_sofa(Vector3(7.0, 0, 29.2), 0.0, Color("#687f73"), 3.8)
-	_add_lounge_sofa(Vector3(7.0, 0, 35.0), PI, Color("#687f73"), 3.8)
-	_box("Lounge coffee table", Vector3(7.0, 0.48, 32.1), Vector3(3.3, 0.15, 1.35), Color("#a98561"), false)
-	_add_plant(Vector3(15.0, 0, 29.0), 1.0)
-	_add_plant(Vector3(15.0, 0, 35.0), 1.0)
+	_add_lounge_sofa(Vector3(7.0, 0, 29.2), 0.0, Color("#8B5A2B"), 3.8) # cognac
+	_add_lounge_sofa(Vector3(7.0, 0, 35.0), PI, Color("#3a3f43"), 3.8)  # charcoal
+	_box("Lounge coffee table", Vector3(7.0, 0.48, 32.1), Vector3(3.3, 0.15, 1.35), Color("#2a2f33"), false, null, 0.14, 0.04)
+	_add_plant(Vector3(15.0, 0, 29.0), 1.0); _add_plant(Vector3(15.0, 0, 35.0), 1.0)
 	_box("Lounge wall display", Vector3(9.0, 2.1, 38.75), Vector3(5.6, 2.0, 0.14), Color("#41544b"), false)
 	_box("Lounge display screen", Vector3(9.0, 2.1, 38.65), Vector3(5.25, 1.66, 0.03), Color("#254039"), false, null, 0.18, 0.0, false, Color("#426d57"))
 
 ## Kursi bebas yang tidak terikat workstation: klaster lounge di lobby luas
 ## plus kursi geser di QA supaya setiap bengkel/jabatan punya tempat duduk.
-func _build_free_seating() -> void:
-	# Klaster duduk lobby: karpet hangat, meja kopi kecil, empat kursi swivel.
-	# Ditempatkan rapi di sisi barat pintu masuk, jalur tengah tetap kosong.
-	_box("Lobby seating rug", Vector3(-8.0, 0.14, 27.8), Vector3(6.6, 0.03, 5.6), Color("#b58f7d"), false, null, 0.9)
-	_box("Lobby coffee table base", Vector3(-8.0, 0.42, 27.8), Vector3(1.15, 0.30, 1.75), Color("#9a7958"), true, null, 0.4)
-	_box("Lobby coffee table tray", Vector3(-8.0, 0.595, 27.8), Vector3(0.95, 0.05, 1.55), Color("#7b6856"), false, null, 0.42, 0.1)
-	for chair in [
-		{"pos": Vector3(-9.8, 0, 26.2), "yaw": 0.0},
-		{"pos": Vector3(-6.2, 0, 26.2), "yaw": 0.0},
-		{"pos": Vector3(-9.8, 0, 29.4), "yaw": PI},
-		{"pos": Vector3(-6.2, 0, 29.4), "yaw": PI},
-	]:
-		_add_office_chair(chair["pos"], Color("#5f776d"), chair["yaw"], "Kursi Tamu Lobby")
-	# Tiga kursi geser di ruang QA untuk rapat cepat / pairing.
-	for chair in [
-		{"pos": Vector3(-4.5, 0, -3.2), "yaw": PI},
-		{"pos": Vector3(-0.5, 0, -3.2), "yaw": PI},
-		{"pos": Vector3(3.5, 0, -3.2), "yaw": PI},
-	]:
-		_add_office_chair(chair["pos"], Color("#62807c"), chair["yaw"], "Kursi Kolaborasi QA")
-
-## Papan informasi tamu: direktori ruangan & pengumuman di sisi pintu masuk,
-## jadwal rapat di dekat Boardroom. Semua menghadap jalur pengunjung.
 func _build_information_boards() -> void:
-	_info_board("InfoDirectory", Vector3(10.8, 0, 34.4), -0.35, "DIREKTORI RUANGAN", [
-		"Utara: Owner Office · Secretariat",
-		"Utara: Management · Architecture",
-		"Barat: Frontend · QA Engineering",
-		"Barat: Boardroom · Archive & Print",
-		"Timur: Backend · API Lab · Pantry",
-		"Tengah: Resepsionis · ekstensi 100",
+	# L1 Zone B — Digital Directory / announcements placed beside security/columns (not blocking flow)
+	_info_board("InfoDirectory", Vector3(9.2, 0, 16.8), -PI * 0.5, "DIREKTORI RUANGAN", [
+		"L1: Resepsionis · Security · Boardroom",
+		"L1: Lab API & Infra · Arsip & Cetak",
+		"L1: Pantry & Staff Lounge",
+		"L2: Sekretariat · Manajemen · Arsitektur",
+		"L2: Frontend/Desain · QA · Backend",
+		"L3: Executive Suite / Ruang Owner",
 	])
-	_info_board("InfoAnnounce", Vector3(-10.8, 0, 34.4), 0.35, "PENGUMUMAN MINGGU INI", [
+	_info_board("InfoAnnounce", Vector3(-9.2, 0, 16.8), PI * 0.5, "PENGUMUMAN MINGGU INI", [
 		"Senin 09.00 · All-hands (Boardroom)",
 		"Selasa 14.00 · Fire drill area lobby",
 		"Kamis 13.00 · Sharing sesi QA",
 		"Jumat 15.00 · Sprint review",
-		"Kopi & donat tiap Jumat 16.00",
+		"Akses via kartu / Security Turnstile",
 	])
 	_info_board("InfoBoardroom", Vector3(-19.35, 0, 17.8), PI * 0.5, "JADWAL BOARDROOM", [
 		"Senin 09.00 · All-hands",
@@ -1159,116 +1538,141 @@ func _build_information_boards() -> void:
 		"Pemesanan: hubungi resepsionis",
 	], 2.1, 1.9)
 
-func _build_accent_walls() -> void:
-	# Cat aksen pada dinding fitur per ruangan — warna tenang sesuai palet
-	# desain, pemasangan sebagai panel tipis agar tidak mengubah struktur.
-	# Boardroom: panel terakota mengapit display + lis kuningan di whiteboard.
+func _build_accent_walls_l1() -> void:
 	for x in [-35.5, -23.5]:
 		_box("Boardroom terracotta accent", Vector3(x, 1.95, 4.86), Vector3(2.4, 2.9, 0.08), Color("#9a6a58"), false)
 		_box("Boardroom accent trim", Vector3(x, 0.48, 4.87), Vector3(2.4, 0.10, 0.09), Color("#c5a366"), false)
 	_box("Boardroom brass line", Vector3(-39.68, 0.75, 15.0), Vector3(0.06, 0.12, 6.0), Color("#c5a366"), false)
-	# Owner suite: wainscot walnut + lis kuningan di bawah crest fitur.
-	_box("Owner wainscot walnut", Vector3(-29.5, 0.55, -38.88), Vector3(16.5, 0.85, 0.06), Color("#6b5238"), false)
-	_box("Owner brass trim", Vector3(-29.5, 1.02, -38.89), Vector3(16.5, 0.09, 0.06), Color("#c5a366"), false)
-	# Management: panel sage di atas sprint board.
-	_box("Management sage accent", Vector3(8.2, 3.15, -38.80), Vector3(6.4, 0.70, 0.06), Color("#6f8a7a"), false)
-	# Engineering: band slate-teal setinggi sandaran kursi di sisi selatan.
-	_box("Engineering slate band", Vector3(0.0, 0.70, 3.86), Vector3(36.0, 1.0, 0.05), Color("#4c666a"), false)
-	# API lab: panel grafit di dinding timur.
 	_box("API graphite accent", Vector3(39.74, 1.95, 14.5), Vector3(0.06, 2.9, 5.0), Color("#3a4a4d"), false)
-	for y in [1.2, 1.95, 2.7]:
-		_box("API accent node", Vector3(39.70, y, 14.5), Vector3(0.04, 0.5, 0.5), Color("#73c49a"), false, null, 0.2, 0.0, false, Color("#5b9b7e"))
-	# Lobby: panel pasir hangat di balik direktori + medali lantai + bangku.
 	_box("Lobby sand accent", Vector3(12.05, 1.60, 28.2), Vector3(0.08, 3.2, 2.6), Color("#b8a88e"), false)
 	_cylinder("Lobby floor medallion", Vector3(11.8, 0.16, 28.2), 2.1, 0.05, Color("#7c8a7e"), null, false, 0.4)
 	_cylinder("Lobby medallion inner", Vector3(11.8, 0.20, 28.2), 1.35, 0.055, Color("#9aa78f"), null, false, 0.4)
-	_box("Lobby visitor bench", Vector3(-14.0, 0.52, 24.5), Vector3(3.4, 0.16, 0.75), Color("#92785c"), false)
-	_box("Lobby bench back", Vector3(-14.0, 0.96, 24.15), Vector3(3.4, 0.7, 0.14), Color("#92785c"), false)
-	for x in [-15.4, -12.6]:
-		_box("Lobby bench leg", Vector3(x, 0.25, 24.5), Vector3(0.13, 0.5, 0.13), Color("#52635b"), false)
-	# Lis ambang pintu berwarna per sayap ruangan (wayfinding halus).
+	_add_framed_poster(Vector3(-19.62, 2.1, 10.0), Color("#9a6a58"), "BANGKAH")
+	_add_framed_poster(Vector3(19.62, 2.1, 10.0), Color("#6f8a7a"), "INTEGRITY")
+	for x in [-29.0, 0.0, 29.0]:
+		_box("Door threshold south wing", Vector3(x, 0.17, 25.0), Vector3(2.9, 0.045, 0.5), Color("#9a6a58"), false)
+
+func _build_accent_walls_l2() -> void:
+	_box("Management sage accent", Vector3(8.2, 3.15, -38.80), Vector3(6.4, 0.70, 0.06), Color("#6f8a7a"), false)
+	_box("Engineering slate band", Vector3(0.0, 0.70, 3.86), Vector3(36.0, 1.0, 0.05), Color("#4c666a"), false)
 	for x in [-29.0, -11.0, 8.0, 29.0]:
 		_box("Door threshold north wing", Vector3(x, 0.17, -20.0), Vector3(2.9, 0.045, 0.5), Color("#6f8a7a"), false)
 	for x in [-29.0, -6.5, 0.0, 13.0, 29.0]:
 		_box("Door threshold engineering", Vector3(x, 0.17, 4.0), Vector3(2.9, 0.045, 0.5), Color("#4c666a"), false)
-	for x in [-29.0, 0.0, 29.0]:
-		_box("Door threshold south wing", Vector3(x, 0.17, 25.0), Vector3(2.9, 0.045, 0.5), Color("#9a6a58"), false)
-	# Tanaman sudut tambahan di koridor.
-	_add_plant(Vector3(-18.5, 0, -17.5), 0.85)
-	_add_plant(Vector3(18.5, 0, -17.5), 0.85)
-	_add_plant(Vector3(-18.5, 0, 21.5), 0.85)
-	_add_plant(Vector3(-18.5, 0, -38.5), 1.0)
-	_add_plant(Vector3(18.5, 0, -38.5), 1.0)
-	# Poster tambahan di lorong selatan.
-	_add_framed_poster(Vector3(-19.62, 2.1, 10.0), Color("#9a6a58"), "BANGKAH")
-	_add_framed_poster(Vector3(19.62, 2.1, 10.0), Color("#6f8a7a"), "INTEGRITY")
+	_add_plant(Vector3(-18.5, 0, -17.5), 0.85); _add_plant(Vector3(18.5, 0, -17.5), 0.85)
+	_add_plant(Vector3(-18.5, 0, -38.5), 1.0); _add_plant(Vector3(18.5, 0, -38.5), 1.0)
 
-func _build_corridor_details() -> void:
-	# Jalur yang rapi & lega: runner masuk saja di poros pintu, panel akustik
-	# menempel di dinding nyata, koridor tengah bebas benda.
-	_box("Lobby entry runner", Vector3(0, 0.148, 31.0), Vector3(5.2, 0.035, 13.0), Color("#a17a5a"), false, null, 0.86)
-	for x in [-2.35, 2.35]:
-		_box("Entry runner trim", Vector3(x, 0.175, 31.0), Vector3(0.05, 0.028, 13.0), Color("#d3b98a"), false, null, 0.4, 0.4)
-	# Panel akustik menempel dinding exterior (bukan melayang).
-	for z in [-14.0, 10.0, 22.0]:
-		_box("Acoustic wall panel west", Vector3(-41.62, 1.8, z), Vector3(0.10, 1.5, 5.2), Color("#9baa9e"), false, null, 0.88)
-		_box("Acoustic wall panel east", Vector3(41.62, 1.8, z), Vector3(0.10, 1.5, 5.2), Color("#9baa9e"), false, null, 0.88)
-	for x in [-11.0, 11.0]:
-		_box("Acoustic wall panel north", Vector3(x, 1.8, -39.64), Vector3(5.2, 1.5, 0.10), Color("#9baa9e"), false, null, 0.88)
-	for x in [-38.8, 41.8]:
-		for z in [-31.0, -7.0, 14.0, 33.0]:
-			_add_plant(Vector3(minf(x, 41.5), 0, z), 0.85)
+func _build_accent_walls_l3() -> void:
+	_box("Owner wainscot walnut", Vector3(-29.5, 0.55, -38.88), Vector3(16.5, 0.85, 0.06), Color("#6b5238"), false)
+	_box("Owner brass trim", Vector3(-29.5, 1.02, -38.89), Vector3(16.5, 0.09, 0.06), Color("#c5a366"), false)
 
-func _add_plant(position: Vector3, scale_value: float = 1.0) -> void:
-	_cylinder("Decorative planter", position + Vector3(0, 0.32 * scale_value, 0), 0.42 * scale_value, 0.62 * scale_value, Color("#9c8268"))
-	_cylinder("Planter soil", position + Vector3(0, 0.64 * scale_value, 0), 0.35 * scale_value, 0.06, Color("#493e31"))
-	for i in range(6):
-		var angle := TAU * float(i) / 6.0
-		_sphere("Plant foliage", position + Vector3(cos(angle) * 0.28 * scale_value, 1.05 * scale_value + float(i % 2) * 0.16, sin(angle) * 0.28 * scale_value), 0.34 * scale_value, Color("#6f9275"), Vector3(1.0, 1.25, 0.84))
-	_sphere("Plant crown", position + Vector3(0, 1.36 * scale_value, 0), 0.32 * scale_value, Color("#88a886"), Vector3(1.0, 1.3, 1.0))
+func _build_free_seating_l1() -> void:
+	# L1 lobby cluster (4 office seats) — positioned off main axis (keeps counts stable)
+	_box("Lobby seating rug", Vector3(-9.5, 0.14, 19.8), Vector3(6.2, 0.03, 4.8), Color("#5a5f63"), false, null, 0.95)
+	_box("Lobby coffee table base", Vector3(-9.5, 0.34, 19.8), Vector3(0.75, 0.30, 0.75), Color("#1f2326"), true, null, 0.3, 0.25)
+	_box("Lobby coffee table top", Vector3(-9.5, 0.52, 19.8), Vector3(1.45, 0.08, 1.05), Color("#2a2f33"), false, null, 0.14, 0.04)
+	for chair in [{"pos": Vector3(-11.0, 0, 18.6), "yaw": 0.0},{"pos": Vector3(-8.0, 0, 18.6), "yaw": 0.0},{"pos": Vector3(-11.0, 0, 21.0), "yaw": PI},{"pos": Vector3(-8.0, 0, 21.0), "yaw": PI}]:
+		_add_office_chair(chair["pos"], Color("#3a3f43"), chair["yaw"], "Kursi Tamu Lobby")
 
-func _build_office_accessories() -> void:
-	# Wall clocks mounted on the solid north wall (was floating, now attached).
-	for spot in [Vector3(-29.5, 3.2, -39.62), Vector3(8.0, 3.2, -39.62), Vector3(29.0, 3.2, -39.62)]:
-		_add_wall_clock(spot, -PI * 0.5)
-	# Framed posters attached to the solid west/east walls.
-	_add_framed_poster(Vector3(-41.62, 2.1, -15.0), Color("#3a5a4a"), "INNOVATION", 0.0)
-	_add_framed_poster(Vector3(-41.62, 2.1, 10.0), Color("#5a4a3a"), "QUALITY", 0.0)
-	_add_framed_poster(Vector3(41.62, 2.1, -15.0), Color("#4a5a6a"), "COLLABORATION", PI)
-	_add_framed_poster(Vector3(41.62, 2.1, 10.0), Color("#3a5a5a"), "PRECISION", PI)
-	# Desk plants — small potted plants on collaboration tables and corners.
-	_add_desk_plant(Vector3(0.0, 0.87, -1.0), 0.4)
-	_add_desk_plant(Vector3(-29.5, 0.87, 14.3), 0.4)
-	# Conference room water dispenser.
-	_box("Water dispenser body", Vector3(-35.0, 1.0, 19.0), Vector3(0.6, 1.6, 0.6), Color("#3a4a4d"), true)
-	_box("Water dispenser jug", Vector3(-35.0, 1.6, 19.0), Vector3(0.42, 0.62, 0.42), Color(0.6, 0.75, 0.78, 0.35), false, null, 0.16, 0.05, true)
-	_box("Water dispenser tap", Vector3(-35.0, 0.78, 18.72), Vector3(0.10, 0.06, 0.08), Color("#8a928c"), false, null, 0.3, 0.5)
-	# Mini fridge in the engineering area.
-	_box("Mini fridge", Vector3(37.0, 0.65, -3.0), Vector3(1.0, 1.25, 0.75), Color("#c4cbc6"), true, null, 0.28, 0.3)
-	_box("Fridge handle", Vector3(36.58, 0.75, -3.0), Vector3(0.05, 0.35, 0.04), Color("#77857f"), false, null, 0.3, 0.6)
-	# Whiteboard markers and erasers on boards.
-	for x in [6.5, 8.2, 9.9]:
-		_box("Whiteboard marker", Vector3(x, 1.0, -38.62), Vector3(0.04, 0.025, 0.03), Color("#4a6e9a"), false)
-		_box("Marker cap", Vector3(x, 1.0, -38.58), Vector3(0.03, 0.025, 0.02), Color("#2a4a7a"), false)
-	# Coffee mug stations — random mugs on desks.
-	for position in [Vector3(27.0, 0.95, -7.5), Vector3(-5.0, 0.95, -7.5), Vector3(-29.0, 0.95, -7.5)]:
-		_cylinder("Desk mug", position, 0.10, 0.16, Color("#e7d8c4"))
-		_cylinder("Mug coffee", position + Vector3(0, 0.04, 0), 0.075, 0.012, Color("#4a2818"))
-	# Sticky notes on board surfaces.
-	for x in [7.0, 8.5, 10.0]:
-		for y in [1.7, 2.3, 2.85]:
-			var note_color: Color = [Color("#f5e88a"), Color("#a8d8b0"), Color("#f0b8a0")][int(y) % 3]
-			_box("Sticky note", Vector3(x, y, -38.63), Vector3(0.28, 0.32, 0.012), note_color, false)
-	# Floor-standing magazine stand in the lounge.
-	_box("Magazine stand base", Vector3(13.0, 0.25, 33.0), Vector3(0.9, 0.5, 0.4), Color("#8a7256"), true)
-	for y in [0.55, 0.80, 1.05]:
-		_box("Magazine stand shelf", Vector3(13.0, y, 33.0), Vector3(0.85, 0.04, 0.36), Color("#a8896a"), false)
+func _build_free_seating_l2() -> void:
+	# L2 QA collaboration (3 office seats) — moved to LANTAI 2
+	for chair in [{"pos": Vector3(-4.5, 0, -3.2), "yaw": PI},{"pos": Vector3(-0.5, 0, -3.2), "yaw": PI},{"pos": Vector3(3.5, 0, -3.2), "yaw": PI}]:
+		_add_office_chair(chair["pos"], Color("#62807c"), chair["yaw"], "Kursi Kolaborasi QA")
+
+func _build_floor_cores() -> void:
+	# Design Bible: floating open-riser stairs (transparent/open between treads, no dark slab),
+	# frameless glass railing + matte-black handrail, under-tread warm LED, planter under L1 stairs,
+	# panoramic smoked-glass lift with cyan indicators. Climbable collision (ramp+step strips) kept
+	# invisible for playability; HQ registries/interactable positions in main.gd unchanged.
+	var fys: Array[float] = [L1_Y, L2_Y, L3_Y]
+	var labels := ["LANTAI 1","LANTAI 2","LANTAI 3"]
+	var cx := 13.2
+	var lxs := cx - 2.6 # tangga turun
+	var rxs := cx + 0.4 # tangga naik
+	var lx := cx + 3.4  # lift
+	var cz := 10.7
+	var marble := Color("#e9e4da"); var walnut := Color("#8B5A2B"); var matte := Color("#2C302E")
+	var cyan := Color("#00FFFF"); var warm := Color("#FFD166"); var glass := Color(0.70,0.84,0.90,0.14)
+	for fi in range(fys.size()):
+		var fy: float = fys[fi]
+		_box("Core landing", Vector3(cx, fy + 0.07, cz), Vector3(10.2, 0.14, 5.0), marble, true, null, 0.42)
+		_box("Core inlay trim", Vector3(cx, fy + 0.155, cz), Vector3(10.3, 0.02, 5.1), Color("#c7a85a"), false, null, 0.3, 0.4)
+		_box("Core feature wall", Vector3(cx, fy + 1.65, 15.45), Vector3(10.4, 3.3, 0.18), Color("#d6d9d2"), false)
+		_box("Core shadow gap", Vector3(cx, fy + 0.02, 15.36), Vector3(10.3, 0.03, 0.04), Color("#1a1f1d"), false, null, 0.9)
+		_box("Core header", Vector3(cx, fy + 3.08, 15.32), Vector3(9.2, 0.55, 0.10), matte, false, null, 0.3, 0.0, false, Color("#40524d"))
+		_painted_text(labels[fi] + "  ·  TANGGA  &  LIFT", Vector3(cx, fy + 3.08, 15.38), 0.0, 0.0028, Color("#f3ecd8"), Color(0,0,0,0))
+		_painted_text("TURUN ↓   NAIK ↑      LIFT →", Vector3(cx, fy + 2.15, 8.05), 0.0, 0.0038, Color("#243530"), Color("#f2ecda"))
+	# --- Floating open-riser stairs (2 per link) ---
+	for link in [{"fy": L1_Y, "to": "LANTAI 2"}, {"fy": L2_Y, "to": "LANTAI 3"}]:
+		var fy: float = float(link["fy"])
+		var flight_h := FLOOR_H
+		var run_len := 8.4
+		var steps_n := 18
+		var rise := flight_h / float(steps_n)
+		var step_run := run_len / float(steps_n)
+		var z_top := 6.3
+		var z_bot := z_top + run_len
+		var z_mid := (z_top + z_bot) * 0.5
+		var slope := atan2(flight_h, run_len)
+		var ramp_len := sqrt(flight_h*flight_h + run_len*run_len)
+		for sc in [{"x": rxs, "name": "TANGGA NAIK", "dir": "NAIK ↑"}, {"x": lxs, "name": "TANGGA TURUN", "dir": "TURUN ↓"}]:
+			var sx: float = float(sc["x"])
+			_box(str(sc["name"]) + " lower", Vector3(sx, fy + 0.07, z_bot + 0.45), Vector3(2.6, 0.14, 1.25), marble, true, null, 0.42)
+			_box(str(sc["name"]) + " upper", Vector3(sx, fy + flight_h + 0.07, z_top - 0.45), Vector3(2.6, 0.14, 1.25), marble, true, null, 0.42)
+			# invisible climbable ramp + step-collision (playability; no solid dark slab visual)
+			var ramp := _box(str(sc["name"]) + " ramp", Vector3(sx, fy + flight_h*0.5 + 0.02, z_mid), Vector3(2.25, 0.16, ramp_len + 0.2), Color(0,0,0,0.001), true)
+			ramp.rotation.x = -slope
+			for si in range(steps_n):
+				var t := (float(si) + 0.5) / float(steps_n)
+				_box("Step col", Vector3(sx, fy + 0.04 + t*flight_h, z_bot - t*run_len), Vector3(2.2, 0.04, step_run*0.82), Color(0,0,0,0), true)
+			for side in [-1.25, 1.25]:
+				var sw := _box("Guide", Vector3(sx + side, fy + flight_h*0.5 + 0.35, z_mid), Vector3(0.06, 0.45, ramp_len), Color(0,0,0,0.001), true)
+				sw.rotation.x = -slope
+			# floating walnut treads (open-riser: no riser panels) + warm under-tread LED
+			for si in range(steps_n):
+				var t := (float(si) + 0.5) / float(steps_n)
+				var sy := fy + 0.14 + t*flight_h; var sz := z_bot - t*run_len
+				_box("Tread", Vector3(sx, sy, sz), Vector3(2.35, 0.11, step_run*0.88), walnut, false, null, 0.48)
+				_box("Tread LED", Vector3(sx, sy - 0.07, sz), Vector3(2.15, 0.012, step_run*0.45), warm, false, null, 0.2, 0.0, false, warm)
+			# frameless glass railing (no vertical posts) + matte-black handrail
+			for side in [-1.28, 1.28]:
+				var gp := _box("Glass bal", Vector3(sx + side, fy + 0.82 + flight_h*0.5, z_mid), Vector3(0.03, 0.95, ramp_len*0.96), glass, false, null, 0.06, 0.02, true)
+				gp.rotation.x = -slope
+				var hr := _box("Handrail", Vector3(sx + side, fy + 1.30 + flight_h*0.5, z_mid), Vector3(0.07, 0.055, ramp_len+0.1), matte, false, null, 0.35, 0.38)
+				hr.rotation.x = -slope
+			_painted_text(str(sc["dir"]) + "  KE " + str(link["to"]), Vector3(sx, fy + 1.95, z_bot+0.18), 0.0, 0.0023, Color("#243530"), Color("#f2ecda"))
+	# Under-stair L1: planter box, white pebbles, Snake Plant feel, uplight (open under floating treads)
+	var ug_z := 10.5
+	_box("Under-stair planter", Vector3(cx - 1.1, L1_Y + 0.18, ug_z), Vector3(5.8, 0.34, 5.4), Color("#3a3f3c"), false, null, 0.55)
+	_box("Pebble bed", Vector3(cx - 1.1, L1_Y + 0.36, ug_z), Vector3(5.4, 0.06, 5.0), Color("#f0efe8"), false, null, 0.95)
+	_add_plant(Vector3(cx - 2.6, L1_Y + 0.36, ug_z - 1.4), 0.8)
+	_add_plant(Vector3(cx - 0.8, L1_Y + 0.36, ug_z + 0.6), 0.75)
+	_add_plant(Vector3(cx + 0.8, L1_Y + 0.36, ug_z - 0.8), 0.78)
+	_box("Planter uplight", Vector3(cx - 1.1, L1_Y + 0.42, ug_z), Vector3(0.5, 0.03, 0.2), warm, false, null, 0.2, 0.0, false, warm)
+	# --- Panoramic smoked-glass lift (black steel frame, cyan indicators), full height ---
+	var shaft_h := FLOOR_H * 3.0 + 2.0
+	_box("Lift shaft frame", Vector3(lx, shaft_h*0.5 - 0.1, cz-0.9), Vector3(2.9, shaft_h, 2.7), matte, true, null, 0.4, 0.3)
+	_box("Lift shaft glass", Vector3(lx, shaft_h*0.5, cz-2.27), Vector3(2.6, shaft_h-0.5, 0.07), Color(0.28,0.30,0.34,0.22), false, null, 0.06, 0.04, true)
+	for fi in range(fys.size()):
+		var fy: float = fys[fi]
+		_box("Lift landing", Vector3(lx, fy + 0.07, cz+0.35), Vector3(2.7, 0.14, 2.3), marble, true, null, 0.42)
+		_box("Lift interior", Vector3(lx, fy + 1.45, cz-0.85), Vector3(2.3, 2.7, 2.2), Color("#e6ece8"), false)
+		_box("Lift door frame", Vector3(lx, fy + 1.45, cz-2.18), Vector3(2.45, 2.8, 0.10), matte, false, null, 0.3, 0.35)
+		_box("Lift door L", Vector3(lx-0.5, fy + 1.35, cz-2.25), Vector3(0.9, 2.4, 0.07), Color(0.36,0.40,0.46,0.26), false, null, 0.08, 0.06, true)
+		_box("Lift door R", Vector3(lx+0.5, fy + 1.35, cz-2.25), Vector3(0.9, 2.4, 0.07), Color(0.36,0.40,0.46,0.26), false, null, 0.08, 0.06, true)
+		_box("Lift indicator", Vector3(lx, fy + 2.78, cz-2.33), Vector3(0.90, 0.34, 0.04), Color("#0c1412"), false, null, 0.2, 0.0, false, cyan)
+		_painted_text(labels[fi] + "  ↑↓", Vector3(lx, fy + 2.78, cz-2.36), 0.0, 0.0024, Color("#eaffff"), Color(0,0,0,0))
+		_box("Lift panel", Vector3(lx-1.28, fy + 1.38, cz-2.33), Vector3(0.26, 0.66, 0.05), Color("#1f2326"), false)
+		_box("Lift up", Vector3(lx-1.28, fy + 1.56, cz-2.36), Vector3(0.12, 0.12, 0.03), cyan, false, null, 0.3, 0.0, false, cyan)
+		_box("Lift down", Vector3(lx-1.28, fy + 1.24, cz-2.36), Vector3(0.12, 0.12, 0.03), Color("#5a6662"), false)
+		_painted_text("LIFT", Vector3(lx, fy + 0.45, cz-2.40), 0.0, 0.0026, Color("#243530"), Color("#f2ecda"))
+		_painted_text(labels[fi], Vector3(0, fy + 3.25, 17.55), 0.0, 0.0065, Color("#2f4339"), Color(0,0,0,0))
+	_box("Lift machine cap", Vector3(lx, L3_Y + FLOOR_H + 1.2, cz-0.9), Vector3(3.0, 1.2, 2.8), Color("#4a5552"), false, null, 0.5, 0.2)
 
 func _add_wall_clock(position: Vector3, yaw: float = 0.0) -> void:
-	# Jam dinding sebagai node berorientasi bila butuh dipasang di dinding arah lain.
 	var root := Node3D.new()
 	root.name = "WallClock"
-	root.position = position
+	root.position = position + Vector3(0, _floor_y, 0)
 	root.rotation.y = yaw
 	add_child(root)
 	_box("Clock frame", Vector3(0, 0, 0), Vector3(0.06, 0.6, 0.6), Color("#3a3a3a"), false, root, 0.35, 0.15)
@@ -1284,10 +1688,9 @@ func _add_wall_clock(position: Vector3, yaw: float = 0.0) -> void:
 	_sphere("Clock center", Vector3(0.025, 0, 0), 0.022, Color("#1a1a1a"))
 
 func _add_framed_poster(position: Vector3, accent: Color, text: String, yaw: float = 0.0) -> void:
-	# Poster selalu menempel dinding nyata; yaw menentukan arah muka teks.
 	var root := Node3D.new()
 	root.name = "FramedPoster"
-	root.position = position
+	root.position = position + Vector3(0, _floor_y, 0)
 	root.rotation.y = yaw
 	add_child(root)
 	_box("Poster frame", Vector3(0, 0, 0), Vector3(0.08, 1.2, 0.9), Color("#4a4035"), false, root, 0.42, 0.05)
@@ -1306,21 +1709,72 @@ func _add_desk_plant(position: Vector3, scale_value: float = 0.5) -> void:
 		_sphere("Desk plant leaf", position + Vector3(cos(angle) * r, h, sin(angle) * r), 0.15 * scale_value, Color("#6f9275" if i % 2 == 0 else "#7ba380"), Vector3(1.0, 1.3, 0.8))
 	_sphere("Desk plant crown", position + Vector3(0, 0.45 * scale_value, 0), 0.14 * scale_value, Color("#88a886"), Vector3(1.0, 1.3, 1.0))
 
+
+	# Petunjuk arah ruangan (wayfinding) per lantai — visual only
+	_build_wayfinding()
+
+func _build_wayfinding() -> void:
+	# Sleek dark-acrylic directory totems per floor (micro-detail signage).
+	var _fys := [{"y":L1_Y,"f":"L1"},{"y":L2_Y,"f":"L2"},{"y":L3_Y,"f":"L3"}]
+	for fl in _fys:
+		var fy: float = float(fl["y"]); var fn := str(fl["f"])
+		_box("Dir post "+fn, Vector3(0, fy+0.85, 8.5), Vector3(0.10,1.7,0.10), Color("#2a3034"), true, null, 0.3, 0.45)
+		_box("Dir board "+fn, Vector3(0, fy+1.55, 8.58), Vector3(3.3,1.25,0.07), Color("#14181b"), false, null, 0.22, 0.5)
+		_box("Dir glow "+fn, Vector3(0, fy+1.0, 8.62), Vector3(3.0,0.02,0.02), Color("#2aa8c8"), false, null, 0.2, 0.0, false, Color("#38c8e8"))
+		_painted_text("DIRECTORY " + fn, Vector3(0, fy+2.02, 8.63), 0.0, 0.0022, Color("#dff8ff"), Color(0,0,0,0))
+	if true:
+		var fy1 := L1_Y
+		_painted_text("L1  →  LOBI · RESEPSIONIS · BOARDROOM · LAB API · ARSIP · PANTRY", Vector3(0, fy1+1.55, 8.64), 0.0, 0.0025, Color("#f2ecda"), Color(0,0,0,0))
+		_painted_text("← ARSIP & CETAK", Vector3(-10.5, fy1+1.15, 24.85), 0.0, 0.0032, Color("#2f4339"), Color(0,0,0,0))
+		_painted_text("RUANG RAPAT / BOARDROOM →", Vector3(-18.8, fy1+1.15, 14.2), -PI*0.5, 0.0030, Color("#2f4339"), Color(0,0,0,0))
+		_painted_text("PANTRY & LOUNGE →", Vector3(10.5, fy1+1.15, 24.85), 0.0, 0.0032, Color("#2f4339"), Color(0,0,0,0))
+		_painted_text("← LAB API & INFRA", Vector3(18.8, fy1+1.15, 14.2), -PI*0.5, 0.0030, Color("#2f4339"), Color(0,0,0,0))
+		_painted_text("↑ TANGGA & LIFT KE LANTAI 2/3", Vector3(6.5, fy1+1.15, 12.2), 0.0, 0.0032, Color("#2f4339"), Color(0,0,0,0))
+		var fy2 := L2_Y
+		_painted_text("L2  →  SEKRETARIAT · MANAJEMEN · ARSITEKTUR · FRONTEND · QA · BACKEND", Vector3(0, fy2+1.55, 8.64), 0.0, 0.0024, Color("#f2ecda"), Color(0,0,0,0))
+		_painted_text("← SEKRETARIAT / OWNER ACCESS", Vector3(-10.5, fy2+1.15, -19.8), PI, 0.0030, Color("#2f4339"), Color(0,0,0,0))
+		_painted_text("MANAJEMEN & ARSITEKTUR ->", Vector3(10.5, fy2+1.15, -19.8), PI, 0.0030, Color("#2f4339"), Color(0,0,0,0))
+		# Kanban board on L2 corridor (visual)
+		_box("Corridor kanban frame", Vector3(6.2, L2_Y + 1.85, 3.86), Vector3(3.8, 1.6, 0.08), Color("#2a3034"), false, null, 0.35, 0.3)
+		_box("Corridor kanban", Vector3(6.2, L2_Y + 1.85, 3.91), Vector3(3.6, 1.42, 0.03), Color("#e6e2d6"), false, null, 0.7)
+		for kx in [5.1, 6.2, 7.3]:
+			for ky in [2.2, 1.75, 1.35]:
+				_box("Kanban note", Vector3(kx, L2_Y + ky, 3.94), Vector3(0.85, 0.32, 0.02), Color("#f2e6b8") if ky > 1.8 else Color("#cfe3d6"), false, null, 0.85)
+		_painted_text("KANBAN", Vector3(6.2, L2_Y + 2.55, 3.95), PI, 0.0026, Color("#2f4339"), Color(0,0,0,0))
+		var fy3 := L3_Y
+		_painted_text("L3  ->  RUANG OWNER · SUITE OWNER · LOUNGE PRIBADI", Vector3(0, fy3+1.55, 8.64), 0.0, 0.0026, Color("#f2ecda"), Color(0,0,0,0))
+		_painted_text("<- RUANG OWNER", Vector3(-10.5, fy3+1.15, -19.8), PI, 0.0034, Color("#2f4339"), Color(0,0,0,0))
+		_painted_text("LOUNGE PRIBADI ->", Vector3(-1.2, fy3+1.15, 29.5), -PI*0.5, 0.0032, Color("#2f4339"), Color(0,0,0,0))
+
 func _build_landscape() -> void:
-	# Entry landscaping, company sign, flag poles, outdoor seating and trees.
-	_box("Entrance planter left", Vector3(-13.2, 0.34, 44.2), Vector3(5.5, 0.68, 2.3), Color("#8a9b88"), false)
-	_box("Entrance planter right", Vector3(13.2, 0.34, 44.2), Vector3(5.5, 0.68, 2.3), Color("#8a9b88"), false)
-	for x in [-14.5, -12.5, -10.5, 10.5, 12.5, 14.5]:
-		_add_plant(Vector3(x, 0.55, 44.2), 0.72)
+	# Entry landscaping: concrete planter boxes + shrubs/low lights + paving feel (visual).
+	var pcon := Color("#b7bdb6"); var soil := Color("#5a4a3a")
+	for side in [-1.0, 1.0]:
+		var sidef := float(side)
+		var px := 13.2 * sidef
+		_box("Planter box", Vector3(px, 0.34, 44.6), Vector3(6.2, 0.52, 2.1), pcon, false, null, 0.55)
+		_box("Planter soil", Vector3(px, 0.62, 44.6), Vector3(5.8, 0.06, 1.7), soil, false, null, 0.9)
+		for ox in [-2.0, -0.6, 0.8, 2.2]:
+			_add_plant(Vector3(px + float(ox), 0.62, 44.6), 0.55)
+		# low bollard/garden light
+		_cylinder("Garden light", Vector3(px + sidef * 3.6, 0.28, 45.9), 0.06, 0.56, Color("#4a5550"), null, false, 0.4)
+		_box("Garden light cap", Vector3(px + sidef * 3.6, 0.58, 45.9), Vector3(0.16, 0.06, 0.16), Color("#f2e6c8"), false, null, 0.2, 0.0, false, Color("#ffe8b8"))
+	# Paving grid on HQ front walk
+	for gx in range(-7, 8, 2):
+		for gz in range(0, 6):
+			_box("Paver", Vector3(float(gx)*1.05, 0.012, 41.2 + float(gz)*1.25), Vector3(1.9, 0.012, 1.1), Color("#c6cec3") if (gx+gz)%2==0 else Color("#bcc6bc"), false, null, 0.72)
 	_box("Outdoor company monument", Vector3(-24.0, 1.55, 42.3), Vector3(7.4, 3.1, 0.72), Color("#42584c"), false)
 	_box("Outdoor monument fascia", Vector3(-24.0, 2.75, 41.86), Vector3(7.4, 2.0, 0.09), Color("#33453c"), false)
-	_raised_text("BANGKAH", Vector3(-24.0, 2.85, 41.82), 0, 0.95, 0.11, Color("#e8d3a0"))
-	_label("HEADQUARTERS", Vector3(-24.0, 1.85, 41.81), 0.0052, Color("#d5e2d3"))
+	_box("Monument banner", Vector3(-24.0, 2.45, 41.7), Vector3(6.2, 1.35, 0.06), Color("#f4f0e4"), false, null, 0.55)
+	_painted_text("BANGKAH", Vector3(-24.0, 2.65, 41.75), 0.0, 0.011, Color("#2f4339"), Color(0,0,0,0))
+	_painted_text("HEADQUARTERS", Vector3(-24.0, 2.15, 41.75), 0.0, 0.0048, Color("#3f574c"), Color(0,0,0,0))
+	
 	for x in [-35.0, 35.0]:
 		_cylinder("Flag pole", Vector3(x, 2.5, 44.0), 0.055, 5.0, Color("#b7c0ba"), null, false, 0.7)
 		_box("Company flag", Vector3(x + 0.72, 4.15, 44.0), Vector3(1.45, 0.82, 0.055), Color("#567f6a"), false)
-	for position in [Vector3(-46,0,25), Vector3(-48,0,0), Vector3(-46,0,-28), Vector3(47,0,24), Vector3(48,0,-4), Vector3(46,0,-30), Vector3(-32,0,60), Vector3(32,0,60)]:
-		_add_tree(position)
+	# HQ perimeter trees — positions collected for MultiMesh (draw-call reduction)
+	var _hq_tree_pos: Array[Vector3] = [Vector3(-46,0,25), Vector3(-48,0,0), Vector3(-46,0,-28), Vector3(47,0,24), Vector3(48,0,-4), Vector3(46,0,-30), Vector3(-32,0,60), Vector3(32,0,60)]
+	_trees_pending = _hq_tree_pos
 	_box("Outdoor bench seat", Vector3(20, 0.52, 46.5), Vector3(3.2, 0.18, 0.7), Color("#92785c"), false)
 	_box("Outdoor bench back", Vector3(20, 0.96, 46.2), Vector3(3.2, 0.7, 0.14), Color("#92785c"), false)
 	for x in [18.8, 21.2]:
@@ -1334,73 +1788,134 @@ func _add_tree(position: Vector3) -> void:
 ## Parkir perusahaan: slot bernama per karyawan, mobil prosedural, dan lampu.
 func _build_company_parking() -> void:
 	var assignments := [
-		{"id":"lead","name":"Arman","x":22.0,"body":Color("#4a6a82")},
-		{"id":"coo","name":"Sinta","x":26.4,"body":Color("#8b6a72")},
-		{"id":"architect","name":"Raka","x":30.8,"body":Color("#5a7a6a")},
-		{"id":"backend","name":"Bima","x":35.2,"body":Color("#6a7288")},
-		{"id":"api","name":"Naya","x":22.0,"z":47.0,"row2":true,"body":Color("#8a7a5a")},
-		{"id":"frontend","name":"Dira","x":26.4,"z":47.0,"row2":true,"body":Color("#7a5f52")},
-		{"id":"qa","name":"Tika","x":30.8,"z":47.0,"row2":true,"body":Color("#5f7a6a")},
+		{"id":"lead","name":"Arman","x":22.0,"z":47.0,"body":Color("#4a6a82")},
+		{"id":"coo","name":"Sinta","x":26.4,"z":47.0,"body":Color("#8b6a72")},
+		{"id":"architect","name":"Raka","x":30.8,"z":47.0,"body":Color("#5a7a6a")},
+		{"id":"backend","name":"Bima","x":35.2,"z":47.0,"body":Color("#6a7288")},
+		{"id":"api","name":"Naya","x":22.0,"z":47.0,"body":Color("#8a7a5a")},
+		{"id":"frontend","name":"Dira","x":26.4,"z":47.0,"body":Color("#7a5f52")},
+		{"id":"qa","name":"Tika","x":30.8,"z":47.0,"body":Color("#5f7a6a")},
 	]
-	_box("Parking sign", Vector3(18.5, 1.15, 43.2), Vector3(0.12, 2.2, 2.4), Color("#4a5a52"), false, null, 0.52, 0.18)
-	_box("Parking sign face", Vector3(18.58, 1.35, 43.2), Vector3(0.04, 0.8, 2.1), Color("#2f4339"), false, null, 0.4, 0.1)
-	_label("PARKIR KARYAWAN", Vector3(18.64, 1.35, 43.2), 0.0042, Color("#e6dec8"))
-	for a in assignments:
-		var slot_z: float = 47.0 if a.get("row2", false) else 47.0
-		var car_pos := Vector3(float(a["x"]), 0.0, slot_z)
-		_add_parked_car(car_pos, 0.0, a["body"], str(a["name"]))
-		_label(str(a["name"]).to_upper(), Vector3(car_pos.x, 1.55, car_pos.z - 2.8), 0.0036, Color("#eef1ea"))
-	# Lampu parkir.
-	for x in [24.2, 33.0]:
-		_cylinder("Parking light pole", Vector3(x, 1.9, 42.2), 0.06, 3.8, Color("#6f7d76"), null, false, 0.5)
-		_box("Parking lamp head", Vector3(x, 3.82, 42.2), Vector3(0.55, 0.14, 0.28), Color("#d9d2be"), false, null, 0.3, 0.05, false, Color("#f4e6c4"))
-		var pl := OmniLight3D.new()
-		pl.position = Vector3(x, 3.68, 44.5)
-		pl.light_color = Color("#fff0d0")
-		pl.light_energy = 0.22
-		pl.omni_range = 9.0
-		pl.shadow_enabled = false
-		add_child(pl)
+	# Signage (tali air / painted)
+	_box("Parking sign post", Vector3(18.2, 1.1, 43.2), Vector3(0.14, 2.2, 0.14), Color("#5a6862"), false, null, 0.5)
+	_box("Parking sign face", Vector3(18.9, 1.45, 43.2), Vector3(1.9, 0.85, 0.08), Color("#2f4339"), false, null, 0.4, 0.1)
+	_painted_text("PARKIR HQ", Vector3(18.95, 1.55, 43.25), -PI*0.5, 0.0038, Color("#e8dfc4"), Color(0,0,0,0))
+	_painted_text("KARYAWAN", Vector3(18.95, 1.28, 43.25), -PI*0.5, 0.0026, Color("#d8e6d6"), Color(0,0,0,0))
+	# Wheel stops / bay markers + drivable cars
+	for i in range(assignments.size()):
+		var a: Dictionary = assignments[i]
+		var car_pos := Vector3(float(a["x"]), 0.0, float(a["z"]))
+		var eid := str(a.get("id", ""))
+		_box("Wheel stop", car_pos + Vector3(0, 0.08, -3.6), Vector3(2.2, 0.14, 0.22), Color("#d8cfa8"), false, null, 0.6)
+		_add_parked_car(car_pos, 0.0, a["body"], str(a["name"]), "car_" + eid, true, "Mobil " + str(a["name"]))
+		_painted_text(str(a["name"]).to_upper(), car_pos + Vector3(0, 0.03, -4.35), 0.0, 0.0032, Color("#f3f1e8"), Color(0.1,0.12,0.1,0.2))
+	# Lights (visual) — poles/heads via MultiMesh; actual parking lights kept sparse in town lamps
+	# (HQ parking lamp positions added to town multimesh)
 
-func _add_parked_car(position: Vector3, yaw: float, body: Color, _label_text: String = "") -> Node3D:
+
+
+
+func _add_parked_car(position: Vector3, yaw: float, body: Color, _label_text: String = "", car_id: String = "", drivable: bool = false, car_label: String = "") -> Node3D:
 	var root := Node3D.new()
 	root.name = "ParkedCar"
 	root.position = position
 	root.rotation.y = yaw
 	add_child(root)
-	_box("Car body", Vector3(0, 0.62, 0), Vector3(2.1, 0.62, 4.4), body, true, root, 0.42, 0.18)
-	_box("Car cabin", Vector3(0, 1.08, -0.15), Vector3(1.85, 0.52, 2.0), body.lightened(0.06), false, root, 0.38, 0.12)
-	_box("Windshield", Vector3(0, 1.08, 0.72), Vector3(1.65, 0.42, 0.06), Color(0.45, 0.62, 0.68, 0.35), false, root, 0.12, 0.08, true)
-	_box("Rear glass", Vector3(0, 1.08, -1.02), Vector3(1.55, 0.38, 0.06), Color(0.45, 0.62, 0.68, 0.32), false, root, 0.12, 0.08, true)
-	for wx in [-0.82, 0.82]:
-		for wz in [-1.25, 1.25]:
-			_cylinder("Wheel", Vector3(wx, 0.28, wz), 0.28, 0.22, Color("#2b3136"), root, false, 0.1)
-			_cylinder("Hubcap", Vector3(wx * 1.01, 0.28, wz), 0.16, 0.04, Color("#8a9592"), root, false, 0.55)
-	_box("Headlight L", Vector3(-0.65, 0.58, 2.16), Vector3(0.36, 0.18, 0.05), Color("#f3edd8"), false, root, 0.2, 0.0, false, Color("#fff2c8"))
-	_box("Headlight R", Vector3(0.65, 0.58, 2.16), Vector3(0.36, 0.18, 0.05), Color("#f3edd8"), false, root, 0.2, 0.0, false, Color("#fff2c8"))
-	_box("Taillight L", Vector3(-0.68, 0.60, -2.16), Vector3(0.34, 0.16, 0.05), Color("#b85a52"), false, root, 0.25, 0.0, false, Color("#b84a42"))
-	_box("Taillight R", Vector3(0.68, 0.60, -2.16), Vector3(0.34, 0.16, 0.05), Color("#b85a52"), false, root, 0.25, 0.0, false, Color("#b84a42"))
+	var dark := body.darkened(0.18)
+	var trim := Color("#2c3338")
+	var chrome := Color("#aeb8bb")
+	# Chassis / body (layered for a more realistic silhouette)
+	_box("Car chassis", Vector3(0, 0.38, 0), Vector3(2.02, 0.22, 4.45), trim, true, root, 0.55, 0.25)
+	_box("Car body lower", Vector3(0, 0.56, 0), Vector3(2.12, 0.34, 4.38), body, true, root, 0.36, 0.22)
+	_box("Car hood", Vector3(0, 0.72, 1.25), Vector3(1.98, 0.18, 1.65), body.lightened(0.04), false, root, 0.32, 0.2)
+	_box("Car trunk", Vector3(0, 0.72, -1.35), Vector3(1.98, 0.18, 1.45), dark, false, root, 0.34, 0.18)
+	_box("Car cabin", Vector3(0, 1.04, -0.12), Vector3(1.82, 0.56, 1.95), body.lightened(0.06), false, root, 0.34, 0.16)
+	_box("Roof", Vector3(0, 1.34, -0.18), Vector3(1.78, 0.08, 1.75), dark, false, root, 0.4, 0.12)
+	# Glass
+	var glass := Color(0.38, 0.55, 0.62, 0.30)
+	_box("Windshield", Vector3(0, 1.04, 0.78), Vector3(1.62, 0.46, 0.06), glass, false, root, 0.08, 0.05, true)
+	_box("Rear glass", Vector3(0, 1.04, -1.06), Vector3(1.52, 0.40, 0.06), glass, false, root, 0.08, 0.05, true)
+	_box("Side glass L", Vector3(-0.92, 1.04, -0.12), Vector3(0.05, 0.38, 1.45), glass, false, root, 0.08, 0.05, true)
+	_box("Side glass R", Vector3(0.92, 1.04, -0.12), Vector3(0.05, 0.38, 1.45), glass, false, root, 0.08, 0.05, true)
+	# Bumpers, grille, plates
+	_box("Front bumper", Vector3(0, 0.42, 2.18), Vector3(2.06, 0.20, 0.18), trim, false, root, 0.5, 0.2)
+	_box("Rear bumper", Vector3(0, 0.42, -2.18), Vector3(2.06, 0.20, 0.18), trim, false, root, 0.5, 0.2)
+	_box("Grille", Vector3(0, 0.56, 2.16), Vector3(1.0, 0.22, 0.05), Color("#1f2528"), false, root, 0.7, 0.1)
+	_box("Plate front", Vector3(0, 0.38, 2.28), Vector3(0.52, 0.14, 0.03), Color("#eef0e6"), false, root, 0.6)
+	_box("Plate rear", Vector3(0, 0.40, -2.28), Vector3(0.52, 0.14, 0.03), Color("#eef0e6"), false, root, 0.6)
+	# Mirrors & handles (detail)
+	_box("Mirror L", Vector3(-1.08, 1.0, 0.55), Vector3(0.14, 0.10, 0.18), dark, false, root, 0.35, 0.25)
+	_box("Mirror R", Vector3(1.08, 1.0, 0.55), Vector3(0.14, 0.10, 0.18), dark, false, root, 0.35, 0.25)
+	_box("Handle L", Vector3(-1.06, 0.86, -0.05), Vector3(0.04, 0.05, 0.22), chrome, false, root, 0.2, 0.75)
+	_box("Handle R", Vector3(1.06, 0.86, -0.05), Vector3(0.04, 0.05, 0.22), chrome, false, root, 0.2, 0.75)
+	# Wheels + arches (proper orientation: axle along X, wheel rotates around X when rolling)
+	for wx in [-0.86, 0.86]:
+		for wz in [-1.28, 1.28]:
+			_box("Wheel arch", Vector3(wx, 0.52, wz), Vector3(0.30, 0.22, 0.64), dark, false, root, 0.5, 0.1)
+			var wheel := Node3D.new()
+			wheel.name = "Wheel"
+			wheel.position = Vector3(wx, 0.29, wz)
+			root.add_child(wheel)
+			# CylinderMesh default axis is Y; rotate 90deg around Z to align axle to X.
+			for part in [
+				{"n":"Tire", "r":0.30, "h":0.24, "c":Color("#1e2226"), "rough":0.95, "met":0.0},
+				{"n":"Rim", "r":0.19, "h":0.26, "c":chrome, "rough":0.25, "met":0.78},
+				{"n":"Hub", "r":0.08, "h":0.28, "c":trim, "rough":0.35, "met":0.4},
+			]:
+				var wn := Node3D.new(); wn.name = str(part["n"]); wn.position.y = 0.0
+				wn.rotation.z = PI * 0.5
+				wheel.add_child(wn)
+				var wm := MeshInstance3D.new()
+				var wc := CylinderMesh.new(); wc.top_radius = float(part["r"]); wc.bottom_radius = float(part["r"]); wc.height = float(part["h"])
+				wm.mesh = wc
+				wm.material_override = _mat(part["c"], float(part["rough"]), float(part["met"]))
+				wn.add_child(wm)
+	# Lights
+	_box("Headlight L", Vector3(-0.62, 0.62, 2.16), Vector3(0.42, 0.18, 0.05), Color("#f6efd6"), false, root, 0.15, 0.0, false, Color("#fff2c8"))
+	_box("Headlight R", Vector3(0.62, 0.62, 2.16), Vector3(0.42, 0.18, 0.05), Color("#f6efd6"), false, root, 0.15, 0.0, false, Color("#fff2c8"))
+	_box("DRL L", Vector3(-0.88, 0.62, 2.14), Vector3(0.10, 0.14, 0.04), Color("#e8f4ff"), false, root, 0.2, 0.0, false, Color("#d8ecff"))
+	_box("DRL R", Vector3(0.88, 0.62, 2.14), Vector3(0.10, 0.14, 0.04), Color("#e8f4ff"), false, root, 0.2, 0.0, false, Color("#d8ecff"))
+	_box("Taillight L", Vector3(-0.66, 0.66, -2.16), Vector3(0.40, 0.16, 0.05), Color("#c45a52"), false, root, 0.22, 0.0, false, Color("#c04840"))
+	_box("Taillight R", Vector3(0.66, 0.66, -2.16), Vector3(0.40, 0.16, 0.05), Color("#c45a52"), false, root, 0.22, 0.0, false, Color("#c04840"))
+	if drivable and not car_id.is_empty():
+		vehicles.append({"id": car_id, "label": car_label if not car_label.is_empty() else car_id, "position": position, "yaw": yaw, "color": body, "kind": "car", "node": root})
 	return root
 
 ## Distrik kota kecil: setiap karyawan punya rumah + mobil di carport. Rumah
 ## adalah geometri prosedural (visual); tidak mengubah state backend.
 func _build_town_district() -> void:
-	# Signage entering the neighborhood.
-	_box("Town sign post", Vector3(72.0, 1.1, 44.8), Vector3(0.14, 2.2, 0.14), Color("#6a776f"), false, null, 0.5, 0.2)
-	_box("Town sign", Vector3(73.1, 1.55, 44.8), Vector3(2.2, 0.85, 0.12), Color("#3f574c"), false, null, 0.42, 0.12)
-	_label("PERUMAHAN BANGKAH", Vector3(73.1, 1.55, 44.88), 0.0040, Color("#efe7d2"))
-	# Local street lamps.
-	for i in range(4):
-		var sz := 18.0 + float(i) * 14.0
-		_cylinder("Street lamp pole", Vector3(TOWN_ORIGIN.x + 15.5, 1.85, sz), 0.055, 3.7, Color("#6b7871"), null, false, 0.5)
-		_box("Street lamp head", Vector3(TOWN_ORIGIN.x + 15.5, 3.72, sz), Vector3(0.5, 0.12, 0.26), Color("#ded6c2"), false, null, 0.28, 0.05, false, Color("#f3e4bf"))
-		var sl := OmniLight3D.new()
-		sl.position = Vector3(TOWN_ORIGIN.x + 13.8, 3.55, sz)
-		sl.light_color = Color("#ffe9c2")
-		sl.light_energy = 0.16
-		sl.omni_range = 8.5
-		sl.shadow_enabled = false
-		add_child(sl)
+	# Tidy city signage (clear, aligned to grid) — roads/connectivity unchanged.
+	_add_road_sign(Vector3(56.0, 0, 49.8), 0.0, "KOTA BANGKAH", "← HQ  |  PERUMAHAN →", Color("#2f4339"), Color("#f2f1ea"))
+	_add_road_sign(Vector3(TOWN_ORIGIN.x + 3.0, 0, 12.0), -PI * 0.5, "PERUMAHAN", "RUMAH KARYAWAN", Color("#3f574c"), Color("#efe7d2"))
+	_add_road_sign(Vector3(TOWN_ORIGIN.x + 3.0, 0, 78.0), -PI * 0.5, "PASAR KOTA", "BELANJA SEGAR / JAJAN", Color("#7a5a46"), Color("#f4ead2"))
+	var kc: Vector3 = kopdes_layout().get("center", TOWN_ORIGIN + Vector3(46, 0, 58))
+	_add_road_sign(Vector3(kc.x, 0, 49.8), 0.0, "KOPDES MALL", "PUSAT BELANJA ↓", Color("#c94a4a"), Color("#fff4f2"))
+	_add_road_sign(Vector3(TOWN_ORIGIN.x - 30.0, 0, 50.0), PI * 0.5, "KOPDES MERAH PUTIH", "LANDMARK LOKAL", Color("#d32f2f"), Color("#fff6f2"))
+	_add_road_sign(Vector3(TOWN_ORIGIN.x - 30.0, 0, 70.0), PI * 0.5, "KOPDES UNIT", "ATM / LAYANAN CEPAT", Color("#b44a46"), Color("#fff6f2"))
+	var ml: Dictionary = owner_mansion_layout()
+	var mbase: Vector3 = ml.get("base", TOWN_ORIGIN + Vector3(44, 0, -10))
+	_add_road_sign(Vector3(TOWN_ORIGIN.x + 22.0, 0, mbase.z + 9.0), 0.0, "RUMAH OWNER", "MANSION →", Color("#4f5f78"), Color("#f3e8c8"))
+	_add_road_sign(Vector3(38.0, 0, 49.8), 0.0, "PARKIR HQ", "KARYAWAN & TAMU", Color("#4a5a52"), Color("#f2f1ea"))
+	_add_road_sign(Vector3(TOWN_ORIGIN.x + 16.8, 0, 49.2), PI * 0.5, "JL. BANGKAH", "UTARA: PERUMAHAN  SELATAN: HQ", Color("#2f4339"), Color("#f2f1ea"))
+	for zc in [18.0, 40.0, 62.0, 84.0]:
+		var rz: float = TOWN_ORIGIN.z + float(zc)
+		_add_road_sign(Vector3(TOWN_ORIGIN.x + 16.5, 0, rz - 3.0), PI * 0.5, "BLOK RUMAH", "← BARAT  |  TIMUR →", Color("#3f574c"), Color("#eef1ea"))
+	_add_road_sign(Vector3(TOWN_ORIGIN.x + 16.5, 0, TOWN_ORIGIN.z + 88.5), PI * 0.5, "PUSAT KOTA", "PASAR →", Color("#7a5a46"), Color("#f4ead2"))
+	_add_road_sign(Vector3(TOWN_ORIGIN.x + 38.0, 0, TOWN_ORIGIN.z + 88.5), 0.0, "PASAR", "KIOS & JAJANAN", Color("#7a5a46"), Color("#f4ead2"))
+	# Street lamps (MultiMesh). HQ perimeter trees via _trees_pending.
+	var _lamp_pos: Array[Vector3] = []
+	for i in range(11):
+		_lamp_pos.append(Vector3(TOWN_ORIGIN.x + 16.8, 0.0, 6.0 + float(i) * 9.5))
+	for lp in [market_layout().get("center", TOWN_ORIGIN) + Vector3(-10, 0, -8), market_layout().get("center", TOWN_ORIGIN) + Vector3(10, 0, -8), kc + Vector3(-10, 0, 22), kc + Vector3(10, 0, 22), mbase + Vector3(-4, 0, 14)]:
+		_lamp_pos.append(Vector3(lp.x, 0.0, lp.z))
+	for px in [24.2, 33.0]:
+		_lamp_pos.append(Vector3(px, 0.0, 42.0))
+	var _mkt_c: Vector3 = market_layout().get("center", TOWN_ORIGIN + Vector3(28, 0, 92))
+	for lp in [Vector3(float(_mkt_c.x) - 8.0, 0.0, float(_mkt_c.z) - 6.5), Vector3(float(_mkt_c.x) + 8.0, 0.0, float(_mkt_c.z) - 6.5)]:
+		_lamp_pos.append(lp)
+	_add_street_lamp_multimesh(_lamp_pos)
+	_add_tree_multimesh(_trees_pending)
+
 
 	var homes := [
 		{"id":"lead", "name":"Arman", "offset": Vector2(0, 0), "wall": Color("#d8d2c4"), "roof": Color("#7a5a48"), "door": Color("#5f7a68"), "car": Color("#4a6a82")},
@@ -1415,50 +1930,452 @@ func _build_town_district() -> void:
 		var base := TOWN_ORIGIN + Vector3(h["offset"].x, 0, h["offset"].y)
 		_build_house(base, str(h["id"]), str(h["name"]), h["wall"], h["roof"], h["door"], h["car"])
 
+	# Street props + curb-parked cars (non-drivable visual density; keeps roads navigable)
+	_add_street_props()
+
+	# Owner's mansion (paling besar & mewah) + market/Kopdes — all in one connected city.
+	_build_owner_mansion()
+	_build_market()
+	_build_kopdes_merah_putih()
+	_build_kopdes_unit()
+	_build_grand_mall()
+
+func _add_road_sign(pos: Vector3, yaw: float, title: String, subtitle: String, head: Color, board: Color) -> void:
+	var root := Node3D.new()
+	root.name = "RoadSign"
+	root.position = pos
+	root.rotation.y = yaw
+	add_child(root)
+	_cylinder("Sign post L", Vector3(-1.25, 1.45, 0), 0.07, 2.9, Color("#6a776f"), root)
+	_cylinder("Sign post R", Vector3(1.25, 1.45, 0), 0.07, 2.9, Color("#6a776f"), root)
+	_box("Sign board", Vector3(0, 2.55, 0), Vector3(3.4, 1.35, 0.10), board, false, root, 0.42)
+	_box("Sign head", Vector3(0, 3.05, 0.04), Vector3(3.4, 0.38, 0.05), head, false, root, 0.35)
+	_box("Sign border", Vector3(0, 2.55, 0.055), Vector3(3.34, 1.29, 0.01), head.darkened(0.15), false, root, 0.5)
+	# Flat painted text (tali air style) — facing forward on the board
+	_painted_text(title, Vector3(0, 2.68, 0.07), 0.0, 0.0036, Color("#1f2c27"), Color(0,0,0,0), root)
+	_painted_text(subtitle, Vector3(0, 2.26, 0.07), 0.0, 0.0023, Color("#2f3f38"), Color(0,0,0,0), root)
+
+
 func _build_house(base: Vector3, employee_id: String, employee_name: String, wall: Color, roof: Color, door: Color, car: Color) -> void:
 	var root := Node3D.new()
 	root.name = "House_%s" % employee_id
 	root.position = base
 	add_child(root)
 	# Lot, path, fence hint.
-	_box("House lot", Vector3(6.0, -0.06, 5.0), Vector3(16.5, 0.08, 14.5), Color("#8ca087"), false, root, 0.92)
-	_box("House path", Vector3(2.2, 0.01, 8.2), Vector3(1.8, 0.06, 4.2), Color("#c3ccbf"), false, root, 0.68)
+	_box("House lot", Vector3(6.0, -0.04, 5.0), Vector3(16.5, 0.08, 14.5), Color("#8ca087"), true, root, 0.92)
+	_box("House path", Vector3(2.2, -0.03, 8.2), Vector3(1.8, 0.06, 4.2), Color("#c3ccbf"), true, root, 0.68)
 	# Main volume + porch roof.
 	_box("House body", Vector3(6.0, 1.75, 4.2), Vector3(9.4, 3.5, 7.8), wall, true, root, 0.84)
-	_box("House roof", Vector3(6.0, 3.72, 4.2), Vector3(10.2, 0.55, 8.6), roof, false, root, 0.72)
+	_box("House roof", Vector3(6.0, 3.72, 4.2), Vector3(10.2, 0.55, 8.6), roof, false, root, 0.68)
+	_box("House trim", Vector3(6.0, 3.48, 8.12), Vector3(9.5, 0.12, 0.12), roof.darkened(0.12), false, root, 0.5)
 	_box("Roof ridge", Vector3(6.0, 4.12, 4.2), Vector3(10.4, 0.18, 0.55), roof.darkened(0.08), false, root, 0.65)
 	_box("Porch roof", Vector3(2.4, 2.55, 7.1), Vector3(3.2, 0.18, 2.2), roof.lightened(0.05), false, root, 0.68)
 	_cylinder("Porch post L", Vector3(1.1, 1.25, 8.0), 0.07, 2.4, Color("#d8d2c6"), root)
 	_cylinder("Porch post R", Vector3(3.7, 1.25, 8.0), 0.07, 2.4, Color("#d8d2c6"), root)
-	# Door and windows.
-	_box("Front door", Vector3(2.2, 1.25, 8.1), Vector3(1.05, 2.35, 0.12), door, false, root, 0.45)
-	_box("Door window", Vector3(2.2, 1.75, 8.16), Vector3(0.55, 0.7, 0.04), Color(0.55, 0.7, 0.74, 0.35), false, root, 0.14, 0.05, true)
+	# Enterable doorway: build wall segments around a real opening (player can enter).
+	var d_c := 2.2
+	var d_w := 1.25
+	var front_z := 8.1
+	var wall_left := 1.3
+	var wall_right := 10.7
+	var left_end := d_c - d_w * 0.5
+	var right_start := d_c + d_w * 0.5
+	_box("Front wall L", Vector3((wall_left + left_end) * 0.5, 1.75, front_z), Vector3(maxf(0.1, left_end - wall_left), 3.5, 0.18), wall, true, root, 0.84)
+	_box("Front wall R", Vector3((right_start + wall_right) * 0.5, 1.75, front_z), Vector3(maxf(0.1, wall_right - right_start), 3.5, 0.18), wall, true, root, 0.84)
+	_box("Front wall top", Vector3(d_c, 2.95, front_z), Vector3(d_w + 0.2, 1.1, 0.18), wall, true, root, 0.84)
+	_box("Door frame", Vector3(d_c, 1.25, front_z + 0.02), Vector3(d_w + 0.14, 2.45, 0.08), Color("#6b5a4a"), false, root, 0.5)
+	_box("Front door", Vector3(d_c, 1.25, front_z + 0.08), Vector3(1.05, 2.35, 0.1), door, false, root, 0.45)
+	_box("Door window", Vector3(d_c, 1.75, front_z + 0.14), Vector3(0.55, 0.7, 0.04), Color(0.55, 0.7, 0.74, 0.35), false, root, 0.14, 0.05, true)
+	# Interior (enterable) — warmer, clearer layout.
+	_box("Interior floor", Vector3(6.0, -0.03, 4.2), Vector3(8.8, 0.06, 7.2), Color("#d6cdbb"), true, root, 0.68)
+	_box("Interior rug", Vector3(6.0, 0.015, 4.8), Vector3(4.6, 0.03, 3.0), Color("#7f8f86"), false, root, 0.82)
+	_box("Back wall paint", Vector3(6.0, 1.75, 0.55), Vector3(8.8, 3.5, 0.08), wall.lightened(0.06), false, root, 0.85)
+	_box("Sofa", Vector3(6.0, 0.46, 2.1), Vector3(3.4, 0.92, 1.15), Color("#6f827c"), true, root, 0.74)
+	_box("Sofa arm L", Vector3(4.45, 0.56, 2.1), Vector3(0.3, 0.72, 1.15), Color("#687a74"), true, root, 0.74)
+	_box("Sofa arm R", Vector3(7.55, 0.56, 2.1), Vector3(0.3, 0.72, 1.15), Color("#687a74"), true, root, 0.74)
+	_box("Coffee table", Vector3(6.0, 0.4, 3.55), Vector3(1.7, 0.42, 0.95), Color("#8a6746"), true, root, 0.58, 0.08)
+	_box("Shelf", Vector3(9.55, 1.05, 2.3), Vector3(0.95, 2.1, 2.4), Color("#c2b08c"), true, root, 0.7)
+	_box("Wall frame", Vector3(3.2, 2.0, 0.62), Vector3(1.4, 1.0, 0.05), Color("#d8c49a"), false, root, 0.5)
+	_painted_text("RUMAH", Vector3(3.2, 2.0, 0.66), 0.0, 0.0028, Color("#5a4a3a"), Color(0,0,0,0), root)
+	var il := OmniLight3D.new()
+	il.position = base + Vector3(6.0, 2.6, 4.2)
+	il.light_color = Color("#ffe8c8")
+	il.light_energy = 0.18
+	il.omni_range = 6.5
+	il.shadow_enabled = false
+	add_child(il)
 	for wx in [5.2, 8.4]:
-		_box("Window frame", Vector3(wx, 2.1, 8.12), Vector3(1.7, 1.35, 0.12), Color("#eef1ea"), false, root, 0.52)
-		_box("Window glass", Vector3(wx, 2.1, 8.18), Vector3(1.45, 1.1, 0.05), Color(0.52, 0.68, 0.72, 0.28), false, root, 0.12, 0.08, true)
+		_box("Window frame", Vector3(wx, 2.1, front_z + 0.02), Vector3(1.7, 1.35, 0.12), Color("#eef1ea"), false, root, 0.52)
+		_box("Window glass", Vector3(wx, 2.1, front_z + 0.08), Vector3(1.45, 1.1, 0.05), Color(0.52, 0.68, 0.72, 0.28), false, root, 0.12, 0.08, true)
 	_box("Side window", Vector3(10.72, 2.0, 4.2), Vector3(0.12, 1.2, 1.6), Color("#eef1ea"), false, root, 0.52)
 	_box("Side glass", Vector3(10.78, 2.0, 4.2), Vector3(0.05, 1.0, 1.35), Color(0.52, 0.68, 0.72, 0.28), false, root, 0.12, 0.08, true)
 	# Nameplate and small garden.
-	_box("Nameplate", Vector3(3.35, 1.55, 8.16), Vector3(0.9, 0.35, 0.05), Color("#f2ead8"), false, root, 0.5)
-	_label(employee_name.to_upper(), base + Vector3(3.35, 1.55, 8.24), 0.0032, Color("#3b4a44"))
+	_box("Nameplate", Vector3(3.35, 1.55, front_z + 0.06), Vector3(1.1, 0.38, 0.05), Color("#f2ead8"), false, root, 0.5)
+	_painted_text(employee_name.to_upper(), Vector3(3.35, 1.55, front_z + 0.095), 0.0, 0.0034, Color("#2f4339"), Color(0,0,0,0), root)
 	_add_plant(base + Vector3(0.4, 0, 5.2), 0.75)
 	_add_plant(base + Vector3(9.8, 0, 8.8), 0.7)
 	# Carport + employee car (visual commute prop).
-	_box("Carport slab", Vector3(12.8, 0.02, 9.8), Vector3(4.6, 0.08, 6.2), Color("#aab5ad"), false, root, 0.7)
+	_box("Carport slab", Vector3(12.8, -0.04, 9.8), Vector3(4.6, 0.08, 6.2), Color("#aab5ad"), true, root, 0.7)
 	_box("Carport roof", Vector3(12.8, 2.45, 9.8), Vector3(4.9, 0.16, 6.5), roof.darkened(0.05), false, root, 0.65)
 	for px in [10.9, 14.7]:
 		for pz in [7.1, 12.5]:
 			_cylinder("Carport post", Vector3(px, 1.22, pz), 0.06, 2.35, Color("#d0ccc2"), root)
-	_add_parked_car(base + Vector3(12.8, 0, 9.8), 0.0, car, employee_name)
+	_add_parked_car(base + Vector3(12.8, 0, 9.8), 0.0, car, employee_name, "car_home_" + employee_id, true, "Mobil " + employee_name)
 	# Warm porch light.
-	_box("Porch light", Vector3(1.35, 2.1, 8.18), Vector3(0.18, 0.26, 0.1), Color("#e8d6a8"), false, root, 0.22, 0.1, false, Color("#f4dca0"))
+	_box("Porch light", Vector3(1.35, 2.1, front_z + 0.08), Vector3(0.18, 0.26, 0.1), Color("#e8d6a8"), false, root, 0.22, 0.1, false, Color("#f4dca0"))
 	var porch := OmniLight3D.new()
-	porch.position = base + Vector3(1.35, 2.1, 8.9)
+	porch.position = base + Vector3(1.35, 2.1, front_z + 0.8)
 	porch.light_color = Color("#ffe6b8")
 	porch.light_energy = 0.14
 	porch.omni_range = 3.8
 	porch.shadow_enabled = false
 	add_child(porch)
+
+## Rumah Owner: paling besar & mewah (visual). Player bisa bertamu/berinteraksi.
+func _build_owner_mansion() -> void:
+	var layout: Dictionary = owner_mansion_layout()
+	var base: Vector3 = layout.get("base", TOWN_ORIGIN + Vector3(44, 0, -10))
+	var root := Node3D.new()
+	root.name = "OwnerMansion"
+	root.position = base
+	add_child(root)
+	var wall := Color("#efe6d6")
+	var roof := Color("#4f5f78")
+	var trim := Color("#d6c48a")
+	_box("Estate lot", Vector3(0, -0.04, 2.0), Vector3(28.0, 0.08, 24.0), Color("#8ea58c"), true, root, 0.9)
+	_box("Driveway", Vector3(-7.5, -0.035, 8.5), Vector3(5.2, 0.07, 11.5), Color("#b8c1b8"), true, root, 0.68)
+	_box("Front path", Vector3(0.0, -0.035, 11.2), Vector3(3.2, 0.07, 6.0), Color("#c7cfc4"), true, root, 0.66)
+	# Main mass + wings (grand/luxurious scale).
+	_box("Mansion body", Vector3(0, 2.45, 0), Vector3(16.5, 4.9, 12.5), wall, true, root, 0.82)
+	_box("Mansion wing L", Vector3(-8.8, 1.95, 0.8), Vector3(6.2, 3.9, 9.5), wall.darkened(0.02), true, root, 0.82)
+	_box("Mansion wing R", Vector3(8.8, 1.95, 0.8), Vector3(6.2, 3.9, 9.5), wall.darkened(0.02), true, root, 0.82)
+	_box("Mansion roof", Vector3(0, 5.25, 0), Vector3(17.6, 0.7, 13.4), roof, false, root, 0.68)
+	_box("Roof ridge", Vector3(0, 5.75, 0), Vector3(17.8, 0.22, 0.7), roof.darkened(0.1), false, root, 0.62)
+	_box("Wing roof L", Vector3(-8.8, 4.2, 0.8), Vector3(6.8, 0.55, 10.2), roof.lightened(0.04), false, root, 0.68)
+	_box("Wing roof R", Vector3(8.8, 4.2, 0.8), Vector3(6.8, 0.55, 10.2), roof.lightened(0.04), false, root, 0.68)
+	# Columns/portico.
+	for cx in [-2.4, -0.8, 0.8, 2.4]:
+		_cylinder("Portico column", Vector3(cx, 1.55, 6.2), 0.16, 3.1, Color("#e8e1d2"), root, true, 0.18)
+	_box("Portico roof", Vector3(0, 3.15, 6.4), Vector3(6.4, 0.22, 2.8), roof.lightened(0.08), false, root, 0.65)
+	# Build front wall around a doorway instead of a solid entry block.
+	var md_c := 0.0
+	var md_w := 2.2
+	var front_z := 6.26
+	var w_left := -9.0
+	var w_right := 9.0
+	_box("Mansion front L", Vector3((w_left + (md_c - md_w*0.5)) * 0.5, 2.2, front_z), Vector3(maxf(0.1, (md_c - md_w*0.5) - w_left), 4.4, 0.16), wall, true, root, 0.78)
+	_box("Mansion front R", Vector3(((md_c + md_w*0.5) + w_right) * 0.5, 2.2, front_z), Vector3(maxf(0.1, w_right - (md_c + md_w*0.5)), 4.4, 0.16), wall, true, root, 0.78)
+	_box("Mansion front top", Vector3(md_c, 3.75, front_z), Vector3(md_w + 0.3, 1.3, 0.16), wall, true, root, 0.78)
+	_box("Entry frame", Vector3(md_c, 1.45, front_z + 0.02), Vector3(md_w + 0.2, 2.8, 0.12), trim, false, root, 0.42, 0.22)
+	_box("Entry door leaf L", Vector3(-0.52, 1.35, front_z + 0.08), Vector3(0.95, 2.55, 0.1), Color("#5a6f62"), false, root, 0.38)
+	_box("Entry door leaf R", Vector3(0.52, 1.35, front_z + 0.08), Vector3(0.95, 2.55, 0.1), Color("#5a6f62"), false, root, 0.38)
+	# Grand interior (enterable) — Owner's house.
+	_box("Mansion interior floor", Vector3(0, -0.03, 0.0), Vector3(17.2, 0.06, 11.4), Color("#d8d1c2"), true, root, 0.62)
+	_box("Mansion rug", Vector3(0, 0.015, 1.8), Vector3(8.5, 0.03, 4.8), Color("#7a5a52"), false, root, 0.82)
+	_box("Mansion sofa", Vector3(0, 0.5, -1.8), Vector3(5.8, 1.0, 1.4), Color("#4f6a63"), true, root, 0.72)
+	_box("Sofa side L", Vector3(-3.2, 0.5, -0.2), Vector3(1.2, 1.0, 2.2), Color("#4f6a63"), true, root, 0.72)
+	_box("Sofa side R", Vector3(3.2, 0.5, -0.2), Vector3(1.2, 1.0, 2.2), Color("#4f6a63"), true, root, 0.72)
+	_box("Mansion table", Vector3(0, 0.5, 0.8), Vector3(2.6, 0.55, 1.4), Color("#7a5a3a"), true, root, 0.55, 0.12)
+	_box("Art panel", Vector3(-6.5, 2.2, -5.7), Vector3(3.2, 1.8, 0.08), Color("#c9b58a"), false, root, 0.6)
+	_box("Shelf wall", Vector3(6.8, 1.2, -2.0), Vector3(1.2, 2.4, 4.5), Color("#bfae8a"), true, root, 0.7)
+	var ml := OmniLight3D.new()
+	ml.position = base + Vector3(0.0, 3.5, 0.5)
+	ml.light_color = Color("#ffe8c2")
+	ml.light_energy = 0.28
+	ml.omni_range = 11.0
+	ml.shadow_enabled = false
+	add_child(ml)
+	# Large windows + balcony accents.
+	for wx in [-5.2, 5.2]:
+		_box("Mansion window", Vector3(wx, 2.35, 6.28), Vector3(2.6, 1.9, 0.12), Color("#f2f4ee"), false, root, 0.5)
+		_box("Mansion glass", Vector3(wx, 2.35, 6.34), Vector3(2.3, 1.6, 0.05), Color(0.5, 0.66, 0.72, 0.26), false, root, 0.12, 0.08, true)
+	_box("Balcony", Vector3(0, 3.55, 6.55), Vector3(5.8, 0.12, 1.1), trim, false, root, 0.48, 0.2)
+	_painted_text("RUMAH OWNER", base + Vector3(0, 5.15, 6.82), 0.0, 0.0052, Color("#f3e8c8"), Color(0.15,0.18,0.22,0.35), root)
+
+	# Garage/carport for Owner vehicle.
+	_box("Garage slab", Vector3(-7.5, -0.04, 11.0), Vector3(5.6, 0.08, 7.2), Color("#aab5ad"), true, root, 0.7)
+	_box("Garage roof", Vector3(-7.5, 2.75, 11.0), Vector3(6.0, 0.18, 7.6), roof.darkened(0.05), false, root, 0.65)
+	for px in [-9.9, -5.1]:
+		for pz in [7.9, 14.1]:
+			_cylinder("Garage post", Vector3(px, 1.38, pz), 0.07, 2.65, Color("#d6d0c4"), root)
+	_add_parked_car(base + Vector3(-7.5, 0, 11.0), 0.0, Color("#2f3b4a"), "Owner", "car_owner_mansion", true, "Mobil Owner")
+	# Luxury lights/landscape.
+	for sx in [-10.5, 10.5, 0.0]:
+		_box("Estate light", Vector3(sx, 1.15, 10.8), Vector3(0.14, 2.2, 0.14), Color("#6a776f"), false, root, 0.5)
+		_box("Estate lamp", Vector3(sx, 2.28, 10.8), Vector3(0.36, 0.18, 0.22), Color("#efe1b8"), false, root, 0.25, 0.05, false, Color("#f6e4b8"))
+		var el := OmniLight3D.new()
+		el.position = base + Vector3(sx, 2.12, 11.8)
+		el.light_color = Color("#ffe7bf")
+		el.light_energy = 0.2
+		el.omni_range = 7.5
+		el.shadow_enabled = false
+		add_child(el)
+	for pp in [Vector3(-11.5, 0, 4.5), Vector3(11.5, 0, 4.5), Vector3(-11.5, 0, -3.5), Vector3(11.5, 0, -3.5)]:
+		_add_plant(base + pp, 0.95)
+
+## Pasar kota kecil: kios, kanopi, lampu, area jalan kaki (visual & interaktif).
+func _build_market() -> void:
+	var layout: Dictionary = market_layout()
+	var c: Vector3 = layout.get("center", TOWN_ORIGIN + Vector3(28, 0, 92))
+	_box("Market plaza", Vector3(c.x, -0.04, c.z), Vector3(26.0, 0.08, 18.0), Color("#c2bca8"), true, null, 0.72)
+	_box("Market sign post", Vector3(c.x - 9.0, 1.15, c.z - 8.2), Vector3(0.14, 2.3, 0.14), Color("#6a776f"), false, null, 0.5)
+	_box("Market sign", Vector3(c.x - 7.6, 1.6, c.z - 8.2), Vector3(2.8, 0.9, 0.12), Color("#7a5a46"), false, null, 0.45)
+	_painted_text("PASAR BANGKAH", Vector3(c.x - 7.6, 1.6, c.z - 8.11), 0.0, 0.0042, Color("#f4ead2"), Color(0,0,0,0))
+	var stalls := [
+		{"x": -7.0, "z": -2.0, "name": "Sayur", "c": Color("#6f8a5a")},
+		{"x": 7.0, "z": -2.0, "name": "Buah", "c": Color("#b07a52")},
+		{"x": -7.0, "z": 4.5, "name": "Warung Kopi", "c": Color("#6a7288")},
+		{"x": 7.0, "z": 4.5, "name": "Kue", "c": Color("#8a6a72")},
+	]
+	for s in stalls:
+		var sp := Vector3(c.x + float(s["x"]), 0, c.z + float(s["z"]))
+		_box("Stall counter", sp + Vector3(0, 0.55, 0), Vector3(4.2, 1.1, 2.4), Color("#d8ccb6"), true, null, 0.72)
+		_box("Stall top", sp + Vector3(0, 1.12, 0), Vector3(4.4, 0.12, 2.6), s["c"], false, null, 0.6)
+		_box("Stall canopy", sp + Vector3(0, 2.35, 0), Vector3(4.8, 0.16, 3.0), s["c"].lightened(0.12), false, null, 0.62)
+		for px in [-2.0, 2.0]:
+			for pz in [-1.1, 1.1]:
+				_cylinder("Canopy post", sp + Vector3(px, 1.75, pz), 0.05, 1.2, Color("#8a8f86"), null)
+		_label(str(s["name"]).to_upper(), sp + Vector3(0, 1.55, 1.35), 0.0034, Color("#3f3a32"))
+		seats.append({"position": sp + Vector3(0, 0.05, 1.65), "yaw": 0.0, "kind": "sofa", "pivot": null, "label": "Kios " + str(s["name"])})
+	for lx in [-4.0, 4.0]:
+		_cylinder("Market lamp pole", Vector3(c.x + lx, 1.7, c.z - 6.5), 0.055, 3.4, Color("#6b7871"), null)
+		_box("Market lamp", Vector3(c.x + lx, 3.42, c.z - 6.5), Vector3(0.45, 0.12, 0.24), Color("#efe2c0"), false, null, 0.26, 0.05, false, Color("#f5e4bf"))
+		var ml := OmniLight3D.new()
+		ml.position = Vector3(c.x + lx, 3.25, c.z - 5.5)
+		ml.light_color = Color("#ffe8c0")
+		ml.light_energy = 0.18
+		ml.omni_range = 8.0
+		ml.shadow_enabled = false
+		add_child(ml)
+
+
+## Kopdes / Koperasi Merah Putih — warga (termasuk Owner) bisa belanja kebutuhan
+## rumah & kantor. Interaksi bersifat lokal/visual (tidak mengubah backend).
+func _build_kopdes(pos: Vector3 = Vector3.ZERO) -> void:
+	# Back-compat wrapper; Kopdes is now a separate mall.
+	_build_grand_mall()
+
+func _build_grand_mall() -> void:
+	# KOPDES MERAH PUTIH MALL — pusat perbelanjaan BESAR (enterable, tidy layout).
+	# Belanja lokal/simulasi (non-otoritatif, tidak mengubah backend). No HQ doors/seats.
+	var layout: Dictionary = kopdes_layout()
+	var pos: Vector3 = layout.get("center", TOWN_ORIGIN + Vector3(46, 0, 58))
+	var root := Node3D.new()
+	root.name = "KopdesMall"
+	root.position = pos
+	add_child(root)
+	var red := Color("#c94a4a")
+	var white := Color("#f5f1e8")
+	var dark := Color("#3f3733")
+	var glass := Color(0.52, 0.68, 0.72, 0.22)
+	var floor_c := Color("#ddd6c8")
+	var atrium_c := Color("#cec6b8")
+	# --- Site podium ---
+	_box("Mall podium", Vector3(0, -0.05, 0), Vector3(66.0, 0.1, 44.0), Color("#b7c0aa"), true, root, 0.78)
+	_box("Mall floor", Vector3(0, -0.01, 0), Vector3(58.0, 0.06, 36.0), floor_c, true, root, 0.55)
+	_box("Mall forecourt", Vector3(0, 0.0, 20.5), Vector3(22.0, 0.05, 6.0), Color("#c9d0c6"), true, root, 0.62)
+	# --- Shell (tall, wide, enterable front opening) ---
+	var wall_h := 7.2
+	_box("Mall back wall", Vector3(0, wall_h * 0.5, -18.0), Vector3(58.4, wall_h, 0.5), white, true, root, 0.8)
+	_box("Mall left wall", Vector3(-29.0, wall_h * 0.5, 0), Vector3(0.5, wall_h, 36.4), white, true, root, 0.8)
+	_box("Mall right wall", Vector3(29.0, wall_h * 0.5, 0), Vector3(0.5, wall_h, 36.4), white, true, root, 0.8)
+	_box("Mall roof", Vector3(0, wall_h + 0.25, 0), Vector3(59.6, 0.5, 37.6), Color("#7a6660"), false, root, 0.6)
+	_box("Mall roof band", Vector3(0, wall_h + 0.55, 0), Vector3(34.0, 0.28, 12.0), red, false, root, 0.55)
+	# Front facade: side panels + ribbon glass, wide central entrance (open)
+	var front_z := 18.0
+	for sx in [-20.0, 20.0]:
+		_box("Mall front panel", Vector3(sx, wall_h * 0.5, front_z), Vector3(18.0, wall_h, 0.5), white, true, root, 0.8)
+		_box("Mall front glass", Vector3(sx, 2.6, front_z + 0.08), Vector3(12.5, 4.4, 0.08), glass, false, root, 0.12, 0.08, true)
+		_box("Mall pilaster", Vector3(sx * 0.56, wall_h * 0.5, front_z + 0.12), Vector3(0.7, wall_h - 0.4, 0.3), Color("#e6dfd2"), false, root, 0.72)
+	# Big entrance header + branding (clear, facing boulevard +Z)
+	_box("Mall header", Vector3(0, 5.9, front_z + 0.08), Vector3(22.0, 2.2, 0.24), red, false, root, 0.42)
+	_box("Mall header white", Vector3(0, 5.9, front_z + 0.22), Vector3(21.0, 1.7, 0.06), Color("#fffaf4"), false, root, 0.5)
+	_painted_text("KOPDES", Vector3(-3.4, 6.15, front_z + 0.28), 0.0, 0.0155, red, Color(0,0,0,0), root)
+	_painted_text("MERAH PUTIH", Vector3(4.2, 6.15, front_z + 0.28), 0.0, 0.011, Color("#2a3440"), Color(0,0,0,0), root)
+	_painted_text("MALL  ·  PUSAT PERBELANJAAN KOTA BANGKAH", Vector3(0, 5.45, front_z + 0.28), 0.0, 0.0046, Color("#4a3f3a"), Color(0,0,0,0), root)
+	# Emblem marks
+	for ex in [-9.2, 9.2]:
+		_box("Logo red", Vector3(ex, 5.9, front_z + 0.26), Vector3(1.25, 1.25, 0.06), red, false, root, 0.4)
+		_box("Logo white", Vector3(ex, 5.9, front_z + 0.3), Vector3(0.6, 0.6, 0.04), white, false, root, 0.5)
+	# Deep entrance canopy
+	_box("Entrance canopy", Vector3(0, 3.4, front_z + 2.6), Vector3(24.0, 0.2, 5.0), red, false, root, 0.55)
+	for cx in [-9.5, -3.2, 3.2, 9.5]:
+		_cylinder("Canopy post", Vector3(cx, 1.7, front_z + 4.7), 0.1, 3.4, dark, root)
+	# LED promo billboard (procedural shader, kept tidy)
+	var bb := _box("LED billboard", Vector3(18.5, 5.2, front_z + 0.3), Vector3(8.5, 3.0, 0.05), Color("#101820"), false, root)
+	_apply_led_billboard_shader(bb)
+	_painted_text("PROMO HARI INI", Vector3(18.5, 5.2, front_z + 0.35), 0.0, 0.0038, Color("#e8fff9"), Color(0,0,0,0), root)
+	# Rooftop branding / helipad marker
+	_box("Roof logo block", Vector3(0, wall_h + 0.9, -3.0), Vector3(8.0, 0.55, 2.6), red, false, root, 0.4, 0.0, false, Color("#ff8a86"))
+	_painted_text("GRAND MALL", Vector3(0, wall_h + 0.94, -1.6), 0.0, 0.0052, Color("#fff6f0"), Color(0,0,0,0), root)
+	_cylinder("Helipad", Vector3(16.0, wall_h + 0.52, -12.0), 3.6, 0.06, Color("#6f7a76"), root)
+	_painted_text("H", Vector3(16.0, wall_h + 0.56, -12.0), -PI * 0.5, 0.011, Color("#f2f1ea"), Color(0,0,0,0), root)
+	# --- Interior: wide central atrium + clear wings (grid, navigable) ---
+	_box("Atrium aisle", Vector3(0, 0.03, 0), Vector3(12.0, 0.04, 34.0), atrium_c, true, root, 0.58)
+	_box("Atrium rug", Vector3(0, 0.06, 6.0), Vector3(8.0, 0.02, 8.0), Color("#c45a58").lightened(0.25), false, root, 0.7)
+	_box("Atrium info desk", Vector3(0, 0.6, 10.5), Vector3(4.2, 1.2, 1.8), red.lightened(0.08), true, root, 0.52)
+	_painted_text("INFORMASI", Vector3(0, 1.35, 11.45), 0.0, 0.0036, Color("#fff4f2"), Color(0,0,0,0), root)
+	# Left wing: kebutuhan rumah (racks in neat rows)
+	_box("Home wing sign", Vector3(-19.5, 2.6, 8.0), Vector3(9.0, 0.8, 0.08), Color("#f3ead8"), false, root, 0.5)
+	_painted_text("KEBUTUHAN RUMAH", Vector3(-19.5, 2.6, 8.06), 0.0, 0.0042, Color("#5a4a3a"), Color(0,0,0,0), root)
+	_box("Home counter", Vector3(-18.0, 0.6, 4.0), Vector3(6.5, 1.2, 2.6), Color("#c8b89a"), true, root, 0.7)
+	for gx in [-24.5, -18.5, -12.5]:
+		for gz in [-10.0, -4.0, 2.0, 8.0]:
+			_box("Home shelf", Vector3(gx, 1.15, gz), Vector3(1.6, 2.3, 3.4), Color("#bfae8a"), true, root, 0.72)
+			for gy in [0.55, 1.15, 1.75]:
+				_box("Home goods", Vector3(gx, gy, gz), Vector3(1.1, 0.2, 2.6), Color("#ddd4c2"), false, root, 0.82)
+	# Right wing: kebutuhan kantor
+	_box("Office wing sign", Vector3(19.5, 2.6, 8.0), Vector3(9.0, 0.8, 0.08), Color("#eef3ec"), false, root, 0.5)
+	_painted_text("KEBUTUHAN KANTOR", Vector3(19.5, 2.6, 8.06), 0.0, 0.0042, Color("#3f4a44"), Color(0,0,0,0), root)
+	_box("Office counter", Vector3(18.0, 0.6, 4.0), Vector3(6.5, 1.2, 2.6), Color("#b8c4b8"), true, root, 0.7)
+	for gx in [12.5, 18.5, 24.5]:
+		for gz in [-10.0, -4.0, 2.0, 8.0]:
+			_box("Office shelf", Vector3(gx, 1.15, gz), Vector3(1.6, 2.3, 3.4), Color("#aeb8ad"), true, root, 0.72)
+			for gy in [0.55, 1.15, 1.75]:
+				_box("Office goods", Vector3(gx, gy, gz), Vector3(1.1, 0.2, 2.6), Color("#e2e8e0"), false, root, 0.82)
+	# Back: cashier / layanan (centered, facing atrium)
+	_box("Cashier desk", Vector3(0, 0.6, -11.5), Vector3(7.0, 1.2, 2.2), red.lightened(0.1), true, root, 0.52)
+	_box("Cashier top", Vector3(0, 1.22, -11.5), Vector3(7.2, 0.08, 2.4), Color("#e8e0d4"), false, root, 0.45)
+	_painted_text("KASIR / LAYANAN  ·  BELI & JUAL", Vector3(0, 1.75, -10.32), 0.0, 0.0038, Color("#5a2f2c"), Color(0,0,0,0), root)
+	_painted_text("BU WATI", Vector3(0, 1.4, -10.32), 0.0, 0.003, Color("#4a3a38"), Color(0,0,0,0), root)
+	# Ceiling light grid (even, shadowless)
+	for lx in [-18.0, -6.0, 6.0, 18.0]:
+		for lz in [-10.0, 0.0, 10.0]:
+			_box("Mall light", Vector3(lx, wall_h - 0.5, lz), Vector3(2.4, 0.14, 0.7), Color("#f3e8c8"), false, root, 0.22, 0.05, false, Color("#fff0c8"))
+			var ml := OmniLight3D.new()
+			ml.position = pos + Vector3(lx, wall_h - 1.4, lz)
+			ml.light_color = Color("#fff3d6")
+			ml.light_energy = 0.22
+			ml.omni_range = 15.0
+			ml.shadow_enabled = false
+			add_child(ml)
+	# Exterior planters (tidy)
+	for pp in [Vector3(-22.0, 0, 20.5), Vector3(22.0, 0, 20.5), Vector3(-22.0, 0, -14.0), Vector3(22.0, 0, -14.0)]:
+		_add_plant(pos + pp, 0.95)
+
+
+
+func _build_kopdes_merah_putih() -> void:
+	# Kopdes Merah Putih (iconic 2 lantai) — landmark lokal; Desain kota: merah #D32F2F + off-white, big glass.
+	var l: Dictionary = kopdes_merah_putih_layout()
+	var b: Vector3 = l.get("base", TOWN_ORIGIN + Vector3(-44,0,40))
+	var root := Node3D.new(); root.name = "KopdesMerahPutih"; root.position = b; add_child(root)
+	var red := Color("#D32F2F"); var white := Color("#f4f1ea"); var glass := Color(0.55,0.7,0.74,0.20)
+	_box("KMP lot", Vector3(0,-0.04,1.5), Vector3(18.0,0.08,15.0), Color("#b7c0aa"), true, root, 0.78)
+	_box("KMP building L1", Vector3(0,1.45,0), Vector3(14.0,2.9,11.0), white, true, root, 0.82)
+	_box("KMP building L2", Vector3(0,4.0,0), Vector3(14.0,2.2,11.0), white, true, root, 0.82)
+	_box("KMP roof", Vector3(0,5.25,0), Vector3(14.8,0.3,11.8), Color("#6f7a76"), false, root)
+	# Red accents (lisplang/pillars/canopy)
+	_box("KMP lisplang", Vector3(0,5.0,5.55), Vector3(14.6,0.35,0.18), red, false, root, 0.45)
+	for px in [-5.2,-1.8,1.8,5.2]: _box("KMP pillar", Vector3(px,2.1,5.55), Vector3(0.35,4.2,0.35), red, false, root, 0.45)
+	_box("KMP canopy", Vector3(0,3.05,6.9), Vector3(10.5,0.16,2.6), red, false, root, 0.5)
+	for cx in [-4.0,0.0,4.0]: _cylinder("KMP canopy post", Vector3(cx,1.5,7.9), 0.08,3.0, Color("#4a3f3a"), root)
+	# Large front glass + 3D-glow logo
+	_box("KMP glass L", Vector3(-4.0,1.55,5.58), Vector3(4.2,2.4,0.08), glass, false, root, 0.12,0.08,true)
+	_box("KMP glass R", Vector3(4.0,1.55,5.58), Vector3(4.2,2.4,0.08), glass, false, root, 0.12,0.08,true)
+	_box("KMP sign board", Vector3(0,3.85,5.62), Vector3(10.2,0.95,0.12), red, false, root, 0.4, 0.0, false, Color("#ff8a80"))
+	_painted_text("KOPERASI DESA MERAH PUTIH", Vector3(0,3.85,5.7), 0.0, 0.0044, Color("#fff6f2"), Color(0,0,0,0), root)
+	# Flag
+	_cylinder("Flag pole", Vector3(-7.8,2.2,6.8), 0.05,4.4, Color("#9aa3a0"), root)
+	_box("Flag red", Vector3(-7.25,3.95,6.8), Vector3(1.1,0.35,0.04), red, false, root)
+	_box("Flag white", Vector3(-7.25,3.6,6.8), Vector3(1.1,0.35,0.04), white, false, root)
+	# Interior hint
+	_box("KMP counter", Vector3(0,0.55,-2.5), Vector3(3.2,1.1,1.2), Color("#c8b89a"), true, root)
+	_box("KMP shelf", Vector3(-4.8,1.0,-1.5), Vector3(1.2,2.0,4.5), Color("#cfc4b0"), true, root)
+
+func _build_kopdes_unit() -> void:
+	# Kopdes Unit standard (1 lantai, cabang cepat)
+	var l: Dictionary = kopdes_unit_layout()
+	var b: Vector3 = l.get("base", TOWN_ORIGIN + Vector3(-44,0,68))
+	var root := Node3D.new(); root.name = "KopdesUnit"; root.position = b; add_child(root)
+	var red := Color("#D32F2F"); var white := Color("#f7f4ee")
+	_box("Unit lot", Vector3(0,-0.04,1.0), Vector3(14.0,0.08,12.0), Color("#b7c0aa"), true, root, 0.78)
+	_box("Unit building", Vector3(0,1.35,0), Vector3(10.5,2.7,8.5), white, true, root, 0.82)
+	_box("Unit roof", Vector3(0,2.85,0), Vector3(11.2,0.28,9.2), Color("#7a8580"), false, root)
+	_box("Unit sign", Vector3(0,2.35,4.32), Vector3(8.5,0.75,0.12), red, false, root, 0.4, 0.0, false, Color("#ff8a80"))
+	_painted_text("KOPDES UNIT", Vector3(0,2.35,4.4), 0.0, 0.0046, Color("#fff6f2"), Color(0,0,0,0), root)
+	_box("Unit glass", Vector3(0,1.25,4.3), Vector3(6.0,1.9,0.08), Color(0.55,0.7,0.74,0.22), false, root, 0.12,0.08,true)
+	_box("Unit counter", Vector3(0,0.55,-1.8), Vector3(2.6,1.1,1.0), Color("#c8b89a"), true, root)
+	_label("ATM / LAYANAN CEPAT", Vector3(0,1.35,-1.2), 0.0032, Color("#4a3f3a"))
+
+func _add_street_lamp_multimesh(positions: Array[Vector3]) -> void:
+	# Repeated street/area lamps as MultiMeshInstance3D (visual) + per-instance lights.
+	if positions.is_empty(): return
+	var root := Node3D.new(); root.name = "StreetLamps_MM"; add_child(root)
+	var pole_mm := MultiMesh.new(); pole_mm.transform_format = MultiMesh.TRANSFORM_3D; pole_mm.instance_count = positions.size()
+	var pc := CylinderMesh.new(); pc.top_radius = 0.055; pc.bottom_radius = 0.055; pc.height = 3.6; pc.radial_segments = 8
+	pole_mm.mesh = pc
+	var head_mm := MultiMesh.new(); head_mm.transform_format = MultiMesh.TRANSFORM_3D; head_mm.instance_count = positions.size()
+	var hc := BoxMesh.new(); hc.size = Vector3(0.5, 0.12, 0.26); head_mm.mesh = hc
+	for i in range(positions.size()):
+		var p: Vector3 = positions[i]
+		pole_mm.set_instance_transform(i, Transform3D(Basis(), p + Vector3(0, 1.85, 0)))
+		head_mm.set_instance_transform(i, Transform3D(Basis(), p + Vector3(0, 3.72, 0)))
+		var sl := OmniLight3D.new(); sl.position = p + Vector3(-0.2, 3.55, 0); sl.light_color = Color("#ffe9c2"); sl.light_energy = 0.14; sl.omni_range = 8.5; sl.shadow_enabled = false; add_child(sl)
+	var pmi := MultiMeshInstance3D.new(); pmi.multimesh = pole_mm; pmi.material_override = _mat(Color("#6b7871"), 0.55); pmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON; root.add_child(pmi)
+	var hmi := MultiMeshInstance3D.new(); hmi.multimesh = head_mm; hmi.material_override = _mat(Color("#ded6c2"), 0.28, 0.05, false, Color("#f3e4bf")); root.add_child(hmi)
+
+func _add_tree_multimesh(positions: Array[Vector3]) -> void:
+	if positions.is_empty(): return
+	var root := Node3D.new(); root.name = "Trees_MM"; add_child(root)
+	var trunk_mm := MultiMesh.new(); trunk_mm.transform_format = MultiMesh.TRANSFORM_3D; trunk_mm.instance_count = positions.size()
+	var tc := CylinderMesh.new(); tc.top_radius = 0.22; tc.bottom_radius = 0.24; tc.height = 2.3; tc.radial_segments = 8
+	trunk_mm.mesh = tc
+	var can_mm := MultiMesh.new(); can_mm.transform_format = MultiMesh.TRANSFORM_3D; can_mm.instance_count = positions.size()
+	var sc := SphereMesh.new(); sc.radius = 1.5; sc.height = 3.0; sc.radial_segments = 10; sc.rings = 6
+	can_mm.mesh = sc
+	for i in range(positions.size()):
+		var p: Vector3 = positions[i]
+		trunk_mm.set_instance_transform(i, Transform3D(Basis(), p + Vector3(0, 1.15, 0)))
+		can_mm.set_instance_transform(i, Transform3D(Basis().scaled(Vector3(1.05,1.0,1.05)), p + Vector3(0, 2.55, 0)))
+	var tmi := MultiMeshInstance3D.new(); tmi.multimesh = trunk_mm; tmi.material_override = _mat(Color("#735b45"), 0.9); tmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON; root.add_child(tmi)
+	var cmi := MultiMeshInstance3D.new(); cmi.multimesh = can_mm; cmi.material_override = _mat(Color("#668b6d"), 0.85); cmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON; root.add_child(cmi)
+
+func _add_street_props() -> void:
+	# Non-drivable parked cars and small props for city density. Kept off road centerlines
+	# and away from HQ entrance/workstation areas; do not add to HQ door/seat registries.
+	var parked := [
+		{"p": Vector3(TOWN_ORIGIN.x + 4.5, 0, TOWN_ORIGIN.z + 18.0), "y": 0.0, "c": Color("#6a7f90")},
+		{"p": Vector3(TOWN_ORIGIN.x + 28.5, 0, TOWN_ORIGIN.z + 40.0), "y": PI, "c": Color("#8a6a5a")},
+		{"p": Vector3(TOWN_ORIGIN.x + 4.5, 0, TOWN_ORIGIN.z + 62.0), "y": 0.0, "c": Color("#5f7a66")},
+		{"p": Vector3(TOWN_ORIGIN.x + 28.5, 0, TOWN_ORIGIN.z + 84.0), "y": PI, "c": Color("#7a6f86")},
+		{"p": Vector3(TOWN_ORIGIN.x + 36.0, 0, TOWN_ORIGIN.z + 96.0), "y": -PI*0.5, "c": Color("#607888")},
+		{"p": Vector3(TOWN_ORIGIN.x + 4.0, 0, TOWN_ORIGIN.z + 96.0), "y": PI*0.5, "c": Color("#8b7662")},
+		{"p": Vector3(TOWN_ORIGIN.x + 16.5, 0, TOWN_ORIGIN.z + 6.0), "y": PI*0.5, "c": Color("#556a78")},
+		{"p": Vector3(TOWN_ORIGIN.x + 16.5, 0, TOWN_ORIGIN.z + 50.0), "y": -PI*0.5, "c": Color("#7a6658")},
+		{"p": Vector3(TOWN_ORIGIN.x + 30.0, 0, TOWN_ORIGIN.z + 70.0), "y": PI, "c": Color("#5f6f80")},
+	]
+	for pc in parked:
+		_add_parked_car(pc["p"], float(pc["y"]), pc["c"], "", "", false, "")
+	# Benches/planters along sidewalks (collidable/visual as before; planters remain individual for variety)
+	var mc: Vector3 = market_layout().get("center", TOWN_ORIGIN + Vector3(28, 0, 92))
+	for bx in [-4.0, 4.0]:
+		_box("Bench", mc + Vector3(bx, 0.28, -6.5), Vector3(1.8, 0.12, 0.55), Color("#7a6a56"), true, null, 0.7)
+		_box("Bench back", mc + Vector3(bx, 0.55, -6.78), Vector3(1.8, 0.42, 0.08), Color("#7a6a56"), true, null, 0.7)
+	for pxp in [Vector3(TOWN_ORIGIN.x + 2.2, 0, TOWN_ORIGIN.z + 10.0), Vector3(TOWN_ORIGIN.x + 2.2, 0, TOWN_ORIGIN.z + 32.0), Vector3(TOWN_ORIGIN.x + 2.2, 0, TOWN_ORIGIN.z + 54.0), Vector3(TOWN_ORIGIN.x + 2.2, 0, TOWN_ORIGIN.z + 76.0)]:
+		_add_plant(pxp, 0.65)
+	# (Crosswalks drawn once in _build_site to avoid z-fighting.)
+
+func _apply_led_billboard_shader(bb_node: Node3D) -> void:
+	# Design Bible: giant LED billboard with animated promo (procedural GDShader, no external texture).
+	var mesh := bb_node.get_node_or_null("Mesh") as MeshInstance3D
+	if mesh == null: return
+	var sh := Shader.new()
+	sh.code = """shader_type spatial;
+render_mode unshaded, cull_disabled;
+uniform float speed : hint_range(0.0,3.0) = 0.45;
+void fragment(){
+	vec2 uv = UV;
+	float scan = step(0.92, fract(uv.y*48.0 + TIME*0.4));
+	float band = smoothstep(0.0,0.2,fract(uv.x + TIME*speed)) * (1.0-smoothstep(0.2,0.4,fract(uv.x + TIME*speed)));
+	vec3 base = mix(vec3(0.05,0.10,0.14), vec3(0.12,0.55,0.60), uv.x);
+	vec3 promo = mix(vec3(0.85,0.22,0.22), vec3(0.95,0.85,0.55), band);
+	vec3 col = mix(base, promo, band*0.65) + scan*0.06;
+	ALBEDO = col; EMISSION = col * 1.15;
+}"""
+	var sm := ShaderMaterial.new()
+	sm.shader = sh
+	mesh.material_override = sm
 
 ## Compute the employee's home/commute anchors (used by NPCs and main).
 static func employee_house_layout(employee_id: String) -> Dictionary:
@@ -1480,4 +2397,46 @@ static func employee_house_layout(employee_id: String) -> Dictionary:
 		"entrance": HQ_ENTRANCE,
 		"commute_to_work": [door, carport, street, TOWN_GATE, HQ_SIDEWALK, HQ_PARKING_WALK, HQ_ENTRANCE],
 		"commute_home": [HQ_ENTRANCE, HQ_PARKING_WALK, HQ_SIDEWALK, TOWN_GATE, street, carport, door],
+	}
+
+## Owner's mansion (largest, most luxurious) — visitable/town anchor.
+static func owner_mansion_layout() -> Dictionary:
+	var base := TOWN_ORIGIN + Vector3(44.0, 0.0, -10.0)
+	return {
+		"id": "owner",
+		"base": base,
+		"door": base + Vector3(0.0, 0.05, 10.2),
+		"carport": base + Vector3(-7.5, 0.05, 11.0),
+		"parking": base + Vector3(-7.5, 0.05, 14.5),
+		"gate": base + Vector3(0.0, 0.05, 16.5),
+		"street": Vector3(TOWN_ORIGIN.x + 6.0, 0.05, base.z + 14.5),
+	}
+
+static func kopdes_layout() -> Dictionary:
+	# Kopdes Merah Putih Mall (pusat perbelanjaan besar). Kept id/door compatible
+	# with any main.gd portal/trade and with kopdes_layout()/market seats contracts.
+	var center := TOWN_ORIGIN + Vector3(46.0, 0.0, 58.0)
+	return {"id":"kopdes", "center": center, "door": center + Vector3(0.0, 0.05, 18.8)}
+
+static func kopdes_merah_putih_layout() -> Dictionary:
+	# Iconic landmark 2 lantai di strip jalan utama (depan Grand Mall).
+	var base := TOWN_ORIGIN + Vector3(-44.0, 0.0, 40.0)
+	return {"id":"kopdes_mp", "base": base, "door": base + Vector3(0.0, 0.05, 8.2)}
+
+static func kopdes_unit_layout() -> Dictionary:
+	var base := TOWN_ORIGIN + Vector3(-44.0, 0.0, 68.0)
+	return {"id":"kopdes_unit", "base": base, "door": base + Vector3(0.0, 0.05, 6.6)}
+
+## Town market square — hub for roaming and social interaction.
+static func market_layout() -> Dictionary:
+	var center := TOWN_ORIGIN + Vector3(28.0, 0.0, 92.0)
+	return {
+		"center": center,
+		"entry": center + Vector3(0.0, 0.05, -10.0),
+		"spots": [
+			center + Vector3(-6.0, 0.05, -2.0),
+			center + Vector3(6.0, 0.05, -2.0),
+			center + Vector3(-6.0, 0.05, 4.0),
+			center + Vector3(6.0, 0.05, 4.0),
+		],
 	}

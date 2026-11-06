@@ -12,13 +12,13 @@ const COMPANY_UI_SCRIPT = preload("res://scripts/company_ui.gd")
 # camera = seat + (0, 1.22, -0.2), target = P + (0, 1.35, -0.44) when the
 # desk rotation is 0 as for every employee desk.
 const EMPLOYEE_STATIONS := {
-	"arman_desk": {"workstation_id": "PC-MGT-001", "title": "Arman", "account": "lead", "position": Vector3(5.8, 0, -31.3)},
-	"sinta_desk": {"workstation_id": "PC-MGT-002", "title": "Sinta", "account": "coo", "position": Vector3(13.2, 0, -31.3)},
-	"raka_desk": {"workstation_id": "PC-ARC-001", "title": "Raka", "account": "architect", "position": Vector3(29.0, 0, -31.3)},
-	"dira_desk": {"workstation_id": "PC-FE-001", "title": "Dira", "account": "frontend", "position": Vector3(-29.0, 0, -8.9)},
-	"tika_desk": {"workstation_id": "PC-QA-001", "title": "Tika", "account": "qa", "position": Vector3(-5.0, 0, -8.9)},
-	"bima_desk": {"workstation_id": "PC-BE-001", "title": "Bima", "account": "backend", "position": Vector3(27.0, 0, -8.9)},
-	"naya_desk": {"workstation_id": "PC-API-001", "title": "Naya", "account": "api", "position": Vector3(29.0, 0, 12.65)},
+	"arman_desk": {"workstation_id": "PC-MGT-001", "title": "Arman", "account": "lead", "position": Vector3(5.8, 6.2, -31.3)},
+	"sinta_desk": {"workstation_id": "PC-MGT-002", "title": "Sinta", "account": "coo", "position": Vector3(13.2, 6.2, -31.3)},
+	"raka_desk": {"workstation_id": "PC-ARC-001", "title": "Raka", "account": "architect", "position": Vector3(29.0, 6.2, -31.3)},
+	"dira_desk": {"workstation_id": "PC-FE-001", "title": "Dira", "account": "frontend", "position": Vector3(-29.0, 6.2, -8.9)},
+	"tika_desk": {"workstation_id": "PC-QA-001", "title": "Tika", "account": "qa", "position": Vector3(-5.0, 6.2, -8.9)},
+	"bima_desk": {"workstation_id": "PC-BE-001", "title": "Bima", "account": "backend", "position": Vector3(27.0, 6.2, -8.9)},
+	"naya_desk": {"workstation_id": "PC-API-001", "title": "Naya", "account": "api", "position": Vector3(29.0, 6.2, 12.65)},
 }
 const OFFICE_WORLD_SCRIPT = preload("res://scripts/office_environment.gd")
 const WORKSTATION_SYSTEM_SCRIPT = preload("res://scripts/workstation_sys.gd")
@@ -35,13 +35,13 @@ const ROOM_CENTERS := {
 }
 
 const EMPLOYEES := [
-	{"id":"lead", "name":"Arman", "role":"Lead Manager", "room":"manager", "position":Vector3(5.8, 0.05, -29.75), "shirt":Color("#466d68"), "hair":Color("#28343b")},
-	{"id":"coo", "name":"Sinta", "role":"COO / Project Manager", "room":"manager", "position":Vector3(13.2, 0.05, -29.75), "shirt":Color("#8b6d83"), "hair":Color("#3a3036")},
-	{"id":"architect", "name":"Raka", "role":"System Architect", "room":"architect", "position":Vector3(29.0, 0.05, -29.75), "shirt":Color("#547b9a"), "hair":Color("#292e34")},
-	{"id":"frontend", "name":"Dira", "role":"Frontend Developer", "room":"frontend", "position":Vector3(-29.0, 0.05, -7.35), "shirt":Color("#b17d62"), "hair":Color("#40352d")},
-	{"id":"qa", "name":"Tika", "role":"QA Engineer", "room":"qa", "position":Vector3(-5.0, 0.05, -7.35), "shirt":Color("#6b8c73"), "hair":Color("#302c2b")},
-	{"id":"backend", "name":"Bima", "role":"Backend Developer", "room":"backend", "position":Vector3(27.0, 0.05, -7.35), "shirt":Color("#55758c"), "hair":Color("#252e31")},
-	{"id":"api", "name":"Naya", "role":"API Specialist", "room":"api", "position":Vector3(29.0, 0.05, 14.2), "shirt":Color("#ad8a56"), "hair":Color("#39312d")}
+	{"id":"lead", "name":"Arman", "role":"Lead Manager", "room":"manager", "position":Vector3(5.8, 0.05, -29.75), "shirt":Color("#466d68"), "hair":Color("#28343b"), "body_type":"average", "gender":"male", "floor":2},
+	{"id":"coo", "name":"Sinta", "role":"COO / Project Manager", "room":"manager", "position":Vector3(13.2, 0.05, -29.75), "shirt":Color("#8b6d83"), "hair":Color("#3a3036"), "body_type":"slim", "gender":"female", "wear_hijab":true, "floor":2},
+	{"id":"architect", "name":"Raka", "role":"System Architect", "room":"architect", "position":Vector3(29.0, 0.05, -29.75), "shirt":Color("#547b9a"), "hair":Color("#292e34"), "body_type":"tall", "gender":"male", "floor":2},
+	{"id":"frontend", "name":"Dira", "role":"Frontend Developer", "room":"frontend", "position":Vector3(-29.0, 0.05, -7.35), "shirt":Color("#b17d62"), "hair":Color("#40352d"), "body_type":"average", "gender":"female", "wear_hijab":false, "floor":2},
+	{"id":"qa", "name":"Tika", "role":"QA Engineer", "room":"qa", "position":Vector3(-5.0, 0.05, -7.35), "shirt":Color("#6b8c73"), "hair":Color("#302c2b"), "body_type":"slim", "gender":"female", "wear_hijab":false, "floor":2},
+	{"id":"backend", "name":"Bima", "role":"Backend Developer", "room":"backend", "position":Vector3(27.0, 0.05, -7.35), "shirt":Color("#55758c"), "hair":Color("#252e31"), "body_type":"stocky", "gender":"male", "floor":2},
+	{"id":"api", "name":"Naya", "role":"API Specialist", "room":"api", "position":Vector3(29.0, 0.05, 14.2), "shirt":Color("#ad8a56"), "hair":Color("#39312d"), "body_type":"average", "gender":"female", "wear_hijab":true, "floor":1}
 ]
 
 var player
@@ -161,44 +161,43 @@ func _build_environment() -> void:
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	environment.ambient_light_energy = 0.72
 
-	# Tonemapping — filmic for natural HDR response. Exposure diturunkan
-	# sedikit agar warna tidak tercuci (washed out) di layar terang.
-	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	environment.tonemap_exposure = 0.97
+	# Design Bible: ACESTonemap, Exposure 1.15, clean vibrant (no far blur).
+	environment.tonemap_mode = Environment.TONE_MAPPER_ACES
+	environment.tonemap_exposure = 1.15
 	environment.adjustment_enabled = true
 	environment.adjustment_brightness = 1.0
-	environment.adjustment_contrast = 1.08
-	environment.adjustment_saturation = 1.03
+	environment.adjustment_contrast = 1.06
+	environment.adjustment_saturation = 1.05
 
-	# SSAO — high quality screen-space ambient occlusion.
+	# SSAO (radius 1.2, intensity 2.0).
 	environment.ssao_enabled = true
-	environment.ssao_radius = 1.4
-	environment.ssao_intensity = 1.8
+	environment.ssao_radius = 1.2
+	environment.ssao_intensity = 2.0
 	environment.ssao_power = 1.8
 	environment.ssao_light_affect = 0.65
 	environment.ssao_ao_channel_affect = 1.0
 
-	# Glow — subtle bloom for screen highlights and emissive surfaces.
+	# Glow — thin bloom (LED/screens), threshold 0.85.
 	environment.glow_enabled = true
-	environment.glow_intensity = 0.40
-	environment.glow_bloom = 0.14
-	environment.glow_hdr_threshold = 0.88
-	environment.glow_hdr_scale = 1.2
+	environment.glow_intensity = 0.30
+	environment.glow_bloom = 0.08
+	environment.glow_hdr_threshold = 0.85
+	environment.glow_hdr_scale = 1.1
 
-	# Fog — subtle atmospheric perspective for depth.
+	# Atmosphere fog (wide city scale; DoF/Far Blur OFF for sharp distant city).
 	environment.fog_enabled = true
-	environment.fog_density = 0.00015
+	environment.fog_density = 0.005
 	environment.fog_light_color = Color(0.78, 0.82, 0.80)
-	environment.fog_aerial_perspective = 0.30
+	environment.fog_aerial_perspective = 0.22
 
-	# Volumetric fog — light shafts through windows.
+	# Volumetric fog — very light shafts.
 	environment.volumetric_fog_enabled = true
-	environment.volumetric_fog_density = 0.007
+	environment.volumetric_fog_density = 0.003
 	environment.volumetric_fog_anisotropy = 0.40
-	environment.volumetric_fog_length = 36.0
-	environment.volumetric_fog_ambient_inject = 0.15
+	environment.volumetric_fog_length = 40.0
+	environment.volumetric_fog_ambient_inject = 0.10
 
-	# Screen-space reflections for glossy floors and surfaces.
+	# SSR for glossy marble floors / screens.
 	environment.ssr_enabled = true
 	environment.ssr_fade_in = 0.15
 	environment.ssr_fade_out = 0.30
@@ -207,16 +206,26 @@ func _build_environment() -> void:
 	world_environment.environment = environment
 	add_child(world_environment)
 
-	# Sun — warm directional light with high-quality shadows.
+	# Sun — cascaded shadows. Bias/pancake tuned to stop shadow acne/flicker
+	# (blend_splits off: seam blending can shimmer with a moving camera).
 	var sun := DirectionalLight3D.new()
 	sun.name = "AfternoonSun"
 	sun.rotation_degrees = Vector3(-38, -35, 0)
 	sun.light_color = Color(1.0, 0.94, 0.80)
 	sun.light_energy = 1.35
 	sun.shadow_enabled = true
-	sun.shadow_blur = 1.5
-	sun.directional_shadow_max_distance = 120.0
+	sun.shadow_bias = 0.035
+	sun.shadow_normal_bias = 1.8
+	sun.shadow_reverse_cull_face = true
+	sun.shadow_blur = 1.2
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	sun.directional_shadow_split_1 = 0.08
+	sun.directional_shadow_split_2 = 0.22
+	sun.directional_shadow_split_3 = 0.55
+	sun.directional_shadow_blend_splits = false
+	sun.directional_shadow_max_distance = 180.0
 	sun.directional_shadow_fade_start = 0.85
+	sun.directional_shadow_pancake_size = 24.0
 	add_child(sun)
 
 	# Fill light — cool ambient bounce from sky.
@@ -312,6 +321,10 @@ func _spawn_characters() -> void:
 		npc.job_title = employee.role
 		npc.shirt_color = employee.shirt
 		npc.hair_color = employee.hair
+		npc.gender = employee.get("gender", "male")
+		npc.wear_hijab = bool(employee.get("wear_hijab", false))
+		npc.skin_color = employee.get("skin_color", Color("#c89e84"))
+		npc.body_type = employee.get("body_type", "average")
 		npc.home_position = employee.position
 		npc.name = "NPC_" + employee.id
 		add_child(npc)
@@ -339,7 +352,7 @@ func _spawn_characters() -> void:
 	secretary.job_title = "Executive Secretary · belum tersambung"
 	secretary.shirt_color = Color("#6e8278")
 	secretary.hair_color = Color("#342e2a")
-	secretary.home_position = Vector3(-10.8, 0.05, -29.75)
+	secretary.home_position = Vector3(-10.8, 6.2+0.05, -29.75)
 	secretary.name = "Secretary_Visual_Slot"
 	add_child(secretary)
 
@@ -398,14 +411,21 @@ func _ambient_plans_for(employee_id: String, _home: Vector3) -> Array:
 func _build_interaction_points() -> void:
 	_interactables = [
 		{"id":"reception", "label":"Reception Desk", "position":Vector3(0,0,22.7), "prompt":"Sapa resepsionis Mira"},
-		_station_interactable("workstation", "Owner Workstation", "OWNER-PC-001", "owner", Vector3(-29.3,0,-31.3)),
-		{"id":"owner_tray", "label":"Owner Paper Tray", "position":Vector3(-27.2,0,-29.8), "prompt":"Periksa dokumen di tray Owner"},
-		{"id":"secretary_desk", "label":"Secretary Desk", "position":Vector3(-10.8,0,-31.3), "prompt":"Buka agenda Sekretaris"},
+		_station_interactable("workstation", "Owner Workstation", "OWNER-PC-001", "owner", Vector3(-29.3,12.4,-31.3)),
+		{"id":"owner_tray", "label":"Owner Paper Tray", "position":Vector3(-27.2,12.4,-29.8), "prompt":"Periksa dokumen di tray Owner"},
+		{"id":"secretary_desk", "label":"Secretary Desk", "position":Vector3(-10.8,6.2,-31.3), "prompt":"Buka agenda Sekretaris"},
 		{"id":"meeting", "label":"Boardroom", "position":Vector3(-29.5,0,10.0), "prompt":"Masuk ke ruang rapat"},
 		{"id":"printer", "label":"Office Printer", "position":Vector3(-23.2,0,29.9), "prompt":"Gunakan printer kantor"},
 		{"id":"coffee", "label":"Coffee Station", "position":Vector3(22.5,0,34.8), "prompt":"Ambil kopi di pantry"},
 		{"id":"lounge", "label":"Staff Lounge", "position":Vector3(7.0,0,32.1), "prompt":"Beristirahat di lounge"},
 		{"id":"archive", "label":"Company Archive", "position":Vector3(-29.5,0,27.2), "prompt":"Buka arsip perusahaan"},
+		{"id":"lift_l1", "label":"Lift (Lantai 1)", "position":Vector3(15.3,0.0,8.7), "prompt":"E · Naik/Turun Lift (samping tangga naik/turun)", "lift_floor":"L1"},
+		{"id":"lift_l2", "label":"Lift (Lantai 2)", "position":Vector3(15.3,6.2,8.7), "prompt":"E · Pilih lantai Lift (samping tangga)", "lift_floor":"L2"},
+		{"id":"lift_l3", "label":"Lift (Lantai 3)", "position":Vector3(15.3,12.4,8.7), "prompt":"E · Naik/Turun Lift (samping tangga)", "lift_floor":"L3"},
+		{"id":"stair_up_l1", "label":"Tangga Naik (ke L2)", "position":Vector3(13.6,0.0,14.7), "prompt":"E · Naik via Tangga Naik → Lantai 2", "to_floor":"L2", "to_pos":"stair"},
+		{"id":"stair_up_l2", "label":"Tangga Naik (ke L3)", "position":Vector3(13.6,6.2,14.7), "prompt":"E · Naik via Tangga Naik → Lantai 3", "to_floor":"L3", "to_pos":"stair"},
+		{"id":"stair_down_l2", "label":"Tangga Turun (ke L1)", "position":Vector3(10.6,6.2,6.6), "prompt":"E · Turun via Tangga Turun → Lantai 1", "to_floor":"L1", "to_pos":"stair"},
+		{"id":"stair_down_l3", "label":"Tangga Turun (ke L2)", "position":Vector3(10.6,12.4,6.6), "prompt":"E · Turun via Tangga Turun → Lantai 2", "to_floor":"L2", "to_pos":"stair"},
 	]
 	for desk_id in EMPLOYEE_STATIONS:
 		var station: Dictionary = EMPLOYEE_STATIONS[desk_id]
@@ -1102,6 +1122,19 @@ func _on_player_interact() -> void:
 		receptionist.trigger_greeting()
 		_show_toast("Mira: Selamat datang di Bangkah Headquarters. Ada yang bisa saya bantu?")
 		return
+	if target_id in ["lift_l1","lift_l2","lift_l3"]:
+		_use_lift(str(target.get("lift_floor","L1")))
+		return
+	if str(target.get("to_pos","")) == "stair":
+		var destf := str(target.get("to_floor","L1"))
+		var ys2 := {"L1":0.06,"L2":6.26,"L3":12.46}
+		var sxp := 13.6 if str(target_id).begins_with("stair_up") else 10.6
+		if is_instance_valid(player):
+			player.global_position = Vector3(sxp, float(ys2.get(destf,0.06)), 14.1)
+			if player.has_method("exit_seat"): player.exit_seat()
+		_show_toast(("Tangga Naik → " if str(target_id).begins_with("stair_up") else "Tangga Turun → ") + ({"L1":"Lantai 1","L2":"Lantai 2","L3":"Lantai 3"}.get(destf,destf)))
+		return
+		return
 	if target_id == "workstation":
 		_enter_workstation(target)
 		return
@@ -1137,6 +1170,18 @@ func _on_player_interact() -> void:
 			_company_ui.open_panel("archive")
 	if target_id in ["coffee", "lounge"]:
 		_show_toast(str(info.get("detail", "Aktivitas dilakukan.")))
+
+
+
+func _use_lift(from_floor: String) -> void:
+	if not is_instance_valid(player): return
+	var order := ["L1","L2","L3"]; var ys := {"L1":0.06, "L2":6.26, "L3":12.46}
+	var names := {"L1":"Lantai 1 (Lobi/Layanan)", "L2":"Lantai 2 (Karyawan Inti)", "L3":"Lantai 3 (Owner)"}
+	var idx := order.find(from_floor); if idx < 0: idx = 0
+	var next_idx := (idx + 1) % order.size(); var dest := str(order[next_idx])
+	player.global_position = Vector3(15.3, float(ys.get(dest, 0.06)), 9.6)
+	if player.has_method("exit_seat"): player.exit_seat()
+	_show_toast("Lift: %s → %s" % [names.get(from_floor, from_floor), names.get(dest, dest)])
 
 func _enter_workstation(target: Dictionary) -> void:
 	if _desktop_active:
