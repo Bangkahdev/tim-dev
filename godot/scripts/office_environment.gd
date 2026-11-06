@@ -47,6 +47,7 @@ func build() -> void:
 	_build_api_lab()
 	_build_archive_and_print()
 	_build_pantry_and_lounge()
+	_build_accent_walls()
 	_build_corridor_details()
 	_build_office_accessories()
 	_build_landscape()
@@ -384,7 +385,7 @@ func _build_room_floors() -> void:
 	_box("Lobby stone floor", Vector3(-0.4, 0.126, 14.5), Vector3(38.0, 0.035, 20.0), Color("#d3d2c8"), false, null, 0.38, 0.05, false, Color.BLACK, stone_material)
 	_box("API lab floor", Vector3(29.0, 0.126, 14.5), Vector3(20.0, 0.035, 20.0), Color("#a8b6b8"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
 	_box("Archive floor", Vector3(-29.5, 0.126, 32.0), Vector3(18.0, 0.035, 14.0), Color("#b9ad9e"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
-	_box("Promotion floor", Vector3(-10.0, 0.126, 32.0), Vector3(18.7, 0.035, 14.0), Color("#b9aa9c"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
+	_box("Owner lounge floor", Vector3(-10.0, 0.126, 32.0), Vector3(18.7, 0.035, 14.0), Color("#b0987e"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
 	_box("Staff lounge floor", Vector3(9.0, 0.126, 32.0), Vector3(18.5, 0.035, 14.0), Color("#b9c6b8"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
 	_box("Pantry tile floor", Vector3(30.0, 0.126, 32.0), Vector3(23.5, 0.035, 14.0), Color("#c6c8bf"), false, null, 0.32, 0.08, false, Color.BLACK, tile_material)
 	# Flooring insets / transition strips.
@@ -725,16 +726,50 @@ func _build_archive_and_print() -> void:
 
 func _build_pantry_and_lounge() -> void:
 	_label("PANTRY  /  STAFF LOUNGE", Vector3(10.0, 3.45, 25.8), 0.0057)
-	# Promotion team room is provisioned spatially; desks remain empty until the
-	# department and its three agents are created in the backend roster.
-	_label("PROMOTION  /  CREATIVE STUDIO", Vector3(-10.0, 3.45, 25.8), 0.0054)
-	_add_workstation(Vector3(-15.2, 0, 30.0), "PROMOTION MANAGER  /  RESERVED", Color("#a17c61"), true)
-	_add_workstation(Vector3(-9.0, 0, 30.0), "CONTENT WRITER  /  RESERVED", Color("#96765f"), true)
-	_add_workstation(Vector3(-2.8, 0, 30.0), "SOCIAL MEDIA  /  RESERVED", Color("#8b8066"), true)
-	_box("Creative studio moodboard frame", Vector3(-10.0, 2.15, 38.75), Vector3(6.2, 2.25, 0.12), Color("#596b60"), false)
-	_box("Creative studio moodboard", Vector3(-10.0, 2.15, 38.66), Vector3(5.9, 1.98, 0.03), Color("#d4d9cb"), false)
-	for x in [-12.0, -10.0, -8.0]:
-		_box("Content moodboard card", Vector3(x, 2.15, 38.61), Vector3(1.45, 1.35, 0.025), Color("#c9b28e"), false)
+	# Ruang pribadi Owner (sebelumnya Promotion studio yang kosong): ruang
+	# santai privat dengan area duduk, perpustakaan, kitchenette dan TV.
+	_label("OWNER  /  RUANG PRIBADI", Vector3(-10.0, 3.45, 25.8), 0.0054)
+	_box("Owner lounge accent wall", Vector3(-10.0, 1.95, 39.72), Vector3(18.6, 3.7, 0.10), Color("#6b4a38"), false)
+	_box("Owner lounge accent trim", Vector3(-10.0, 0.42, 39.66), Vector3(18.6, 0.10, 0.05), Color("#c5a366"), false)
+	_box("Owner lounge rug", Vector3(-10.0, 0.16, 32.0), Vector3(15.0, 0.06, 9.0), Color("#7c5f4a"), false)
+	_box("Owner lounge rug inset", Vector3(-10.0, 0.20, 32.0), Vector3(13.4, 0.045, 7.6), Color("#8f7260"), false)
+	_add_lounge_sofa(Vector3(-10.0, 0, 34.6), PI, Color("#7a5a44"), 4.2)
+	_box("Owner lounge coffee table", Vector3(-10.0, 0.46, 32.6), Vector3(3.2, 0.60, 1.35), Color("#8a6a4c"), false)
+	_box("Owner lounge table top", Vector3(-10.0, 0.80, 32.6), Vector3(3.45, 0.12, 1.55), Color("#c8aa83"), false)
+	_cylinder("Owner lounge mug", Vector3(-10.8, 0.97, 32.4), 0.09, 0.14, Color("#e7e1d4"))
+	_box("Owner lounge book stack", Vector3(-9.2, 0.90, 32.8), Vector3(0.55, 0.16, 0.40), Color("#5e756a"), false)
+	# TV wall panel di seberang sofa.
+	_box("Owner lounge TV frame", Vector3(-10.0, 2.05, 25.45), Vector3(5.4, 1.95, 0.14), Color("#2f3f3c"), false)
+	_box("Owner lounge TV screen", Vector3(-10.0, 2.05, 25.36), Vector3(5.05, 1.62, 0.03), Color("#1c2f36"), false, null, 0.18, 0.0, false, Color("#3f6d68"))
+	_box("Owner lounge TV bar", Vector3(-10.0, 1.18, 25.40), Vector3(3.2, 0.08, 0.05), Color("#35464a"), false)
+	# Perpustakaan pribadi.
+	_add_shelf(Vector3(-17.5, 0.16, 36.5), 3.4, 2.65, 0.9, "PERPUSTAKAAN PRIBADI")
+	_add_shelf(Vector3(-17.5, 0.16, 29.5), 3.4, 2.65, 0.9, "KOLEKSI")
+	# Kitchenette pribadi.
+	_box("Owner kitchenette cabinet", Vector3(-3.4, 0.72, 36.5), Vector3(3.6, 1.42, 1.05), Color("#7c6853"), false)
+	_box("Owner kitchenette countertop", Vector3(-3.4, 1.48, 36.35), Vector3(3.8, 0.14, 1.25), Color("#d3cbb9"), false)
+	_box("Owner kitchenette kettle", Vector3(-3.9, 1.75, 36.2), Vector3(0.34, 0.42, 0.34), Color("#3b4e4b"), false)
+	_cylinder("Owner kitchenette mug", Vector3(-3.1, 1.62, 36.2), 0.09, 0.14, Color("#e7e1d4"))
+	_box("Owner mini fridge", Vector3(-1.9, 0.65, 38.3), Vector3(0.9, 1.25, 0.85), Color("#c4cbc6"), false, null, 0.28, 0.3)
+	# Lampu lantai hangat + tanaman + dekorasi.
+	_cylinder("Owner floor lamp pole", Vector3(-4.4, 0.85, 28.5), 0.045, 1.6, Color("#596b63"))
+	_box("Owner floor lamp glow", Vector3(-4.4, 1.72, 28.5), Vector3(0.42, 0.10, 0.42), Color("#f5e0b8"), false, null, 0.22, 0.0, false, Color("#f8ecca"))
+	var owner_lamp := OmniLight3D.new()
+	owner_lamp.position = Vector3(-4.4, 1.85, 28.5)
+	owner_lamp.light_color = Color("#ffe8c8")
+	owner_lamp.light_energy = 0.38
+	owner_lamp.omni_range = 7.0
+	owner_lamp.shadow_enabled = false
+	add_child(owner_lamp)
+	_add_plant(Vector3(-18.0, 0, 26.5), 0.95)
+	_add_plant(Vector3(-2.8, 0, 26.5), 0.95)
+	_add_plant(Vector3(-18.0, 0, 38.5), 1.05)
+	_add_framed_poster(Vector3(-19.62, 2.1, 32.5), Color("#c5a366"), "OWNER")
+	_add_wall_clock(Vector3(-10.0, 3.0, 39.65))
+	_box("Owner lounge sideboard", Vector3(-2.9, 0.72, 29.5), Vector3(3.2, 1.38, 0.70), Color("#8b735c"), false)
+	_box("Owner lounge sideboard top", Vector3(-2.9, 1.46, 29.5), Vector3(3.4, 0.12, 0.84), Color("#c8aa83"), false)
+	_cylinder("Owner lounge vase", Vector3(-3.6, 1.72, 29.5), 0.16, 0.30, Color("#5e756a"))
+	_box("Owner lounge book pile", Vector3(-2.2, 1.62, 29.5), Vector3(0.5, 0.22, 0.36), Color("#7889a8"), false)
 	# Kitchen run: upper cabinets, counter, sink, fridge, coffee and microwave.
 	_box("Pantry lower cabinets", Vector3(29.0, 0.72, 36.5), Vector3(18.5, 1.42, 1.10), Color("#8d7b68"), true)
 	_box("Pantry countertop", Vector3(29.0, 1.48, 36.35), Vector3(18.8, 0.14, 1.30), Color("#d3cbb9"), false)
@@ -763,6 +798,50 @@ func _build_pantry_and_lounge() -> void:
 	_add_plant(Vector3(15.0, 0, 35.0), 1.0)
 	_box("Lounge wall display", Vector3(9.0, 2.1, 38.75), Vector3(5.6, 2.0, 0.14), Color("#41544b"), false)
 	_box("Lounge display screen", Vector3(9.0, 2.1, 38.65), Vector3(5.25, 1.66, 0.03), Color("#254039"), false, null, 0.18, 0.0, false, Color("#426d57"))
+
+func _build_accent_walls() -> void:
+	# Cat aksen pada dinding fitur per ruangan — warna tenang sesuai palet
+	# desain, pemasangan sebagai panel tipis agar tidak mengubah struktur.
+	# Boardroom: panel terakota mengapit display + lis kuningan di whiteboard.
+	for x in [-35.5, -23.5]:
+		_box("Boardroom terracotta accent", Vector3(x, 1.95, 4.86), Vector3(2.4, 2.9, 0.08), Color("#9a6a58"), false)
+		_box("Boardroom accent trim", Vector3(x, 0.48, 4.87), Vector3(2.4, 0.10, 0.09), Color("#c5a366"), false)
+	_box("Boardroom brass line", Vector3(-39.68, 0.75, 15.0), Vector3(0.06, 0.12, 6.0), Color("#c5a366"), false)
+	# Owner suite: wainscot walnut + lis kuningan di bawah crest fitur.
+	_box("Owner wainscot walnut", Vector3(-29.5, 0.55, -38.88), Vector3(16.5, 0.85, 0.06), Color("#6b5238"), false)
+	_box("Owner brass trim", Vector3(-29.5, 1.02, -38.89), Vector3(16.5, 0.09, 0.06), Color("#c5a366"), false)
+	# Management: panel sage di atas sprint board.
+	_box("Management sage accent", Vector3(8.2, 3.15, -38.80), Vector3(6.4, 0.70, 0.06), Color("#6f8a7a"), false)
+	# Engineering: band slate-teal setinggi sandaran kursi di sisi selatan.
+	_box("Engineering slate band", Vector3(0.0, 0.70, 3.86), Vector3(36.0, 1.0, 0.05), Color("#4c666a"), false)
+	# API lab: panel grafit di dinding timur.
+	_box("API graphite accent", Vector3(39.74, 1.95, 14.5), Vector3(0.06, 2.9, 5.0), Color("#3a4a4d"), false)
+	for y in [1.2, 1.95, 2.7]:
+		_box("API accent node", Vector3(39.70, y, 14.5), Vector3(0.04, 0.5, 0.5), Color("#73c49a"), false, null, 0.2, 0.0, false, Color("#5b9b7e"))
+	# Lobby: panel pasir hangat di balik direktori + medali lantai + bangku.
+	_box("Lobby sand accent", Vector3(12.05, 1.60, 28.2), Vector3(0.08, 3.2, 2.6), Color("#b8a88e"), false)
+	_cylinder("Lobby floor medallion", Vector3(11.8, 0.16, 28.2), 2.1, 0.05, Color("#7c8a7e"), null, false, 0.4)
+	_cylinder("Lobby medallion inner", Vector3(11.8, 0.20, 28.2), 1.35, 0.055, Color("#9aa78f"), null, false, 0.4)
+	_box("Lobby visitor bench", Vector3(-14.0, 0.52, 24.5), Vector3(3.4, 0.16, 0.75), Color("#92785c"), false)
+	_box("Lobby bench back", Vector3(-14.0, 0.96, 24.15), Vector3(3.4, 0.7, 0.14), Color("#92785c"), false)
+	for x in [-15.4, -12.6]:
+		_box("Lobby bench leg", Vector3(x, 0.25, 24.5), Vector3(0.13, 0.5, 0.13), Color("#52635b"), false)
+	# Lis ambang pintu berwarna per sayap ruangan (wayfinding halus).
+	for x in [-29.0, -11.0, 8.0, 29.0]:
+		_box("Door threshold north wing", Vector3(x, 0.17, -20.0), Vector3(2.9, 0.045, 0.5), Color("#6f8a7a"), false)
+	for x in [-29.0, -6.5, 0.0, 13.0, 29.0]:
+		_box("Door threshold engineering", Vector3(x, 0.17, 4.0), Vector3(2.9, 0.045, 0.5), Color("#4c666a"), false)
+	for x in [-29.0, 0.0, 29.0]:
+		_box("Door threshold south wing", Vector3(x, 0.17, 25.0), Vector3(2.9, 0.045, 0.5), Color("#9a6a58"), false)
+	# Tanaman sudut tambahan di koridor.
+	_add_plant(Vector3(-18.5, 0, -17.5), 0.85)
+	_add_plant(Vector3(18.5, 0, -17.5), 0.85)
+	_add_plant(Vector3(-18.5, 0, 21.5), 0.85)
+	_add_plant(Vector3(-18.5, 0, -38.5), 1.0)
+	_add_plant(Vector3(18.5, 0, -38.5), 1.0)
+	# Poster tambahan di lorong selatan.
+	_add_framed_poster(Vector3(-19.62, 2.1, 10.0), Color("#9a6a58"), "BANGKAH")
+	_add_framed_poster(Vector3(19.62, 2.1, 10.0), Color("#6f8a7a"), "INTEGRITY")
 
 func _build_corridor_details() -> void:
 	# Hallway wayfinding strips and room labels, kept low-key so the office remains the focus.

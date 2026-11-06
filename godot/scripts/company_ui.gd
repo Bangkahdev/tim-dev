@@ -137,10 +137,10 @@ func _build_interface() -> void:
 
 	shell_margin_container = MarginContainer.new()
 	shell_margin_container.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	shell_margin_container.add_theme_constant_override("margin_left", 30)
-	shell_margin_container.add_theme_constant_override("margin_top", 28)
-	shell_margin_container.add_theme_constant_override("margin_right", 30)
-	shell_margin_container.add_theme_constant_override("margin_bottom", 28)
+	shell_margin_container.add_theme_constant_override("margin_left", 20)
+	shell_margin_container.add_theme_constant_override("margin_top", 20)
+	shell_margin_container.add_theme_constant_override("margin_right", 20)
+	shell_margin_container.add_theme_constant_override("margin_bottom", 20)
 	overlay_root.add_child(shell_margin_container)
 	shell = PanelContainer.new()
 	shell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -212,13 +212,13 @@ func _build_interface() -> void:
 
 func _build_header(parent: VBoxContainer) -> void:
 	var header_margin := MarginContainer.new()
-	header_margin.add_theme_constant_override("margin_left", 24)
-	header_margin.add_theme_constant_override("margin_right", 20)
+	header_margin.add_theme_constant_override("margin_left", 18)
+	header_margin.add_theme_constant_override("margin_right", 16)
 	header_margin.add_theme_constant_override("margin_top", 15)
 	header_margin.add_theme_constant_override("margin_bottom", 15)
 	parent.add_child(header_margin)
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 14)
+	row.add_theme_constant_override("separation", 10)
 	header_margin.add_child(row)
 	var mark := PanelContainer.new()
 	mark.custom_minimum_size = Vector2(42, 42)
@@ -231,7 +231,7 @@ func _build_header(parent: VBoxContainer) -> void:
 	var brand_box := VBoxContainer.new()
 	brand_box.add_theme_constant_override("separation", 1)
 	row.add_child(brand_box)
-	brand_box.add_child(_label("BANGKAH  /  KANTOR PERUSAHAAN", 12, MUTED, true, false))
+	brand_box.add_child(_label("BANGKAH  /  PERUSAHAAN", 10, MUTED, true, false))
 	page_title = _label("Ringkasan perusahaan", 19, TEXT, true, false)
 	brand_box.add_child(page_title)
 	var spacer := Control.new()
@@ -254,10 +254,10 @@ func _build_header(parent: VBoxContainer) -> void:
 	connection_badge = _label("OFFLINE", 10, MUTED, true, false)
 	row.add_child(connection_badge)
 	header_tray_button = _button("KOTAK MASUK", Callable(self, "open_panel").bind("documents"), "secondary")
-	header_tray_button.custom_minimum_size = Vector2(132, 38)
+	header_tray_button.custom_minimum_size = Vector2(96, 36)
 	row.add_child(header_tray_button)
 	var close := _button("CLOSE  ×", Callable(self, "close_panel"), "quiet")
-	close.custom_minimum_size = Vector2(88, 38)
+	close.custom_minimum_size = Vector2(68, 36)
 	# Hover effect for close button.
 	close.mouse_entered.connect(func():
 		var t := create_tween()
@@ -278,12 +278,19 @@ func _build_sidebar(parent: HBoxContainer) -> void:
 	side_margin.custom_minimum_size.x = 214
 	side_margin.add_theme_constant_override("margin_left", 14)
 	side_margin.add_theme_constant_override("margin_right", 14)
-	side_margin.add_theme_constant_override("margin_top", 20)
-	side_margin.add_theme_constant_override("margin_bottom", 18)
+	side_margin.add_theme_constant_override("margin_top", 14)
+	side_margin.add_theme_constant_override("margin_bottom", 10)
 	parent.add_child(side_margin)
+	var side_scroll := ScrollContainer.new()
+	side_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	side_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	side_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	side_margin.add_child(side_scroll)
 	var side := VBoxContainer.new()
-	side.add_theme_constant_override("separation", 6)
-	side_margin.add_child(side)
+	side.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	side.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	side.add_theme_constant_override("separation", 5)
+	side_scroll.add_child(side)
 	side.add_child(_label("OPERASIONAL", 9, MUTED, true))
 	_add_nav(side, "overview", "Ringkasan", "01")
 	_add_nav(side, "projects", "Proyek & Tugas", "02")
@@ -312,7 +319,7 @@ func _add_nav(parent: VBoxContainer, page_id: String, title: String, number: Str
 	nav_meta[page_id] = {"number": number, "title": title}
 	var button := _button(_nav_text(page_id, 0), Callable(self, "open_panel").bind(page_id), "nav")
 	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	button.custom_minimum_size = Vector2(0, 42)
+	button.custom_minimum_size = Vector2(0, 34)
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.tooltip_text = _shortcut_for(page_id)
 	# Hover feedback for nav items.
@@ -393,12 +400,12 @@ func set_connection_state(online: bool) -> void:
 	connection_online = online
 	if not is_instance_valid(connection_badge):
 		return
-	connection_badge.text = "BACKEND TERHUBUNG" if online else "BACKEND OFFLINE"
+	connection_badge.text = "TERHUBUNG" if online else "OFFLINE"
 	connection_badge.add_theme_color_override("font_color", ACCENT if online else AMBER)
 	if is_instance_valid(_connection_dot):
 		_connection_dot.add_theme_color_override("font_color", ACCENT if online else AMBER)
 	if is_instance_valid(data_badge):
-		data_badge.text = "DATA OPERASIONAL" if online else "MODE LOKAL"
+		data_badge.text = "LIVE" if online else "LOKAL"
 		data_badge.add_theme_color_override("font_color", ACCENT if online else AMBER)
 		data_badge.add_theme_stylebox_override("normal", _style(Color("#22322c"), Color("#4a6a55"), 9, 1) if online else _style(Color("#3b3020"), Color("#6b5230"), 9, 1))
 
@@ -600,8 +607,7 @@ func _style_scrollbar(scroll: ScrollContainer) -> void:
 
 func _render_projects() -> void:
 	_page_intro("Workspace aktif, task, acceptance criteria dan evidence dari backend.")
-	if not connection_online:
-		_add_notice(content_box, "BACKEND OFFLINE", "Tidak ada data proyek yang dapat dimuat.", AMBER); return
+	_offline_banner("Tidak ada data proyek baru. Menampilkan data terakhir yang tersimpan.")
 	var projects: Variant = company_snapshot.get("projects", [])
 	var project_card := _section_card(content_box, "WORKSPACE PROYEK", "Direktori proyek yang terdeteksi backend")
 	if projects is Array and not projects.is_empty():
@@ -673,8 +679,7 @@ func _open_task_evidence_dialog(task_id: String) -> void:
 
 func _render_team() -> void:
 	_page_intro("Status, departemen dan task aktif dari roster backend.")
-	if not connection_online:
-		_add_notice(content_box, "BACKEND OFFLINE", "Roster tidak tersedia dalam mode lokal.", AMBER); return
+	_offline_banner("Roster tidak tersedia. Menampilkan data terakhir yang tersimpan.")
 	var employees := _company_rows("employees")
 	var departments := _company_rows("departments")
 	for department in departments:
@@ -689,8 +694,7 @@ func _render_team() -> void:
 
 func _render_documents() -> void:
 	_page_intro("Paper, approval dan hasil cetak yang tersimpan di database perusahaan.")
-	if not connection_online:
-		_add_notice(content_box, "BACKEND OFFLINE", "Kotak masuk dan persetujuan hanya dapat dibuka ketika backend tersambung.", AMBER); return
+	_offline_banner("Kotak masuk hanya baca dalam mode lokal. Menampilkan data terakhir yang tersimpan.")
 	var papers := _company_rows("papers")
 	if selected_paper_id.is_empty() and not papers.is_empty():
 		selected_paper_id = str(papers[0].get("id", ""))
@@ -815,8 +819,7 @@ func _open_paper_dialog() -> void:
 
 func _render_meetings() -> void:
 	_page_intro("Agenda, peserta, notulen, keputusan dan tindak lanjut rapat persisten.")
-	if not connection_online:
-		_add_notice(content_box, "BACKEND OFFLINE", "Rapat tidak dapat dibuat atau diperbarui.", AMBER); return
+	_offline_banner("Rapat tidak dapat dibuat atau diperbarui. Menampilkan agenda terakhir yang tersimpan.")
 	var meetings := _company_rows("meetings")
 	var card := _section_card(content_box, "AGENDA RAPAT", "Meeting records")
 	card.add_child(_button("JADWALKAN RAPAT  +", Callable(self, "_open_meeting_dialog"), "primary"))
@@ -880,8 +883,7 @@ func _lines_to_array(value: String) -> Array[String]:
 
 func _render_secretary() -> void:
 	_page_intro("Jalur koordinasi Owner ke Lead Manager Bangkah.")
-	if not connection_online:
-		_add_notice(content_box, "BACKEND OFFLINE", "Hubungkan backend untuk mengirim instruksi perusahaan.", AMBER); return
+	_offline_banner("Koordinasi aktif membutuhkan backend. Menampilkan status terakhir yang tersimpan.")
 	var card := _section_card(content_box, "KOORDINASI INSTRUKSI", "Instruksi diteruskan ke Orchestrator melalui Arman")
 	card.add_child(_label("Gunakan ruang diskusi Arman untuk merencanakan pekerjaan, meminta laporan, membuat task, dan mengarahkan tim. Aksi eksternal tetap membutuhkan approval Owner.", 12, TEXT))
 	card.add_child(_button("BUKA DISKUSI DENGAN ARMAN", func(): employee_chat_requested.emit("lead"), "primary"))
@@ -893,8 +895,7 @@ func _render_secretary() -> void:
 
 func _render_archive() -> void:
 	_page_intro("Dokumen knowledge base yang tersimpan dan diindeks backend.")
-	if not connection_online:
-		_add_notice(content_box, "BACKEND OFFLINE", "Arsip tidak tersedia dalam mode lokal.", AMBER); return
+	_offline_banner("Arsip tidak dapat diperbarui. Menampilkan data terakhir yang tersimpan.")
 	var card := _section_card(content_box, "KNOWLEDGE BASE", "Index dokumen perusahaan")
 	var docs: Variant = _company_data().get("knowledge_documents", [])
 	if docs is Array and not docs.is_empty():
@@ -913,9 +914,7 @@ func _render_archive() -> void:
 
 func _render_overview() -> void:
 	_page_intro("Ringkasan kesehatan perusahaan, status tim dan aktivitas terkini.")
-	if not connection_online:
-		_add_notice(content_box, "BACKEND OFFLINE", "Hubungkan backend untuk melihat data operasional.", AMBER)
-		return
+	_offline_banner("Hubungkan backend untuk data operasional terbaru. Ini ringkasan terakhir yang tersimpan.")
 	var company := _company_data()
 	var employees := _company_rows("employees")
 	var tasks := _company_rows("tasks")
@@ -1010,6 +1009,11 @@ func _render_settings() -> void:
 	_add_task_line(shortcuts, "Proyek & tugas", "F3 / 2", "BUKA", ACCENT)
 	_add_task_line(shortcuts, "Karyawan & tim", "F4 / 3", "BUKA", ACCENT)
 	_add_task_line(shortcuts, "Tutup panel", "ESC", "TUTUP", MUTED)
+
+func _offline_banner(detail: String = "Menampilkan data terakhir yang tersimpan. Aksi tulis akan ditolak sampai backend terhubung.") -> void:
+	if connection_online:
+		return
+	_add_notice(content_box, "BACKEND OFFLINE", detail, AMBER)
 
 func _page_intro(subtitle: String) -> void:
 	_last_page_intro = subtitle

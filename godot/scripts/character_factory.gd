@@ -242,10 +242,10 @@ static func build(parent: Node3D, shirt: Color, hair: Color, label_text: String,
 	# Adam's apple hint.
 	_mesh(body, _sphere_mesh(0.022, 12, 6), skin_mat, Vector3(0, 1.73, -0.072)).scale = Vector3(0.8, 1.2, 0.6)
 
-	# Shoulder caps — rounded deltoids.
+	# Shoulder caps — deltoid membulat tapi proporsional lebih ramping.
 	for sx in [-0.302, 0.302]:
-		var deltoid := _mesh(body, _sphere_mesh(0.096, 24, 12), fabric_mat, Vector3(sx, 1.62, -0.01))
-		deltoid.scale = Vector3(1.0, 0.85, 0.92)
+		var deltoid := _mesh(body, _sphere_mesh(0.084, 24, 12), fabric_mat, Vector3(sx, 1.62, -0.01))
+		deltoid.scale = Vector3(1.0, 0.82, 0.90)
 
 	# Shirt collar — V-neck with depth.
 	var collar := _mesh(body, _box_mesh(Vector3(0.26, 0.06, 0.14)), shirt_light, Vector3(0, 1.68, -0.11))
@@ -291,12 +291,14 @@ static func build(parent: Node3D, shirt: Color, hair: Color, label_text: String,
 		_mesh(head_pivot, _sphere_mesh(0.038, 12, 6), dark_skin_mat, Vector3(sx * 0.15, 0.22, -0.01)).scale = Vector3(0.6, 0.8, 0.5)
 
 	# ---- HAIR — multi-layered with natural volume ----
-	# Crown — main volume.
+	# Crown — main volume. Kedalaman-z dipangkas supaya puncak rambut tak menjorok
+	# ke depan melewati bidang mata/browo.
 	var hair_top := _mesh(head_pivot, _sphere_mesh(0.216, 36, 20), hair_mat, Vector3(0, 0.37, -0.008))
-	hair_top.scale = Vector3(1.02, 0.60, 1.04)
-	# Back — flowing back hair.
-	var hair_back := _mesh(head_pivot, _sphere_mesh(0.212, 32, 14), hair_dark_mat, Vector3(0, 0.26, -0.06))
-	hair_back.scale = Vector3(1.0, 0.72, 0.94)
+	hair_top.scale = Vector3(1.02, 0.60, 0.86)
+	# Back — flowing back hair. Dikecilkan & digeser ke belakang agar tidak
+	# menelan wajah depan (elipsoid penuh dulu menutupi mata dari depan).
+	var hair_back := _mesh(head_pivot, _sphere_mesh(0.212, 32, 14), hair_dark_mat, Vector3(0, 0.28, 0.045))
+	hair_back.scale = Vector3(1.02, 0.62, 0.62)
 	# Side hair / temples.
 	for sx in [-1.0, 1.0]:
 		var side := _mesh(head_pivot, _sphere_mesh(0.068, 22, 12), hair_mat, Vector3(sx * 0.188, 0.30, 0.012))
@@ -306,11 +308,11 @@ static func build(parent: Node3D, shirt: Color, hair: Color, label_text: String,
 	# Front fringe — natural hairline.
 	var fringe := _mesh(head_pivot, _sphere_mesh(0.082, 18, 10), hair_mat, Vector3(0, 0.35, -0.155))
 	fringe.scale = Vector3(1.45, 0.38, 0.65)
-	# Top texture — subtle hair clumps for volume.
+		# Top texture — subtle hair clumps for volume.
 	for i in range(5):
 		var a := TAU * float(i) / 5.0
-		var clump := _mesh(head_pivot, _sphere_mesh(0.048, 12, 6), hair_light_mat, Vector3(cos(a) * 0.12, 0.42 + sin(a) * 0.02, -0.05 + sin(a * 2.0) * 0.03))
-		clump.scale = Vector3(0.85, 0.55, 0.85)
+		var clump := _mesh(head_pivot, _sphere_mesh(0.052, 12, 6), hair_light_mat, Vector3(cos(a) * 0.13, 0.43 + sin(a) * 0.025, -0.02 + sin(a * 2.0) * 0.03))
+		clump.scale = Vector3(1.0, 0.60, 0.95)
 
 	# ---- EARS — anatomical with helix and earlobe ----
 	for sx in [-1.0, 1.0]:
@@ -350,15 +352,15 @@ static func build(parent: Node3D, shirt: Color, hair: Color, label_text: String,
 		# Eye pivot for blink.
 		var eye_pivot := Node3D.new()
 		eye_pivot.name = "EyePivot_%s" % str(sx)
-		eye_pivot.position = Vector3(sx * 0.072, 0.235, -0.186)
+		eye_pivot.position = Vector3(sx * 0.072, 0.235, -0.196)
 		head_pivot.add_child(eye_pivot)
-		# Eye white — larger sclera.
+		# Eye white — larger sclera, pushed forward so the eye reads clearly.
 		var white := _mesh(eye_pivot, _sphere_mesh(0.028, 24, 14), eye_white_mat, Vector3.ZERO)
-		white.scale = Vector3(1.25, 0.68, 0.78)
+		white.scale = Vector3(1.30, 0.78, 0.95)
 		eyes.append(eye_pivot)
 		# Iris — colored circle facing forward.
 		var iris := _mesh(eye_pivot, _sphere_mesh(0.019, 16, 10), iris_mat, Vector3(0, 0, -0.022))
-		iris.scale = Vector3(1.05, 1.0, 0.48)
+		iris.scale = Vector3(1.05, 1.0, 0.55)
 		# Pupil.
 		_mesh(eye_pivot, _sphere_mesh(0.012, 12, 6), pupil_mat, Vector3(0, 0, -0.030), Vector3(1.0, 0.95, 0.4))
 		# Upper eyelid hint.
@@ -387,14 +389,14 @@ static func build(parent: Node3D, shirt: Color, hair: Color, label_text: String,
 		tail.rotation.z = sx * 0.12
 
 	# ---- NOSE — bridge, tip, nostrils, with depth ----
-	var nose_bridge := _mesh(head_pivot, _box_mesh(Vector3(0.038, 0.092, 0.034)), dark_skin_mat, Vector3(0, 0.175, -0.208))
+	var nose_bridge := _mesh(head_pivot, _box_mesh(Vector3(0.038, 0.092, 0.034)), dark_skin_mat, Vector3(0, 0.175, -0.214))
 	nose_bridge.rotation.x = 0.04
 	# Nose bridge sides — for natural width.
 	for sx in [-1.0, 1.0]:
 		_mesh(head_pivot, _box_mesh(Vector3(0.014, 0.06, 0.020)), dark_skin_mat, Vector3(sx * 0.020, 0.175, -0.205))
-	# Nose tip — rounded.
-	var nose_tip := _mesh(head_pivot, _sphere_mesh(0.026, 16, 10), skin_mat, Vector3(0, 0.128, -0.220))
-	nose_tip.scale = Vector3(1.18, 0.82, 0.98)
+	# Nose tip — rounded, sedikit lebih besar & menonjol agar s tombak profil terbaca.
+	var nose_tip := _mesh(head_pivot, _sphere_mesh(0.026, 16, 10), skin_mat, Vector3(0, 0.128, -0.224))
+	nose_tip.scale = Vector3(1.30, 0.88, 1.05)
 	# Nostrils — defined openings.
 	for sx in [-1.0, 1.0]:
 		var nostril := _mesh(head_pivot, _sphere_mesh(0.013, 10, 6), dark_skin_mat, Vector3(sx * 0.018, 0.113, -0.222))
@@ -417,13 +419,13 @@ static func build(parent: Node3D, shirt: Color, hair: Color, label_text: String,
 	lip_mat.roughness = 0.38
 	lip_mat.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
 	# Upper lip — cupid's bow shape.
-	var upper_lip := _mesh(head_pivot, _box_mesh(Vector3(0.098, 0.022, 0.026)), lip_mat, Vector3(0, 0.093, -0.208))
+	var upper_lip := _mesh(head_pivot, _box_mesh(Vector3(0.098, 0.022, 0.026)), lip_mat, Vector3(0, 0.093, -0.213))
 	upper_lip.scale = Vector3(1.0, 0.68, 0.82)
 	# Lower lip — fuller.
-	var lower_lip := _mesh(head_pivot, _box_mesh(Vector3(0.088, 0.028, 0.026)), lip_mat, Vector3(0, 0.068, -0.207))
+	var lower_lip := _mesh(head_pivot, _box_mesh(Vector3(0.088, 0.028, 0.026)), lip_mat, Vector3(0, 0.068, -0.212))
 	lower_lip.scale = Vector3(1.0, 1.0, 0.82)
 	# Lip line — subtle shadow.
-	_mesh(head_pivot, _box_mesh(Vector3(0.085, 0.004, 0.010)), dark_skin_mat, Vector3(0, 0.080, -0.212)).scale = Vector3(1.0, 1.0, 0.8)
+	_mesh(head_pivot, _box_mesh(Vector3(0.085, 0.004, 0.010)), dark_skin_mat, Vector3(0, 0.080, -0.217)).scale = Vector3(1.0, 1.0, 0.8)
 
 	# ---- ARMS — shoulder → upper arm → elbow → forearm → wrist → hand ----
 	var arms: Array[Node3D] = []
@@ -488,10 +490,11 @@ static func build(parent: Node3D, shirt: Color, hair: Color, label_text: String,
 	for side in [-1.0, 1.0]:
 		var hip := Node3D.new()
 		hip.name = "LegPivot_%s" % ("L" if side < 0 else "R")
-		hip.position = Vector3(side * 0.135, 0.80, 0)
+		hip.position = Vector3(side * 0.148, 0.80, 0)
 		body.add_child(hip)
-		# Thigh — tapered, wider at top.
-		_mesh(hip, _capsule_mesh(0.104, 0.44, 22, 8), pants_mat, Vector3(0, -0.22, 0))
+		# Thigh — tapered, wider at top. Radius diperkecil supaya kedua paha
+		# tidak menyatu ("culottes") saat dilihat dari depan bawah.
+		_mesh(hip, _capsule_mesh(0.096, 0.44, 22, 8), pants_mat, Vector3(0, -0.22, 0))
 		# Thigh muscle hint.
 		_mesh(hip, _sphere_mesh(0.085, 14, 8), pants_dark, Vector3(0, -0.18, 0.02)).scale = Vector3(0.92, 0.55, 0.88)
 		# Knee joint.
