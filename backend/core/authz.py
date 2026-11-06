@@ -112,11 +112,13 @@ def required_permission(route, method):
         if route.startswith(prefix):
             return read_permission if read else write_permission
 
-    return "company.read" if read else "office.write"
+    return "__unknown_route__"
 
 
 def is_allowed(role, route, method):
     permission = required_permission(route, method)
     if permission is None:
         return True
+    if permission == "__unknown_route__":
+        return False
     return has_permission(role, permission)
