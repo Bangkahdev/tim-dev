@@ -9,7 +9,7 @@ const CHARACTER_FACTORY = preload("res://scripts/character_factory.gd")
 @export var shirt_color: Color = Color("#638a81")
 @export var hair_color: Color = Color("#30383a")
 @export var is_receptionist: bool = false
-@export var home_position: Vector3 = Vector3.ZERO
+@export var home_position: Vector3 = Vector3.ZERO # workstation/desk home (work)
 
 # Backend-owned status. Ambient actions below never promote an idle employee to
 # "working"; only an employee record from the backend may do that.
@@ -30,7 +30,7 @@ var _routine_timer: float = 4.0
 var _phase: float = 0.0
 var _rng := RandomNumberGenerator.new()
 var _is_walking: bool = false
-var _ambient_phase: String = "home" # home -> outbound -> at_destination -> returning
+var _ambient_phase: String = "home" # home -> outbound -> at_destination -> returning (+ commute phases)
 var _activity_mode: String = "idle"
 var _last_ambient_plan: int = -1
 var _blink_timer: float = 3.0
@@ -48,6 +48,16 @@ var _sitting: bool = false
 var _sit_transition: float = 0.0
 var _idle_variant: int = 0
 var _idle_timer: float = 0.0
+
+# Small-town commute: each employee has a residence and may travel between
+# house and HQ. Commute is visual only and never fabricates backend work state.
+var house_position: Vector3 = Vector3.INF
+var commute_to_work: Array = []
+var commute_to_home: Array = []
+var _at_residence: bool = false
+var _commuting: bool = false
+var _shift_on_duty: bool = true # set from activity_engine/main; default true preserves old behavior
+var _commute_cooldown: float = 0.0
 
 func _ready() -> void:
 	_rng.randomize()
@@ -83,6 +93,26 @@ func _ready() -> void:
 		_routine_timer = _rng.randf_range(4.0, 8.0)
 	_update_status_label()
 
+func set_commute(home_pos: Vector3, to_work_route: Array, to_home_route: Array) -> void:
+	house_position = home_pos
+	commute_to_work = to_work_route.duplicate()
+	commute_to_home = to_home_route.duplicate()
+
+func set_shift_on_duty(on_duty: bool) -> void:
+	_shift_on_duty = on_duty
+	if is_receptionist or _meeting_active:
+		return
+	if not _shift_on_duty and _can_leave_for_home():
+		_begin_commute_home()
+	elif _shift_on_duty and _at_residence and office_status not in ["talking", "listening"]:
+		_begin_commute_to_work()
+
+func _can_leave_for_home() -> bool:
+	return not _meeting_active and not _is_walking and not _commuting and not _sitting and office_status in ["idle", "completed"] and not commute_to_home.is_empty()
+
+func is_away_from_office() -> bool:
+	return _at_residence or _commuting or (house_position != Vector3.INF and global_position.distance_to(home_position) > 30.0)
+
 func set_ambient_plans(plans: Array) -> void:
 	_plans = plans
 
@@ -99,6 +129,14 @@ func apply_employee_record(record: Dictionary) -> void:
 		office_status = incoming_status
 		_update_status_label()
 		return
+	# Backend status wins over a visual commute: bring the employee to the
+	# office context (they may still be mid-route; route completes to desk).
+	if _commuting and incoming_status in ["working", "talking", "listening", "blocked", "failed"]:
+		_commuting = false
+		_at_residence = false
+		office_status = incoming_status
+		_update_status_label()
+		return
 	office_status = incoming_status
 	room_id = str(record.get("room_id", room_id))
 	if record.has("name"):
@@ -110,7 +148,9 @@ func apply_employee_record(record: Dictionary) -> void:
 	if office_status == "working":
 		_activity_mode = "typing"
 		activity_text = "Bekerja · tugas aktif"
-		if previous_status != "working":
+		if _at_residence and not commute_to_work.is_empty():
+			_begin_commute_to_work()
+		elif previous_status != "working":
 			_ambient_phase = "returning"
 			if global_position.distance_to(home_position) > 0.55:
 				_set_route([home_position])
@@ -144,7 +184,7 @@ func apply_employee_record(record: Dictionary) -> void:
 		activity_text = "Menunggu instruksi"
 		if previous_status != "idle":
 			_ambient_phase = "home"
-			if global_position.distance_to(home_position) > 0.55:
+			if global_position.distance_to(home_position) > 0.55 and not _at_residence:
 				_ambient_phase = "returning"
 				_set_route([home_position])
 			else:
@@ -212,7 +252,7 @@ func _set_route(points: Array) -> void:
 		_update_status_label()
 
 func can_join_local_meeting() -> bool:
-	return not is_receptionist and not _meeting_active and office_status in ["idle", "completed"]
+	return not is_receptionist and not _meeting_active and office_status in ["idle", "completed"] and not _commuting and not _at_residence
 
 func begin_local_meeting(route_points: Array, facing_yaw: float) -> bool:
 	if not can_join_local_meeting() or route_points.is_empty():
@@ -252,6 +292,35 @@ func end_local_meeting() -> void:
 	_set_route(_meeting_return_route)
 	activity_text = "Kembali ke workstation"
 	_update_status_label()
+
+func _begin_commute_to_work() -> void:
+	if commute_to_work.is_empty() or _meeting_active or _commuting:
+		return
+	_at_residence = false
+	_commuting = true
+	_stand_if_needed()
+	_ambient_phase = "commute_to_work"
+	_activity_mode = "commute"
+	activity_text = "Berangkat ke kantor"
+	_set_route(commute_to_work)
+	_update_status_label()
+
+func _begin_commute_home() -> void:
+	if commute_to_home.is_empty() or _meeting_active or _commuting or not _can_leave_for_home():
+		return
+	_commuting = true
+	_at_residence = false
+	_stand_if_needed()
+	_ambient_phase = "commute_home"
+	_activity_mode = "commute"
+	activity_text = "Pulang ke rumah"
+	_set_route(commute_to_home)
+	_update_status_label()
+
+func _stand_if_needed() -> void:
+	if _sitting:
+		stand()
+	_sit_transition = 0.0
 
 func sit() -> void:
 	if _sitting:
@@ -333,10 +402,14 @@ func _update_stuck_recovery(delta: float, target_distance: float) -> void:
 
 func _physics_process(delta: float) -> void:
 	_phase += delta
+	_commute_cooldown = maxf(0.0, _commute_cooldown - delta)
 	if is_receptionist:
 		_update_receptionist(delta)
 	elif office_status in ["idle", "completed"]:
 		_update_ambient(delta)
+	elif not _commuting and _at_residence and office_status == "working":
+		# Backend reports active work while we are visually at home: commute in.
+		_begin_commute_to_work()
 
 	var was_walking := _is_walking
 	if _is_walking and _route_index < _route.size():
@@ -352,7 +425,7 @@ func _physics_process(delta: float) -> void:
 				_on_route_completed()
 		else:
 			var direction := _steer_around_obstacles(to_target.normalized())
-			var move_speed := 1.45 if is_receptionist else (1.72 if _meeting_active else 1.38)
+			var move_speed := 1.45 if is_receptionist else (1.72 if _meeting_active else (2.05 if _commuting else 1.38))
 			velocity.x = move_toward(velocity.x, direction.x * move_speed, 7.0 * delta)
 			velocity.z = move_toward(velocity.z, direction.z * move_speed, 7.0 * delta)
 			_visual.rotation.y = lerp_angle(_visual.rotation.y, atan2(-direction.x, -direction.z), 7.0 * delta)
@@ -407,6 +480,29 @@ func _on_route_completed() -> void:
 				activity_text = _default_activity()
 		_routine_timer = _rng.randf_range(4.0, 8.0)
 		_update_status_label()
+	elif _ambient_phase == "commute_to_work":
+		_commuting = false
+		_at_residence = false
+		_ambient_phase = "returning"
+		_activity_mode = "walking"
+		activity_text = "Masuk ke area kerja"
+		if global_position.distance_to(home_position) > 0.55:
+			_set_route([home_position])
+		else:
+			_ambient_phase = "home"
+			_clear_route()
+			activity_text = _default_activity() if office_status != "working" else "Bekerja · tugas aktif"
+		_update_status_label()
+	elif _ambient_phase == "commute_home":
+		_commuting = false
+		_at_residence = true
+		_ambient_phase = "at_home"
+		_activity_mode = "resting_home"
+		activity_text = "Di rumah · istirahat"
+		_clear_route()
+		_routine_timer = _rng.randf_range(6.0, 12.0)
+		_commute_cooldown = 8.0
+		_update_status_label()
 	elif _ambient_phase == "outbound":
 		_ambient_phase = "at_destination"
 		activity_text = "Sedang " + _activity_description(_activity_mode)
@@ -427,6 +523,8 @@ func _on_route_completed() -> void:
 
 func _activity_description(mode: String) -> String:
 	match mode:
+		"commute": return "perjalanan pulang-pergi kantor/rumah"
+		"resting_home": return "beristirahat di rumah"
 		"review_board": return "meninjau papan sprint"
 		"review_documents": return "membaca dokumen"
 		"inspect_diagram": return "memeriksa diagram sistem"
@@ -462,10 +560,27 @@ func _update_receptionist(delta: float) -> void:
 	_update_status_label()
 
 func _update_ambient(delta: float) -> void:
-	if _meeting_active or _is_walking:
+	if _meeting_active or _is_walking or _commuting:
+		return
+	# While off-duty and idle at the office, head home once (visual commute).
+	if not _shift_on_duty and _can_leave_for_home() and _commute_cooldown <= 0.0:
+		_begin_commute_home()
+		return
+	# While on-duty at home, return to work.
+	if _shift_on_duty and _at_residence and office_status in ["idle", "completed"] and _commute_cooldown <= 0.0:
+		_begin_commute_to_work()
 		return
 	_routine_timer -= delta
 	if _routine_timer > 0.0:
+		return
+	if _ambient_phase == "at_home":
+		# Stay home during off-duty; nudge back to work when shift opens.
+		if _shift_on_duty and office_status in ["idle", "completed"] and _commute_cooldown <= 0.0:
+			_begin_commute_to_work()
+		else:
+			_routine_timer = _rng.randf_range(6.0, 12.0)
+			activity_text = "Di rumah · istirahat" if not _shift_on_duty else "Bersiap berangkat"
+			_update_status_label()
 		return
 	if _ambient_phase == "at_destination":
 		_ambient_phase = "returning"

@@ -8,6 +8,15 @@ const CEIL_Y := 5.45		# acoustic ceiling panel plane
 const DOOR_H := 3.02		# door opening height
 const DOOR_W := 2.9			# door opening width
 
+## Small-town district lives south-east of the headquarters. Employee homes and
+## the company parking lot are visual/ambient spaces; they do not create backend
+## state. The parking waypoint is the hand-off point for commute routes.
+const TOWN_ORIGIN := Vector3(88.0, 0.0, 18.0)
+const HQ_ENTRANCE := Vector3(0.0, 0.05, 36.8)
+const HQ_PARKING_WALK := Vector3(16.0, 0.05, 47.5)
+const HQ_SIDEWALK := Vector3(48.0, 0.05, 47.5)
+const TOWN_GATE := Vector3(68.0, 0.05, 47.5)
+
 # Procedural interior for Bangkah HQ. All objects are native Godot meshes so the
 # project opens without paid asset packs or external downloads.
 
@@ -48,6 +57,7 @@ const MAT := {
 func build() -> void:
 	_build_site()
 	_build_shell()
+	_build_exterior_facade()
 	_build_room_partitions()
 	_build_room_floors()
 	_build_ceiling_and_lighting()
@@ -66,6 +76,8 @@ func build() -> void:
 	_build_corridor_details()
 	_build_office_accessories()
 	_build_landscape()
+	_build_company_parking()
+	_build_town_district()
 	_add_dust_particles()
 
 func _mat(color: Color, roughness: float = 0.78, metallic: float = 0.0, transparent: bool = false, emission: Color = Color.BLACK) -> StandardMaterial3D:
@@ -437,15 +449,28 @@ func _add_door_sign(wall_pos: float, along_pos: float, axis_x: bool, face_south_
 
 func _build_site() -> void:
 	_box("Site ground", Vector3(0, -0.62, 0), Vector3(150, 0.7, 150), Color("#839582"), true)
+	# Extend the site to the small-town district east/south-east of HQ.
+	_box("Town ground", Vector3(TOWN_ORIGIN.x + 8.0, -0.62, TOWN_ORIGIN.z + 18.0), Vector3(120, 0.7, 110), Color("#7f917d"), true)
 	_box("HQ apron", Vector3(0, -0.27, 0), Vector3(98, 0.18, 92), Color("#adb5aa"), false)
 	_box("Main foundation", Vector3(0, -0.10, 0), Vector3(86, 0.24, 82), Color("#89958e"), true)
 	_box("Road south", Vector3(0, -0.20, 55), Vector3(100, 0.12, 13), Color("#5b6663"), false)
+	_box("Road east spur", Vector3(76.0, -0.20, 55), Vector3(78, 0.12, 13), Color("#5b6663"), false)
 	_box("Road marking", Vector3(0, -0.12, 55), Vector3(90, 0.025, 0.16), Color("#e7d8ad"), false)
-	for x in [-34, -18, 18, 34]:
-		_box("Parking bay", Vector3(x, -0.105, 47), Vector3(0.12, 0.025, 8), Color("#eee8d5"), false)
+	_box("Road marking east", Vector3(76.0, -0.12, 55), Vector3(72, 0.025, 0.16), Color("#e7d8ad"), false)
+	_box("Town main street", Vector3(TOWN_ORIGIN.x + 10.0, -0.20, 47.5), Vector3(10.5, 0.12, 72), Color("#596460"), false)
+	_box("Town street marking", Vector3(TOWN_ORIGIN.x + 10.0, -0.12, 47.5), Vector3(0.14, 0.025, 66), Color("#e7d8ad"), false)
+	# Company parking (south apron, east of the visitor walk) — employees park and walk in.
+	for x in [22.0, 26.4, 30.8, 35.2]:
+		_box("Parking bay", Vector3(x, -0.105, 47.0), Vector3(0.12, 0.025, 8.2), Color("#eee8d5"), false)
+		_box("Parking bay", Vector3(x, -0.105, 47.0), Vector3(3.8, 0.02, 0.12), Color("#eee8d5"), false)
+	_box("Parking walkway", Vector3(16.0, -0.015, 47.2), Vector3(2.8, 0.07, 9.2), Color("#bcc4ba"), false)
 	_box("Entry walkway", Vector3(0, -0.015, 43.5), Vector3(15, 0.07, 12), Color("#c4c9bf"), false)
 	for z in [38.5, 40.5, 42.5]:
 		_box("Walkway joint", Vector3(0, 0.026, z), Vector3(14, 0.018, 0.045), Color("#9ca69c"), false)
+	# Sidewalk connecting HQ to the town district.
+	_box("Town sidewalk", Vector3(58.0, -0.015, 47.5), Vector3(32, 0.07, 3.2), Color("#bec7be"), false)
+	for x in [52.0, 58.0, 64.0]:
+		_box("Sidewalk joint", Vector3(x, 0.026, 47.5), Vector3(0.045, 0.018, 3.0), Color("#9ca69c"), false)
 
 
 func _add_dust_particles() -> void:
@@ -524,6 +549,52 @@ func _build_shell() -> void:
 	_box("Exterior logo trim", Vector3(0, 4.20, 40.44), Vector3(14.0, 0.10, 0.16), Color("#c2a36e"), false, null, 0.32, 0.7)
 	_raised_text("BANGKAH", Vector3(0, 5.06, 40.53), 0, 0.66, 0.09, Color("#e8d3a0"))
 	_label("HEADQUARTERS", Vector3(0, 4.56, 40.53), 0.0056, Color("#dbe4d8"))
+
+## Eksterior yang lebih representatif: cornice/parasoleil, pilaster, pencahayaan
+## fasad, teras masuk berlapis, dan penanda perusahaan — tanpa mengubah footprint
+## interior yang sudah dipakai koordinat meja/karyawan.
+func _build_exterior_facade() -> void:
+	# Cornice / parapet band di atas roof edge agar massa bangunan lebih tegas.
+	for side in [{"pos": Vector3(0, 5.92, -40.18), "size": Vector3(84.6, 0.34, 0.70)},
+			{"pos": Vector3(0, 5.92, 40.18), "size": Vector3(84.6, 0.34, 0.70)},
+			{"pos": Vector3(-42.18, 5.92, 0), "size": Vector3(0.70, 0.34, 80.6)},
+			{"pos": Vector3(42.18, 5.92, 0), "size": Vector3(0.70, 0.34, 80.6)}]:
+		_box("Cornice band", side["pos"], side["size"], Color("#607269"), false, null, 0.58, 0.08)
+	# Vertical pilasters pada fasad depan (selatan) untuk ritme arsitektur.
+	for x in [-30.0, -20.0, -10.0, 10.0, 20.0, 30.0]:
+		_box("Facade pilaster", Vector3(x, 2.95, 40.22), Vector3(0.55, 5.55, 0.28), Color("#e6dfd2"), false, null, 0.76)
+		_box("Pilaster cap", Vector3(x, 5.72, 40.28), Vector3(0.72, 0.18, 0.42), Color("#c8b996"), false, null, 0.48, 0.12)
+	# Sunshade fins di atas glazing samping — memberi bayangan dan kedalaman.
+	for x in [-34, -25, -16, -7, 2, 11, 20, 29, 38]:
+		_box("North sunshade", Vector3(x, 4.62, -40.28), Vector3(5.8, 0.10, 0.62), Color("#5f7268"), false, null, 0.55, 0.18)
+	for z in [-32, -21, -10, 1, 12, 23, 34]:
+		_box("West sunshade", Vector3(-42.28, 4.62, z), Vector3(0.62, 0.10, 7.5), Color("#5f7268"), false, null, 0.55, 0.18)
+		_box("East sunshade", Vector3(42.28, 4.62, z), Vector3(0.62, 0.10, 7.5), Color("#5f7268"), false, null, 0.55, 0.18)
+	# Layered entrance terrace + planter boxes framing the lobby doors.
+	_box("Entrance terrace", Vector3(0, 0.05, 44.8), Vector3(18.0, 0.18, 4.2), Color("#c9d0c6"), false, null, 0.62)
+	_box("Terrace step", Vector3(0, -0.02, 46.9), Vector3(20.0, 0.08, 1.2), Color("#b9c2b8"), false, null, 0.64)
+	for x in [-12.5, 12.5]:
+		_box("Terrace planter", Vector3(x, 0.48, 44.8), Vector3(3.6, 0.75, 1.6), Color("#8d9f92"), false, null, 0.78)
+		_add_plant(Vector3(x, 0.78, 44.8), 0.88)
+	# Warm facade uplights (subtle, no shadow cost explosion).
+	for x in [-18.0, -6.0, 6.0, 18.0]:
+		_box("Facade sconce", Vector3(x, 0.55, 40.35), Vector3(0.22, 0.42, 0.16), Color("#d8c79a"), false, null, 0.25, 0.2, false, Color("#f0ddb0"))
+		var sconce := OmniLight3D.new()
+		sconce.position = Vector3(x, 0.72, 41.2)
+		sconce.light_color = Color("#ffe8bf")
+		sconce.light_energy = 0.18
+		sconce.omni_range = 4.8
+		sconce.shadow_enabled = false
+		add_child(sconce)
+	# Rooftop mechanical/green accent volumes (visual only) for skyline depth.
+	_box("Roof accent north", Vector3(-18.0, 6.25, -24.0), Vector3(14.0, 0.95, 8.0), Color("#7f9188"), false, null, 0.7)
+	_box("Roof accent east", Vector3(24.0, 6.18, 10.0), Vector3(10.0, 0.82, 12.0), Color("#7a8d84"), false, null, 0.7)
+	for px in [-22.0, -18.0, -14.0]:
+		_add_plant(Vector3(px, 6.72, -24.0), 0.55)
+	# Feature frame around the entrance glazing.
+	_box("Entrance frame top", Vector3(0, 3.52, 39.95), Vector3(8.8, 0.22, 0.26), Color("#6b7f74"), false, null, 0.42, 0.22)
+	_box("Entrance frame left", Vector3(-4.3, 1.9, 39.95), Vector3(0.22, 3.4, 0.26), Color("#6b7f74"), false, null, 0.42, 0.22)
+	_box("Entrance frame right", Vector3(4.3, 1.9, 39.95), Vector3(0.22, 3.4, 0.26), Color("#6b7f74"), false, null, 0.42, 0.22)
 
 func _build_room_partitions() -> void:
 	# North executive wing: Owner, Secretary, Management and Architecture.
@@ -1260,3 +1331,153 @@ func _add_tree(position: Vector3) -> void:
 	_sphere("Tree canopy", position + Vector3(0, 2.55, 0), 1.5, Color("#668b6d"), Vector3(1.05, 1.0, 1.05))
 	_sphere("Tree canopy detail", position + Vector3(0.72, 2.85, -0.22), 0.9, Color("#83a27b"), Vector3(1.1, 0.9, 0.95))
 	_sphere("Tree canopy detail", position + Vector3(-0.68, 2.78, 0.16), 0.84, Color("#779975"), Vector3(1.0, 0.94, 1.0))
+## Parkir perusahaan: slot bernama per karyawan, mobil prosedural, dan lampu.
+func _build_company_parking() -> void:
+	var assignments := [
+		{"id":"lead","name":"Arman","x":22.0,"body":Color("#4a6a82")},
+		{"id":"coo","name":"Sinta","x":26.4,"body":Color("#8b6a72")},
+		{"id":"architect","name":"Raka","x":30.8,"body":Color("#5a7a6a")},
+		{"id":"backend","name":"Bima","x":35.2,"body":Color("#6a7288")},
+		{"id":"api","name":"Naya","x":22.0,"z":47.0,"row2":true,"body":Color("#8a7a5a")},
+		{"id":"frontend","name":"Dira","x":26.4,"z":47.0,"row2":true,"body":Color("#7a5f52")},
+		{"id":"qa","name":"Tika","x":30.8,"z":47.0,"row2":true,"body":Color("#5f7a6a")},
+	]
+	_box("Parking sign", Vector3(18.5, 1.15, 43.2), Vector3(0.12, 2.2, 2.4), Color("#4a5a52"), false, null, 0.52, 0.18)
+	_box("Parking sign face", Vector3(18.58, 1.35, 43.2), Vector3(0.04, 0.8, 2.1), Color("#2f4339"), false, null, 0.4, 0.1)
+	_label("PARKIR KARYAWAN", Vector3(18.64, 1.35, 43.2), 0.0042, Color("#e6dec8"))
+	for a in assignments:
+		var slot_z: float = 47.0 if a.get("row2", false) else 47.0
+		var car_pos := Vector3(float(a["x"]), 0.0, slot_z)
+		_add_parked_car(car_pos, 0.0, a["body"], str(a["name"]))
+		_label(str(a["name"]).to_upper(), Vector3(car_pos.x, 1.55, car_pos.z - 2.8), 0.0036, Color("#eef1ea"))
+	# Lampu parkir.
+	for x in [24.2, 33.0]:
+		_cylinder("Parking light pole", Vector3(x, 1.9, 42.2), 0.06, 3.8, Color("#6f7d76"), null, false, 0.5)
+		_box("Parking lamp head", Vector3(x, 3.82, 42.2), Vector3(0.55, 0.14, 0.28), Color("#d9d2be"), false, null, 0.3, 0.05, false, Color("#f4e6c4"))
+		var pl := OmniLight3D.new()
+		pl.position = Vector3(x, 3.68, 44.5)
+		pl.light_color = Color("#fff0d0")
+		pl.light_energy = 0.22
+		pl.omni_range = 9.0
+		pl.shadow_enabled = false
+		add_child(pl)
+
+func _add_parked_car(position: Vector3, yaw: float, body: Color, _label_text: String = "") -> Node3D:
+	var root := Node3D.new()
+	root.name = "ParkedCar"
+	root.position = position
+	root.rotation.y = yaw
+	add_child(root)
+	_box("Car body", Vector3(0, 0.62, 0), Vector3(2.1, 0.62, 4.4), body, true, root, 0.42, 0.18)
+	_box("Car cabin", Vector3(0, 1.08, -0.15), Vector3(1.85, 0.52, 2.0), body.lightened(0.06), false, root, 0.38, 0.12)
+	_box("Windshield", Vector3(0, 1.08, 0.72), Vector3(1.65, 0.42, 0.06), Color(0.45, 0.62, 0.68, 0.35), false, root, 0.12, 0.08, true)
+	_box("Rear glass", Vector3(0, 1.08, -1.02), Vector3(1.55, 0.38, 0.06), Color(0.45, 0.62, 0.68, 0.32), false, root, 0.12, 0.08, true)
+	for wx in [-0.82, 0.82]:
+		for wz in [-1.25, 1.25]:
+			_cylinder("Wheel", Vector3(wx, 0.28, wz), 0.28, 0.22, Color("#2b3136"), root, false, 0.1)
+			_cylinder("Hubcap", Vector3(wx * 1.01, 0.28, wz), 0.16, 0.04, Color("#8a9592"), root, false, 0.55)
+	_box("Headlight L", Vector3(-0.65, 0.58, 2.16), Vector3(0.36, 0.18, 0.05), Color("#f3edd8"), false, root, 0.2, 0.0, false, Color("#fff2c8"))
+	_box("Headlight R", Vector3(0.65, 0.58, 2.16), Vector3(0.36, 0.18, 0.05), Color("#f3edd8"), false, root, 0.2, 0.0, false, Color("#fff2c8"))
+	_box("Taillight L", Vector3(-0.68, 0.60, -2.16), Vector3(0.34, 0.16, 0.05), Color("#b85a52"), false, root, 0.25, 0.0, false, Color("#b84a42"))
+	_box("Taillight R", Vector3(0.68, 0.60, -2.16), Vector3(0.34, 0.16, 0.05), Color("#b85a52"), false, root, 0.25, 0.0, false, Color("#b84a42"))
+	return root
+
+## Distrik kota kecil: setiap karyawan punya rumah + mobil di carport. Rumah
+## adalah geometri prosedural (visual); tidak mengubah state backend.
+func _build_town_district() -> void:
+	# Signage entering the neighborhood.
+	_box("Town sign post", Vector3(72.0, 1.1, 44.8), Vector3(0.14, 2.2, 0.14), Color("#6a776f"), false, null, 0.5, 0.2)
+	_box("Town sign", Vector3(73.1, 1.55, 44.8), Vector3(2.2, 0.85, 0.12), Color("#3f574c"), false, null, 0.42, 0.12)
+	_label("PERUMAHAN BANGKAH", Vector3(73.1, 1.55, 44.88), 0.0040, Color("#efe7d2"))
+	# Local street lamps.
+	for i in range(4):
+		var sz := 18.0 + float(i) * 14.0
+		_cylinder("Street lamp pole", Vector3(TOWN_ORIGIN.x + 15.5, 1.85, sz), 0.055, 3.7, Color("#6b7871"), null, false, 0.5)
+		_box("Street lamp head", Vector3(TOWN_ORIGIN.x + 15.5, 3.72, sz), Vector3(0.5, 0.12, 0.26), Color("#ded6c2"), false, null, 0.28, 0.05, false, Color("#f3e4bf"))
+		var sl := OmniLight3D.new()
+		sl.position = Vector3(TOWN_ORIGIN.x + 13.8, 3.55, sz)
+		sl.light_color = Color("#ffe9c2")
+		sl.light_energy = 0.16
+		sl.omni_range = 8.5
+		sl.shadow_enabled = false
+		add_child(sl)
+
+	var homes := [
+		{"id":"lead", "name":"Arman", "offset": Vector2(0, 0), "wall": Color("#d8d2c4"), "roof": Color("#7a5a48"), "door": Color("#5f7a68"), "car": Color("#4a6a82")},
+		{"id":"coo", "name":"Sinta", "offset": Vector2(24, 0), "wall": Color("#e0d8cc"), "roof": Color("#6f5f74"), "door": Color("#7a6658"), "car": Color("#8b6a72")},
+		{"id":"architect", "name":"Raka", "offset": Vector2(0, 22), "wall": Color("#d4dcd6"), "roof": Color("#546a74"), "door": Color("#5a6e62"), "car": Color("#5a7a6a")},
+		{"id":"backend", "name":"Bima", "offset": Vector2(24, 22), "wall": Color("#ddd6c8"), "roof": Color("#6a5f54"), "door": Color("#4f675d"), "car": Color("#6a7288")},
+		{"id":"api", "name":"Naya", "offset": Vector2(0, 44), "wall": Color("#d9ddd2"), "roof": Color("#7a6a52"), "door": Color("#6b775e"), "car": Color("#8a7a5a")},
+		{"id":"frontend", "name":"Dira", "offset": Vector2(24, 44), "wall": Color("#e2d6c8"), "roof": Color("#8a624f"), "door": Color("#6a5a6a"), "car": Color("#7a5f52")},
+		{"id":"qa", "name":"Tika", "offset": Vector2(12, 66), "wall": Color("#d6dfd8"), "roof": Color("#5f7468"), "door": Color("#5f6f7a"), "car": Color("#5f7a6a")},
+	]
+	for h in homes:
+		var base := TOWN_ORIGIN + Vector3(h["offset"].x, 0, h["offset"].y)
+		_build_house(base, str(h["id"]), str(h["name"]), h["wall"], h["roof"], h["door"], h["car"])
+
+func _build_house(base: Vector3, employee_id: String, employee_name: String, wall: Color, roof: Color, door: Color, car: Color) -> void:
+	var root := Node3D.new()
+	root.name = "House_%s" % employee_id
+	root.position = base
+	add_child(root)
+	# Lot, path, fence hint.
+	_box("House lot", Vector3(6.0, -0.06, 5.0), Vector3(16.5, 0.08, 14.5), Color("#8ca087"), false, root, 0.92)
+	_box("House path", Vector3(2.2, 0.01, 8.2), Vector3(1.8, 0.06, 4.2), Color("#c3ccbf"), false, root, 0.68)
+	# Main volume + porch roof.
+	_box("House body", Vector3(6.0, 1.75, 4.2), Vector3(9.4, 3.5, 7.8), wall, true, root, 0.84)
+	_box("House roof", Vector3(6.0, 3.72, 4.2), Vector3(10.2, 0.55, 8.6), roof, false, root, 0.72)
+	_box("Roof ridge", Vector3(6.0, 4.12, 4.2), Vector3(10.4, 0.18, 0.55), roof.darkened(0.08), false, root, 0.65)
+	_box("Porch roof", Vector3(2.4, 2.55, 7.1), Vector3(3.2, 0.18, 2.2), roof.lightened(0.05), false, root, 0.68)
+	_cylinder("Porch post L", Vector3(1.1, 1.25, 8.0), 0.07, 2.4, Color("#d8d2c6"), root)
+	_cylinder("Porch post R", Vector3(3.7, 1.25, 8.0), 0.07, 2.4, Color("#d8d2c6"), root)
+	# Door and windows.
+	_box("Front door", Vector3(2.2, 1.25, 8.1), Vector3(1.05, 2.35, 0.12), door, false, root, 0.45)
+	_box("Door window", Vector3(2.2, 1.75, 8.16), Vector3(0.55, 0.7, 0.04), Color(0.55, 0.7, 0.74, 0.35), false, root, 0.14, 0.05, true)
+	for wx in [5.2, 8.4]:
+		_box("Window frame", Vector3(wx, 2.1, 8.12), Vector3(1.7, 1.35, 0.12), Color("#eef1ea"), false, root, 0.52)
+		_box("Window glass", Vector3(wx, 2.1, 8.18), Vector3(1.45, 1.1, 0.05), Color(0.52, 0.68, 0.72, 0.28), false, root, 0.12, 0.08, true)
+	_box("Side window", Vector3(10.72, 2.0, 4.2), Vector3(0.12, 1.2, 1.6), Color("#eef1ea"), false, root, 0.52)
+	_box("Side glass", Vector3(10.78, 2.0, 4.2), Vector3(0.05, 1.0, 1.35), Color(0.52, 0.68, 0.72, 0.28), false, root, 0.12, 0.08, true)
+	# Nameplate and small garden.
+	_box("Nameplate", Vector3(3.35, 1.55, 8.16), Vector3(0.9, 0.35, 0.05), Color("#f2ead8"), false, root, 0.5)
+	_label(employee_name.to_upper(), base + Vector3(3.35, 1.55, 8.24), 0.0032, Color("#3b4a44"))
+	_add_plant(base + Vector3(0.4, 0, 5.2), 0.75)
+	_add_plant(base + Vector3(9.8, 0, 8.8), 0.7)
+	# Carport + employee car (visual commute prop).
+	_box("Carport slab", Vector3(12.8, 0.02, 9.8), Vector3(4.6, 0.08, 6.2), Color("#aab5ad"), false, root, 0.7)
+	_box("Carport roof", Vector3(12.8, 2.45, 9.8), Vector3(4.9, 0.16, 6.5), roof.darkened(0.05), false, root, 0.65)
+	for px in [10.9, 14.7]:
+		for pz in [7.1, 12.5]:
+			_cylinder("Carport post", Vector3(px, 1.22, pz), 0.06, 2.35, Color("#d0ccc2"), root)
+	_add_parked_car(base + Vector3(12.8, 0, 9.8), 0.0, car, employee_name)
+	# Warm porch light.
+	_box("Porch light", Vector3(1.35, 2.1, 8.18), Vector3(0.18, 0.26, 0.1), Color("#e8d6a8"), false, root, 0.22, 0.1, false, Color("#f4dca0"))
+	var porch := OmniLight3D.new()
+	porch.position = base + Vector3(1.35, 2.1, 8.9)
+	porch.light_color = Color("#ffe6b8")
+	porch.light_energy = 0.14
+	porch.omni_range = 3.8
+	porch.shadow_enabled = false
+	add_child(porch)
+
+## Compute the employee's home/commute anchors (used by NPCs and main).
+static func employee_house_layout(employee_id: String) -> Dictionary:
+	var offsets := {
+		"lead": Vector2(0, 0), "coo": Vector2(24, 0), "architect": Vector2(0, 22),
+		"backend": Vector2(24, 22), "api": Vector2(0, 44), "frontend": Vector2(24, 44), "qa": Vector2(12, 66),
+	}
+	var off: Vector2 = offsets.get(employee_id, Vector2(12, 22))
+	var base := TOWN_ORIGIN + Vector3(off.x, 0, off.y)
+	var door := base + Vector3(2.2, 0.05, 9.2)
+	var carport := base + Vector3(12.8, 0.05, 13.8)
+	var street := Vector3(TOWN_ORIGIN.x + 6.0, 0.05, base.z + 9.8)
+	return {
+		"id": employee_id,
+		"door": door,
+		"carport": carport,
+		"street": street,
+		"parking": HQ_PARKING_WALK,
+		"entrance": HQ_ENTRANCE,
+		"commute_to_work": [door, carport, street, TOWN_GATE, HQ_SIDEWALK, HQ_PARKING_WALK, HQ_ENTRANCE],
+		"commute_home": [HQ_ENTRANCE, HQ_PARKING_WALK, HQ_SIDEWALK, TOWN_GATE, street, carport, door],
+	}
