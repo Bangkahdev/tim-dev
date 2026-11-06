@@ -236,7 +236,8 @@ class OfficeHandler(BaseHTTPRequestHandler):
     def _chat_identity(self):
         user = self._auth_user or {}
         username = str(user.get("username") or "unknown")
-        return username, username
+        role = str(user.get("role") or "employee")
+        return username, username, role
 
     def _authorize_mutation(self):
         user = self._current_user()
@@ -653,7 +654,7 @@ class OfficeHandler(BaseHTTPRequestHandler):
             self.send_json({"success": True, "session": res}, 200)
             return
         if route == "/api/auth/logout":
-            token = str(body.get("token","")).strip() or self.headers.get("Authorization","").replace("Bearer ","").strip()
+            token = self.headers.get("Authorization","").replace("Bearer ","").strip()
             AUTH.logout(token)
             self.send_json({"success": True})
             return
@@ -832,8 +833,8 @@ class OfficeHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Tulis pesan sebelum mengirim."}, 400)
                 return
             try:
-                sender_id, sender_name = self._chat_identity()
-                STORE.add_chat_message(channel_id, sender_id, sender_name, "owner", employee_message)
+                sender_id, sender_name, sender_role = self._chat_identity()
+                STORE.add_chat_message(channel_id, sender_id, sender_name, sender_role, employee_message)
                 if channel_id == "team":
                     result = ORCHESTRATOR.handle_chat(employee_message)
                     reply = str(result.get("reply") or "Pesan diterima tim.")
@@ -971,8 +972,8 @@ class OfficeHandler(BaseHTTPRequestHandler):
         with EMPLOYEE_CHAT_STATE_LOCK:
             EMPLOYEE_CHAT_ACTIVE[employee_id] = {"started_at": datetime.now().isoformat(timespec="seconds")}
         try:
-            sender_id, sender_name = self._chat_identity()
-            STORE.add_chat_message(employee_id, sender_id, sender_name, "owner", message)
+            sender_id, sender_name, sender_role = self._chat_identity()
+            STORE.add_chat_message(employee_id, sender_id, sender_name, sender_role, message)
             result = ORCHESTRATOR.handle_employee_chat(employee_id, message)
             reply = str(result.get("reply") or "Pesan diterima.")
             STORE.add_chat_message(employee_id, employee_id, employee["name"], "agent", reply)
