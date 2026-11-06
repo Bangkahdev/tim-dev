@@ -2,8 +2,11 @@ extends SceneTree
 
 const OUT := "/tmp/opencode/shots/"
 const SHOTS := [
-	{"name": "office-exterior.png", "pos": Vector3(0, 3.2, 54), "look": Vector3(0, 2.8, 38)},
+	{"name": "office-exterior.png", "pos": Vector3(0, 4.0, 54), "look": Vector3(0, 3.6, 38)},
 	{"name": "office-lobby.png", "pos": Vector3(-10, 1.75, 29), "look": Vector3(0, 1.6, 8)},
+	{"name": "office-lobby-south.png", "pos": Vector3(5.2, 1.85, 24.0), "look": Vector3(1.6, 1.3, 33.0)},
+	{"name": "office-doors.png", "pos": Vector3(-13.8, 1.72, 14.5), "look": Vector3(-19.8, 2.6, 14.5)},
+	{"name": "office-doors-north.png", "pos": Vector3(8.0, 1.72, -15.6), "look": Vector3(8.0, 2.7, -20.1)},
 	{"name": "office-reception.png", "pos": Vector3(4.5, 1.75, 27.5), "look": Vector3(0, 1.5, 19)},
 	{"name": "office-leadership.png", "pos": Vector3(8, 1.7, -21), "look": Vector3(8, 1.5, -32)},
 	{"name": "office-frontend.png", "pos": Vector3(-29.5, 1.7, -2), "look": Vector3(-29.5, 1.4, -10)},

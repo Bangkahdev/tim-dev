@@ -1,10 +1,21 @@
 extends Node3D
 
+## Design tokens / constants used across the office build. Raised ceiling
+## heights keep first-person sightlines airy instead of cramped.
+const WALL_H := 5.6			# exterior wall height
+const PART_H := 5.30		# interior partition glass height
+const CEIL_Y := 5.45		# acoustic ceiling panel plane
+const DOOR_H := 3.02		# door opening height
+const DOOR_W := 2.9			# door opening width
+
 # Procedural interior for Bangkah HQ. All objects are native Godot meshes so the
 # project opens without paid asset packs or external downloads.
 
 var _materials: Dictionary = {}
 var _material_cache: Dictionary = {}
+# Registrasi titik makan duduk (kursi/sofa) untuk sistem interaksi di main.gd.
+# Isi: {"position": Vector3, "yaw": float, "kind": String, "pivot": Node3D or null}
+var seats: Array[Dictionary] = []
 
 const MAT := {
 	"concrete": Color("#b0bab3"),
@@ -47,6 +58,7 @@ func build() -> void:
 	_build_api_lab()
 	_build_archive_and_print()
 	_build_pantry_and_lounge()
+	_build_free_seating()
 	_build_accent_walls()
 	_build_corridor_details()
 	_build_office_accessories()
@@ -216,23 +228,115 @@ func _wall_segment_z(x: float, z1: float, z2: float, y: float, height: float, co
 		for z in [z1 + 0.08, z2 - 0.08]:
 			_box("Glass mullion", Vector3(x, y, z), Vector3(0.20, height, 0.075), Color("#758982"), false, null, 0.34, 0.48)
 
-func _partition_x_with_door(x1: float, x2: float, z: float, door_center: float, door_width: float = 2.8) -> void:
+func _partition_x_with_door(x1: float, x2: float, z: float, door_center: float, door_width: float = DOOR_W, door_label: String = "", swing_north: bool = true) -> void:
 	var left_end := door_center - door_width * 0.5
 	var right_start := door_center + door_width * 0.5
-	_wall_segment_x(x1, left_end, z, 1.55, 3.05, MAT.glass, true)
-	_wall_segment_x(right_start, x2, z, 1.55, 3.05, MAT.glass, true)
-	_box("Door frame left", Vector3(left_end, 1.55, z), Vector3(0.10, 3.12, 0.22), Color("#6b7e75"), false, null, 0.45, 0.4)
-	_box("Door frame right", Vector3(right_start, 1.55, z), Vector3(0.10, 3.12, 0.22), Color("#6b7e75"), false, null, 0.45, 0.4)
-	_box("Door header", Vector3(door_center, 3.08, z), Vector3(door_width, 0.12, 0.22), Color("#6b7e75"), false, null, 0.45, 0.4)
+	_wall_segment_x(x1, left_end, z, PART_H * 0.5 + 0.02, PART_H, MAT.glass, true)
+	_wall_segment_x(right_start, x2, z, PART_H * 0.5 + 0.02, PART_H, MAT.glass, true)
+	# Frame kayu: post kiri/kanan + header, bukaan setinggi DOOR_H.
+	_box("Door frame left", Vector3(left_end + 0.03, DOOR_H * 0.5, z), Vector3(0.14, DOOR_H + 0.05, 0.28), Color("#5f7368"), false, null, 0.42, 0.45)
+	_box("Door frame right", Vector3(right_start - 0.03, DOOR_H * 0.5, z), Vector3(0.14, DOOR_H + 0.05, 0.28), Color("#5f7368"), false, null, 0.42, 0.45)
+	_box("Door header", Vector3(door_center, DOOR_H + 0.09, z), Vector3(door_width + 0.30, 0.18, 0.26), Color("#574132"), false, null, 0.50, 0.1)
+	# Transom kaca susu di atas daun pintu sampai atap partisi.
+	var transom_h := PART_H - (DOOR_H + 0.18)
+	_box("Door transom", Vector3(door_center, DOOR_H + 0.18 + transom_h * 0.5, z),
+		Vector3(door_width + 0.34, transom_h, 0.10), Color(0.72, 0.82, 0.78, 0.38), false, null, 0.28, 0.0, true)
+	# Daun pintu ganda membuka ajar (swign north = ke ruang utara).
+	var open_amount := 0.62
+	_add_door_leaf(Vector3(left_end, 0, z), 0.0, open_amount * (1.0 if swing_north else -1.0), door_width * 0.5 - 0.02)
+	_add_door_leaf(Vector3(right_start, 0, z), PI, open_amount * (-1.0 if swing_north else 1.0), door_width * 0.5 - 0.02)
+	if door_label != "":
+		_add_door_sign(door_center, z, true, swing_north, door_label)
 
-func _partition_z_with_door(x: float, z1: float, z2: float, door_center: float, door_width: float = 2.8) -> void:
+func _partition_z_with_door(x: float, z1: float, z2: float, door_center: float, door_width: float = DOOR_W, door_label: String = "", open_east: bool = true) -> void:
 	var left_end := door_center - door_width * 0.5
 	var right_start := door_center + door_width * 0.5
-	_wall_segment_z(x, z1, left_end, 1.55, 3.05, MAT.glass, true)
-	_wall_segment_z(x, right_start, z2, 1.55, 3.05, MAT.glass, true)
-	_box("Door frame left", Vector3(x, 1.55, left_end), Vector3(0.22, 3.12, 0.10), Color("#6b7e75"), false, null, 0.45, 0.4)
-	_box("Door frame right", Vector3(x, 1.55, right_start), Vector3(0.22, 3.12, 0.10), Color("#6b7e75"), false, null, 0.45, 0.4)
-	_box("Door header", Vector3(x, 3.08, door_center), Vector3(0.22, 0.12, door_width), Color("#6b7e75"), false, null, 0.45, 0.4)
+	_wall_segment_z(x, z1, left_end, PART_H * 0.5 + 0.02, PART_H, MAT.glass, true)
+	_wall_segment_z(x, right_start, z2, PART_H * 0.5 + 0.02, PART_H, MAT.glass, true)
+	_box("Door frame left", Vector3(x, DOOR_H * 0.5, left_end + 0.03), Vector3(0.28, DOOR_H + 0.05, 0.14), Color("#5f7368"), false, null, 0.42, 0.45)
+	_box("Door frame right", Vector3(x, DOOR_H * 0.5, right_start - 0.03), Vector3(0.28, DOOR_H + 0.05, 0.14), Color("#5f7368"), false, null, 0.42, 0.45)
+	_box("Door header", Vector3(x, DOOR_H + 0.09, door_center), Vector3(0.26, 0.18, door_width + 0.30), Color("#574132"), false, null, 0.50, 0.1)
+	var transom_h := PART_H - (DOOR_H + 0.18)
+	_box("Door transom", Vector3(x, DOOR_H + 0.18 + transom_h * 0.5, door_center),
+		Vector3(0.10, transom_h, door_width + 0.34), Color(0.72, 0.82, 0.78, 0.38), false, null, 0.28, 0.0, true)
+	var open_amount := 0.62
+	_add_door_leaf(Vector3(x, 0, left_end), -PI * 0.5, open_amount * (1.0 if open_east else -1.0), door_width * 0.5 - 0.02)
+	_add_door_leaf(Vector3(x, 0, right_start), PI * 0.5, open_amount * (-1.0 if open_east else 1.0), door_width * 0.5 - 0.02)
+	if door_label != "":
+		_add_door_sign(x, door_center, false, not open_east, door_label)
+
+## Daun pintu ganda: pivot di engsel, panel kayu dengan pegangan kuningan di
+## kedua sisi. Membuka ajar yang terlihat arsitiktural namun tidak menghalangi
+## jalur (tanpa collision). bearing = yaw arah tertutup; offset = bukaan radian.
+var _door_leaf_index := 0
+var _door_sign_index := 0
+
+func _add_door_leaf(hinge: Vector3, bearing: float, open_offset: float, leaf_length: float) -> void:
+	var leaf := Node3D.new()
+	leaf.name = "DoorLeaf_%02d" % _door_leaf_index
+	_door_leaf_index += 1
+	leaf.position = hinge
+	leaf.rotation.y = bearing + open_offset
+	add_child(leaf)
+	var panel := MeshInstance3D.new()
+	var panel_mesh := BoxMesh.new()
+	panel_mesh.size = Vector3(leaf_length, DOOR_H - 0.16, 0.055)
+	panel.mesh = panel_mesh
+	panel.material_override = _mat(Color("#6b5138"), 0.42, 0.05)
+	panel.position = Vector3(leaf_length * 0.5 + 0.05, (DOOR_H - 0.16) * 0.5 + 0.02, 0)
+	leaf.add_child(panel)
+	# Inset panel dekoratif.
+	var inset := MeshInstance3D.new()
+	var inset_mesh := BoxMesh.new()
+	inset_mesh.size = Vector3(leaf_length * 0.62, DOOR_H - 0.72, 0.02)
+	inset.mesh = inset_mesh
+	inset.material_override = _mat(Color("#755a41"), 0.44, 0.05)
+	inset.position = Vector3(leaf_length * 0.5 + 0.05, (DOOR_H - 0.16) * 0.5 + 0.02, -0.010)
+	leaf.add_child(inset)
+	# Pegangan kuningan vertikal di sisi luar tiap daun.
+	for side_z in [-0.055, 0.055]:
+		var handle := MeshInstance3D.new()
+		var handle_mesh := CylinderMesh.new()
+		handle_mesh.top_radius = 0.022
+		handle_mesh.bottom_radius = 0.022
+		handle_mesh.height = 0.72
+		handle_mesh.radial_segments = 12
+		handle.mesh = handle_mesh
+		handle.material_override = _mat(Color("#c5a366"), 0.25, 0.75)
+		handle.position = Vector3(leaf_length - 0.10, (DOOR_H - 0.16) * 0.5 + 0.02, side_z)
+		leaf.add_child(handle)
+
+## Plakat nama ruangan di atas header pintu, sisi belakang partisi dipilih oleh
+## caller (corridor side).
+func _add_door_sign(wall_pos: float, along_pos: float, axis_x: bool, face_south_or_east: bool, text: String) -> void:
+	var plate_position := Vector3(wall_pos, DOOR_H + 0.42, along_pos)
+	var offset := 0.15
+	if axis_x:
+		plate_position.z += offset if face_south_or_east else -offset
+	else:
+		plate_position.x += offset if face_south_or_east else -offset
+	_box("Door sign plate %02d" % _door_sign_index, plate_position, Vector3(1.7, 0.36, 0.035) if axis_x else Vector3(0.035, 0.36, 1.7), Color("#3f5a4e"), false, null, 0.35, 0.28)
+	_box("Door sign trim %02d" % _door_sign_index, plate_position, Vector3(1.5, 0.24, 0.04) if axis_x else Vector3(0.04, 0.24, 1.5), Color("#283b33"), false, null, 0.30, 0.35)
+	_door_sign_index += 1
+	var label := Label3D.new()
+	label.text = text.to_upper()
+	label.font_size = 44
+	label.outline_size = 6
+	label.modulate = Color("#ece6d4")
+	label.outline_modulate = Color(0.05, 0.09, 0.07, 0.95)
+	label.pixel_size = 0.0042
+	label.no_depth_test = false
+	# Label3D punya normal -Z; tetapkan yaw agar teks menghadap sisi koridor.
+	if axis_x:
+		label.rotation.y = PI if face_south_or_east else 0.0
+	else:
+		# Untuk dinding-Z: menghadap timur butuh yaw -PI/2 (bukan +PI/2).
+		label.rotation.y = -PI * 0.5 if face_south_or_east else PI * 0.5
+	if axis_x:
+		label.position = plate_position + Vector3(0, 0, 0.030 if face_south_or_east else -0.030)
+	else:
+		label.position = plate_position + Vector3(0.030 if face_south_or_east else -0.030, 0, 0)
+	add_child(label)
 
 func _build_site() -> void:
 	_box("Site ground", Vector3(0, -0.62, 0), Vector3(150, 0.7, 150), Color("#839582"), true)
@@ -279,67 +383,74 @@ func _add_dust_particles() -> void:
 
 func _build_shell() -> void:
 	_box("Office floor slab", Vector3(0, 0, 0), Vector3(84, 0.22, 80), MAT.floor, true)
-	# Exterior walls. The south facade opens into a double-height glass entrance.
-	_box("North exterior wall", Vector3(0, 2.05, -40), Vector3(84, 4.1, 0.34), MAT.wall, true)
-	_box("West exterior wall", Vector3(-42, 2.05, 0), Vector3(0.34, 4.1, 80), MAT.wall, true)
-	_box("East exterior wall", Vector3(42, 2.05, 0), Vector3(0.34, 4.1, 80), MAT.wall, true)
-	_wall_segment_x(-42, -5.2, 40, 2.05, 4.1, MAT.wall, false)
-	_wall_segment_x(5.2, 42, 40, 2.05, 4.1, MAT.wall, false)
+	# Exterior walls, raised to a double-height office proportion.
+	_box("North exterior wall", Vector3(0, WALL_H * 0.5, -40), Vector3(84, WALL_H, 0.34), MAT.wall, true)
+	_box("West exterior wall", Vector3(-42, WALL_H * 0.5, 0), Vector3(0.34, WALL_H, 80), MAT.wall, true)
+	_box("East exterior wall", Vector3(42, WALL_H * 0.5, 0), Vector3(0.34, WALL_H, 80), MAT.wall, true)
+	_wall_segment_x(-42, -5.2, 40, WALL_H * 0.5, WALL_H, MAT.wall, false)
+	_wall_segment_x(5.2, 42, 40, WALL_H * 0.5, WALL_H, MAT.wall, false)
 	_box("Entrance canopy", Vector3(0, 4.15, 42.8), Vector3(20, 0.38, 5.4), Color("#344b43"), true)
 	for x in [-9.1, 9.1]:
 		_box("Canopy pillar", Vector3(x, 2.05, 43.6), Vector3(0.38, 4.1, 0.38), Color("#73857c"), true)
 	# Full-height windows along side and rear facades.
 	for x in [-34, -25, -16, -7, 2, 11, 20, 29, 38]:
-		_box("North glazing", Vector3(x, 2.1, -39.78), Vector3(5.6, 2.55, 0.06), MAT.glass, false, null, 0.16, 0.12, true)
+		_box("North glazing", Vector3(x, 2.45, -39.78), Vector3(5.6, 3.4, 0.06), MAT.glass, false, null, 0.16, 0.12, true)
 		_box("North window sill", Vector3(x, 0.78, -39.68), Vector3(5.8, 0.10, 0.20), Color("#9ca9a2"), false)
+		_box("North glazing header", Vector3(x, 4.28, -39.78), Vector3(5.6, 0.10, 0.12), Color("#7d8b84"), false)
 	for z in [-32, -21, -10, 1, 12, 23, 34]:
 		for x in [-41.78, 41.78]:
-			_box("Side glazing", Vector3(x, 2.05, z), Vector3(0.06, 2.48, 7.3), MAT.glass, false, null, 0.16, 0.12, true)
+			_box("Side glazing", Vector3(x, 2.45, z), Vector3(0.06, 3.4, 7.3), MAT.glass, false, null, 0.16, 0.12, true)
 			_box("Side window sill", Vector3(x * 0.999, 0.78, z), Vector3(0.20, 0.1, 7.5), Color("#9ca9a2"), false)
-	# South lobby storefront glass and sliding doors.
+			_box("Side glazing header", Vector3(x * 0.999, 4.28, z), Vector3(0.12, 0.10, 7.3), Color("#7d8b84"), false)
+	# South lobby storefront glass and sliding doors, plus a clerestory band
+	# above the shopfront so the expanded lobby stays bright.
 	for x in [-15, -10, -5, 5, 10, 15]:
 		_box("Lobby storefront glass", Vector3(x, 2.0, 39.78), Vector3(4.55, 3.0, 0.07), MAT.glass, false, null, 0.12, 0.1, true)
 		_box("Storefront mullion", Vector3(x, 2.0, 39.68), Vector3(0.09, 3.15, 0.16), Color("#71847b"), false, null, 0.35, 0.5)
+		_box("Lobby clerestory glass", Vector3(x, 4.5, 39.78), Vector3(4.55, 1.8, 0.07), MAT.glass, false, null, 0.12, 0.1, true)
+		_box("Clerestory mullion", Vector3(x, 4.5, 39.68), Vector3(0.09, 1.95, 0.16), Color("#71847b"), false, null, 0.35, 0.5)
 	_box("Entry left door", Vector3(-2.25, 1.7, 39.5), Vector3(2.0, 3.25, 0.11), Color(0.44, 0.65, 0.65, 0.34), false, null, 0.12, 0.1, true)
 	_box("Entry right door", Vector3(2.25, 1.7, 39.5), Vector3(2.0, 3.25, 0.11), Color(0.44, 0.65, 0.65, 0.34), false, null, 0.12, 0.1, true)
+	_box("Entry transom glass", Vector3(0, 4.5, 39.78), Vector3(4.4, 1.8, 0.07), MAT.glass, false, null, 0.12, 0.1, true)
 	_box("Entry pull left", Vector3(-1.25, 1.7, 39.38), Vector3(0.05, 1.15, 0.08), Color("#c5aa7a"), false, null, 0.28, 0.75)
 	_box("Entry pull right", Vector3(1.25, 1.7, 39.38), Vector3(0.05, 1.15, 0.08), Color("#c5aa7a"), false, null, 0.28, 0.75)
 	# Structural columns and a visible roof edge keep the building architectural, not a floating floorplan.
 	for x in [-39, -20, 0, 20, 39]:
 		for z in [-37, -18, 4, 25, 37]:
-			_box("Structural column", Vector3(x, 2.05, z), Vector3(0.42, 4.1, 0.42), Color("#c5cec7"), true)
-	_box("North roof edge", Vector3(0, 4.25, -40), Vector3(84, 0.28, 0.52), Color("#718179"), false)
-	_box("West roof edge", Vector3(-42, 4.25, 0), Vector3(0.52, 0.28, 80), Color("#718179"), false)
-	_box("East roof edge", Vector3(42, 4.25, 0), Vector3(0.52, 0.28, 80), Color("#718179"), false)
-	_box("South roof edge", Vector3(0, 4.25, 40), Vector3(84, 0.28, 0.52), Color("#718179"), false)
-	_box("Exterior logo board", Vector3(0, 3.5, 40.55), Vector3(12, 1.0, 0.28), Color("#354d43"), false)
-	_label("BANGKAH  /  HEADQUARTERS", Vector3(0, 3.35, 40.35), 0.009)
+			_box("Structural column", Vector3(x, WALL_H * 0.5, z), Vector3(0.42, WALL_H, 0.42), Color("#c5cec7"), true)
+	_box("North roof edge", Vector3(0, 5.62, -40), Vector3(84, 0.30, 0.52), Color("#718179"), false)
+	_box("West roof edge", Vector3(-42, 5.62, 0), Vector3(0.52, 0.30, 80), Color("#718179"), false)
+	_box("East roof edge", Vector3(42, 5.62, 0), Vector3(0.52, 0.30, 80), Color("#718179"), false)
+	_box("South roof edge", Vector3(0, 5.62, 40), Vector3(84, 0.30, 0.52), Color("#718179"), false)
+	_box("Exterior logo board", Vector3(0, 4.75, 40.55), Vector3(12, 1.0, 0.28), Color("#354d43"), false)
+	_label("BANGKAH  /  HEADQUARTERS", Vector3(0, 4.6, 40.35), 0.009)
 
 func _build_room_partitions() -> void:
 	# North executive wing: Owner, Secretary, Management and Architecture.
-	_partition_z_with_door(-19.5, -39.8, -20.0, -29.5, 2.9)
-	_partition_z_with_door(-2.0, -39.8, -20.0, -29.5, 2.9)
-	_partition_z_with_door(18.5, -39.8, -20.0, -29.5, 2.9)
-	_partition_x_with_door(-39.8, -19.8, -20.0, -29.0, 2.9)
-	_partition_x_with_door(-19.2, -2.2, -20.0, -11.0, 2.9)
-	_partition_x_with_door(-1.8, 18.2, -20.0, 8.0, 2.9)
-	_partition_x_with_door(18.8, 39.8, -20.0, 29.0, 2.9)
+	_partition_z_with_door(-19.5, -39.8, -20.0, -29.5, DOOR_W, "OWNER OFFICE", true)
+	_partition_z_with_door(-2.0, -39.8, -20.0, -29.5, DOOR_W, "SECRETARIAT", true)
+	_partition_z_with_door(18.5, -39.8, -20.0, -29.5, DOOR_W, "ARCHITECTURE", true)
+	_partition_x_with_door(-39.8, -19.8, -20.0, -29.0, DOOR_W, "OWNER OFFICE", true)
+	_partition_x_with_door(-19.2, -2.2, -20.0, -11.0, DOOR_W, "SECRETARIAT", true)
+	_partition_x_with_door(-1.8, 18.2, -20.0, 8.0, DOOR_W, "MANAGEMENT", true)
+	_partition_x_with_door(18.8, 39.8, -20.0, 29.0, DOOR_W, "ARCHITECTURE", true)
 	# Engineering wing, meeting room, public lobby, QA, backend and API lab.
-	_partition_z_with_door(-19.5, -19.8, 4.0, -7.0, 2.9)
-	_partition_z_with_door(6.5, -19.8, 4.0, -7.0, 2.9)
-	_partition_z_with_door(18.5, -19.8, 4.0, -7.0, 2.9)
-	_partition_x_with_door(-39.8, -19.8, 4.0, -29.0, 2.9)
-	_partition_x_with_door(-19.2, 6.2, 4.0, -6.5, 2.9)
-	_partition_x_with_door(6.8, 18.2, 4.0, 13.0, 2.9)
-	_partition_x_with_door(18.8, 39.8, 4.0, 29.0, 2.9)
-	# South rooms: meeting, lobby, API lab, archive and pantry/lounge.
-	_partition_z_with_door(-19.5, 4.0, 25.0, 14.5, 2.9)
-	_partition_z_with_door(18.5, 4.0, 25.0, 14.5, 2.9)
-	_partition_x_with_door(-39.8, -19.8, 25.0, -29.0, 2.9)
-	_partition_x_with_door(18.8, 39.8, 25.0, 29.0, 2.9)
-	# Split the south-central wing into an empty Promotion studio and staff lounge.
-	_partition_z_with_door(-0.5, 25.0, 39.8, 32.5, 2.9)
-	_partition_x_with_door(-19.8, 18.8, 25.0, -0.5, 2.9)
+	_partition_z_with_door(-19.5, -19.8, 4.0, -7.0, DOOR_W, "FRONTEND", true)
+	_partition_z_with_door(6.5, -19.8, 4.0, -7.0, DOOR_W, "BACKEND", true)
+	_partition_z_with_door(18.5, -19.8, 4.0, -7.0, DOOR_W, "API LAB", true)
+	_partition_x_with_door(-39.8, -19.8, 4.0, -29.0, DOOR_W, "BOARDROOM", true)
+	_partition_x_with_door(-19.2, 6.2, 4.0, -6.5, DOOR_W, "QA ENGINEERING", true)
+	_partition_x_with_door(6.8, 18.2, 4.0, 13.0, DOOR_W, "BACKEND", true)
+	_partition_x_with_door(18.8, 39.8, 4.0, 29.0, DOOR_W, "API LAB", true)
+	# South rooms: archive/print remain; area selatan-tengah menyatu dengan
+	# LOBBY (dinding lama x=-19.8..18.8 dihapus) supaya lobi lebih luas.
+	_partition_z_with_door(-19.5, 4.0, 25.0, 14.5, DOOR_W, "BOARDROOM", false)
+	_partition_z_with_door(18.5, 4.0, 25.0, 14.5, DOOR_W, "API LAB", true)
+	_partition_x_with_door(-39.8, -19.8, 25.0, -29.0, DOOR_W, "ARCHIVE & PRINT", false)
+	_partition_x_with_door(18.8, 39.8, 25.0, 29.0, DOOR_W, "PANTRY & LOUNGE", false)
+	# Pemisah ruang pribadi owner dari lobby baru.
+	_partition_z_with_door(-0.5, 25.0, 39.8, 32.5, DOOR_W, "OWNER LOUNGE", true)
+	_partition_x_with_door(-19.8, -0.5, 25.0, -12.5, 3.1, "OWNER SUITE", false)
 	# Frosted lower bands and door signage details.
 	for x in [-29, -11, 8, 29]:
 		_box("Glass privacy band", Vector3(x, 0.62, -20.0), Vector3(2.2, 0.36, 0.19), Color(0.72, 0.78, 0.73, 0.56), false, null, 0.28, 0.0, true)
@@ -396,21 +507,21 @@ func _build_ceiling_and_lighting() -> void:
 	# Suspended acoustic ceiling: the roof is now present from first-person eye level.
 	# Individual panels leave narrow service gaps and recessed light channels.
 	for z in [-37.5, -18.5, 4.0, 25.0, 37.5]:
-		_box("Ceiling cross beam", Vector3(0, 4.02, z), Vector3(82, 0.18, 0.32), Color("#87948d"), false, null, 0.72, 0.12)
+		_box("Ceiling cross beam", Vector3(0, 5.22, z), Vector3(82, 0.18, 0.32), Color("#87948d"), false, null, 0.72, 0.12)
 	for x in [-40, -19.5, -2.0, 18.5, 40]:
-		_box("Ceiling spine", Vector3(x, 4.02, 0), Vector3(0.28, 0.18, 78), Color("#87948d"), false, null, 0.72, 0.12)
+		_box("Ceiling spine", Vector3(x, 5.22, 0), Vector3(0.28, 0.18, 78), Color("#87948d"), false, null, 0.72, 0.12)
 	for tile_x in range(-38, 39, 4):
 		for tile_z in range(-37, 38, 5):
-			_box("Acoustic ceiling panel", Vector3(float(tile_x) + 2.0, 4.17, float(tile_z) + 2.5), Vector3(3.70, 0.075, 4.68), Color("#e2e5df"), false, null, 0.92)
+			_box("Acoustic ceiling panel", Vector3(float(tile_x) + 2.0, CEIL_Y, float(tile_z) + 2.5), Vector3(3.70, 0.075, 4.68), Color("#e2e5df"), false, null, 0.92)
 	# HVAC return grilles add scale and break up the broad ceiling plane.
-	for point in [Vector3(-34,4.11,-27), Vector3(-14,4.11,-27), Vector3(8,4.11,-27), Vector3(30,4.11,-27), Vector3(-33,4.11,-4), Vector3(5,4.11,-4), Vector3(31,4.11,16), Vector3(8,4.11,34)]:
+	for point in [Vector3(-34,5.39,-27), Vector3(-14,5.39,-27), Vector3(8,5.39,-27), Vector3(30,5.39,-27), Vector3(-33,5.39,-4), Vector3(5,5.39,-4), Vector3(31,5.39,16), Vector3(8,5.39,34)]:
 		_box("HVAC ceiling grille", point, Vector3(0.95, 0.018, 0.42), Color("#87918c"), false, null, 0.62, 0.22)
 	var light_points := [Vector3(-29,-29, -28), Vector3(-10,-29,-28), Vector3(8,-29,-28), Vector3(29,-29,-28), Vector3(-29,-7,-7), Vector3(-6,-7,-7), Vector3(24,-7,-7), Vector3(-29, -7, 15), Vector3(-1,-7,15), Vector3(29,-7,15), Vector3(8,-7,33)]
 	for i in range(light_points.size()):
 		var point = light_points[i]
-		_box("Linear ceiling light", Vector3(point.x, 3.86, point.z), Vector3(4.6, 0.12, 0.55), Color("#f4f0df"), false, null, 0.22, 0.0, false, Color("#f5e8d0"))
+		_box("Linear ceiling light", Vector3(point.x, CEIL_Y - 0.30, point.z), Vector3(4.6, 0.12, 0.55), Color("#f4f0df"), false, null, 0.22, 0.0, false, Color("#f5e8d0"))
 		var light := OmniLight3D.new()
-		light.position = Vector3(point.x, 3.45, point.z)
+		light.position = Vector3(point.x, 4.72, point.z)
 		light.light_color = Color("#fff0d8")
 		light.light_energy = 0.42
 		light.omni_range = 11.0
@@ -419,19 +530,20 @@ func _build_ceiling_and_lighting() -> void:
 		if light.shadow_enabled:
 			light.shadow_blur = 2.0
 		add_child(light)
-	# Lobby feature pendant lights with warm light sources.
-	for x in [-7.0, 0.0, 7.0]:
-		_cylinder("Pendant stem", Vector3(x, 3.35, 15.0), 0.035, 0.75, Color("#596b63"))
-		_cylinder("Pendant shade", Vector3(x, 2.94, 15.0), 0.46, 0.18, Color("#d5c49e"), null, false, 0.2)
-		# Emissive shade material for warm glow.
-		_box("Pendant glow", Vector3(x, 2.88, 15.0), Vector3(0.38, 0.06, 0.38), Color("#f5e0b8"), false, null, 0.22, 0.0, false, Color("#f8ecca"))
-		var pendant_light := OmniLight3D.new()
-		pendant_light.position = Vector3(x, 2.80, 15.0)
-		pendant_light.light_color = Color("#ffe8c8")
-		pendant_light.light_energy = 0.35
-		pendant_light.omni_range = 5.5
-		pendant_light.shadow_enabled = false
-		add_child(pendant_light)
+	# Lobby feature pendant lights, two rows across the expanded lobby.
+	for pendant_z in [15.0, 24.0, 31.5]:
+		for x in [-7.0, 0.0, 7.0]:
+			_cylinder("Pendant stem", Vector3(x, 4.14, pendant_z), 0.035, 2.45, Color("#596b63"))
+			_cylinder("Pendant shade", Vector3(x, 2.90, pendant_z), 0.46, 0.18, Color("#d5c49e"), null, false, 0.2)
+			# Emissive shade material for warm glow.
+			_box("Pendant glow", Vector3(x, 2.84, pendant_z), Vector3(0.38, 0.06, 0.38), Color("#f5e0b8"), false, null, 0.22, 0.0, false, Color("#f8ecca"))
+			var pendant_light := OmniLight3D.new()
+			pendant_light.position = Vector3(x, 2.76, pendant_z)
+			pendant_light.light_color = Color("#ffe8c8")
+			pendant_light.light_energy = 0.35
+			pendant_light.omni_range = 5.5
+			pendant_light.shadow_enabled = false
+			add_child(pendant_light)
 
 func _add_workstation(position: Vector3, title: String, wood: Color = Color("#9c8062"), dual_monitor: bool = true, rotation_y: float = 0.0) -> void:
 	var root := Node3D.new()
@@ -479,7 +591,8 @@ func _add_workstation(position: Vector3, title: String, wood: Color = Color("#9c
 	desk_lamp.shadow_enabled = false
 	root.add_child(desk_lamp)
 	# Ergonomic chair and floor mat. Chair faces the monitor (-Z).
-	_add_office_chair(position + root.transform.basis * Vector3(0, 0, 1.55), Color("#52675f"))
+	var chair_position := position + root.transform.basis * Vector3(0, 0, 1.55)
+	_add_office_chair(chair_position, Color("#52675f"), false, rotation_y)
 	_box("Desk floor mat", Vector3(0, 0.145, 1.45), Vector3(2.1, 0.025, 1.95), Color("#737f78"), false, root)
 	_label(title, Vector3(0, 2.35, -0.04), 0.0055, Color("#f3f1e8"), root)
 	# Workstation label only visible when player is close — keeps the office clean.
@@ -487,20 +600,31 @@ func _add_workstation(position: Vector3, title: String, wood: Color = Color("#9c
 	ws_label.set("visibility_range_end", 6.0)
 	ws_label.set("visibility_range_fade_mode", 1) # VISIBILITY_RANGE_FADE_SELF
 
-func _add_office_chair(position: Vector3, color: Color = Color("#52675f")) -> void:
+func _add_office_chair(position: Vector3, color: Color = Color("#52675f"), interactive: bool = true, facing: float = 0.0) -> void:
+	# Kursi kantor swivel: kaki & silang statis, dudukan punya pivot sendiri yang
+	# berputar mengikuti pemain saat diduduki. interactive=false untuk kursi yang
+	# sudah dikelola sistem workstation (duduk + desktop UI).
 	var root := Node3D.new()
+	root.name = "OfficeChair"
 	root.position = position
+	root.rotation.y = facing
 	add_child(root)
 	_cylinder("Chair base hub", Vector3(0, 0.24, 0), 0.12, 0.22, Color("#69736e"), root, false, 0.62)
 	for angle in [0.0, PI * 0.5, PI, PI * 1.5]:
 		var spoke := _box("Chair base spoke", Vector3(cos(angle) * 0.30, 0.12, sin(angle) * 0.30), Vector3(0.62, 0.065, 0.085), Color("#6a7771"), false, root, 0.32, 0.7)
 		spoke.rotation.y = angle
 		_cylinder("Chair caster", Vector3(cos(angle) * 0.56, 0.08, sin(angle) * 0.56), 0.085, 0.12, Color("#303a3b"), root)
-	_box("Chair cushion", Vector3(0, 0.63, 0), Vector3(0.94, 0.18, 0.92), color, false, root)
-	_box("Chair back cushion", Vector3(0, 1.18, -0.39), Vector3(0.92, 1.08, 0.18), color, false, root)
-	for x in [-0.54, 0.54]:
-		_box("Chair arm support", Vector3(x, 0.92, -0.02), Vector3(0.10, 0.42, 0.12), Color("#485852"), false, root)
-		_box("Chair arm pad", Vector3(x, 1.12, 0.04), Vector3(0.19, 0.08, 0.58), Color("#3e5049"), false, root)
+	if interactive:
+		var swivel := Node3D.new()
+		swivel.name = "ChairSwivel"
+		swivel.position = Vector3(0, 0.18, 0)
+		root.add_child(swivel)
+		_box("Chair cushion", Vector3(0, 0.45, 0), Vector3(0.94, 0.18, 0.92), color, false, swivel)
+		_box("Chair back cushion", Vector3(0, 1.00, 0.39), Vector3(0.92, 1.08, 0.18), color, false, swivel)
+		for x in [-0.54, 0.54]:
+			_box("Chair arm support", Vector3(x, 0.74, -0.02), Vector3(0.10, 0.42, 0.12), Color("#485852"), false, swivel)
+			_box("Chair arm pad", Vector3(x, 0.94, 0.04), Vector3(0.19, 0.08, 0.58), Color("#3e5049"), false, swivel)
+		seats.append({"position": Vector3(position.x, 0.0, position.z), "yaw": facing, "kind": "office", "pivot": swivel, "label": "Kursi Kantor"})
 
 func _add_shelf(position: Vector3, width: float, height: float, depth: float, label_text: String) -> void:
 	var root := Node3D.new()
@@ -563,6 +687,11 @@ func _add_lounge_sofa(position: Vector3, rotation_y: float, color: Color, width:
 		_box("Sofa arm", Vector3(x, 0.71, 0), Vector3(0.28, 0.74, 1.08), color.darkened(0.08), false, root)
 	for x in [-width * 0.28, 0.0, width * 0.28]:
 		_box("Sofa seat cushion", Vector3(x, 0.81, 0.03), Vector3(width * 0.25, 0.15, 0.79), color.lightened(0.10), false, root)
+	# Registrasi dua titik duduk sofa; pemain menghadap +z lokal (yaw = PI
+	# terhadap rotasi sofa) supaya tepat duduk menghadap ruangan.
+	for sx in [width * 0.24, -width * 0.24]:
+		var world_sit := Vector3(position.x + cos(rotation_y) * sx, 0.0, position.z - sin(rotation_y) * sx)
+		seats.append({"position": world_sit, "yaw": rotation_y + PI, "kind": "sofa", "pivot": null, "label": "Sofa"})
 
 func _build_owner_suite() -> void:
 	_label("OWNER  /  PRIVATE OFFICE", Vector3(-29.5, 3.55, -38.1), 0.006)
@@ -671,8 +800,8 @@ func _build_meeting_room() -> void:
 	# Ten physically placed chairs support a full engineering review with room
 	# for the Owner and observers. Seats align with the local meeting positions.
 	for x in [-4.2, -2.1, 0.0, 2.1, 4.2]:
-		_add_meeting_chair(table_center + Vector3(x, 0, -2.55), 0.0)
-		_add_meeting_chair(table_center + Vector3(x, 0, 2.55), PI)
+		_add_meeting_chair(table_center + Vector3(x, 0, -2.55), PI)
+		_add_meeting_chair(table_center + Vector3(x, 0, 2.55), 0.0)
 	_box("Boardroom display frame", Vector3(-29.5, 2.2, 5.05), Vector3(6.3, 2.25, 0.18), Color("#33464c"), false)
 	_box("Boardroom display screen", Vector3(-29.5, 2.2, 4.93), Vector3(5.92, 1.9, 0.03), Color("#28464b"), false, null, 0.18, 0.0, false, Color("#477f76"))
 	_box("Boardroom whiteboard frame", Vector3(-38.7, 1.9, 15.0), Vector3(0.13, 2.2, 6.5), Color("#6e7b74"), false)
@@ -686,10 +815,18 @@ func _add_meeting_chair(position: Vector3, rotation_y: float) -> void:
 	root.position = position
 	root.rotation.y = rotation_y
 	add_child(root)
-	_box("Meeting chair seat", Vector3(0, 0.58, 0), Vector3(0.92, 0.16, 0.82), Color("#5e766d"), false, root)
-	_box("Meeting chair back", Vector3(0, 1.06, -0.34), Vector3(0.92, 0.88, 0.14), Color("#50675f"), false, root)
+	# Kursi rapat dengan pivot swivel supaya bisa ikut berputar saat pemain
+	# duduk dan meng-interasi mouse. Sandar di sisi +z (belakang pemain yang
+	# menghadap -z/varian yaw), sehingga tampilan menghadap meja betul.
+	var swivel := Node3D.new()
+	swivel.name = "ChairSwivel"
+	root.add_child(swivel)
+	_box("Meeting chair seat", Vector3(0, 0.58, 0), Vector3(0.92, 0.16, 0.82), Color("#5e766d"), false, swivel)
+	_box("Meeting chair back", Vector3(0, 1.02, 0.34), Vector3(0.92, 0.88, 0.14), Color("#50675f"), false, swivel)
 	for x in [-0.35, 0.35]:
-		_box("Meeting chair leg", Vector3(x, 0.27, 0.22), Vector3(0.08, 0.55, 0.08), Color("#596a63"), false, root, 0.35, 0.5)
+		for z in [-0.28, 0.28]:
+			_box("Meeting chair leg", Vector3(x, 0.27, z), Vector3(0.08, 0.55, 0.08), Color("#596a63"), false, root, 0.35, 0.5)
+	seats.append({"position": position, "yaw": rotation_y, "kind": "meeting", "pivot": swivel, "label": "Kursi Rapat"})
 
 func _build_api_lab() -> void:
 	_label("API  /  INFRASTRUCTURE LAB", Vector3(29.0, 3.45, 4.4), 0.0057)
@@ -798,6 +935,28 @@ func _build_pantry_and_lounge() -> void:
 	_add_plant(Vector3(15.0, 0, 35.0), 1.0)
 	_box("Lounge wall display", Vector3(9.0, 2.1, 38.75), Vector3(5.6, 2.0, 0.14), Color("#41544b"), false)
 	_box("Lounge display screen", Vector3(9.0, 2.1, 38.65), Vector3(5.25, 1.66, 0.03), Color("#254039"), false, null, 0.18, 0.0, false, Color("#426d57"))
+
+## Kursi bebas yang tidak terikat workstation: klaster lounge di lobby luas
+## plus kursi geser di QA supaya setiap bengkel/jabatan punya tempat duduk.
+func _build_free_seating() -> void:
+	# Klaster duduk lobby: karpet hangat, meja kopi kecil, empat kursi swivel.
+	_box("Lobby seating rug", Vector3(2.8, 0.14, 27.6), Vector3(6.6, 0.03, 5.6), Color("#b58f7d"), false, null, 0.9)
+	_box("Lobby coffee table base", Vector3(2.8, 0.42, 27.6), Vector3(1.15, 0.30, 1.75), Color("#9a7958"), true, null, 0.4)
+	_box("Lobby coffee table tray", Vector3(2.8, 0.595, 27.6), Vector3(0.95, 0.05, 1.55), Color("#7b6856"), false, null, 0.42, 0.1)
+	for chair in [
+		{"pos": Vector3(1.0, 0, 26.0), "yaw": 0.0},
+		{"pos": Vector3(4.6, 0, 26.0), "yaw": 0.0},
+		{"pos": Vector3(1.0, 0, 29.2), "yaw": PI},
+		{"pos": Vector3(4.6, 0, 29.2), "yaw": PI},
+	]:
+		_add_office_chair(chair["pos"], Color("#5f776d"), true, chair["yaw"])
+	# Tiga kursi geser di ruang QA untuk rapat cepat / pairing.
+	for chair in [
+		{"pos": Vector3(-4.5, 0, -3.2), "yaw": PI},
+		{"pos": Vector3(-0.5, 0, -3.2), "yaw": PI},
+		{"pos": Vector3(3.5, 0, -3.2), "yaw": PI},
+	]:
+		_add_office_chair(chair["pos"], Color("#62807c"), true, chair["yaw"])
 
 func _build_accent_walls() -> void:
 	# Cat aksen pada dinding fitur per ruangan — warna tenang sesuai palet
