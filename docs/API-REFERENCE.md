@@ -145,9 +145,14 @@ Supported action types: `email.send`, `website.deploy`, `expense.purchase`.
 
 - `POST /api/approvals/{id}/approve` creates one queued outbox item.
 - `POST /api/approvals/{id}/reject` rejects the request.
-- `POST /api/outbox/{id}/execute` executes an approved email / deployment adapter. The Owner must explicitly invoke this endpoint after approval.
+- `POST /api/outbox/{id}/execute` executes an approved email / deployment adapter. The Owner must explicitly invoke this endpoint after approval. A definitive failure schedules an exponential backoff (`next_retry_at`); an early call is refused.
+- `POST /api/outbox/retry-due` executes only failed items whose backoff window has elapsed.
+- `POST /api/outbox/{id}/reconcile` accepts `outcome` (`succeeded`/`failed`), `note` (required verification note) and optional `external_id`. It records the verified provider result without re-sending; a succeeded result is final.
+- `POST /api/outbox/{id}/requeue` resets an exhausted `failed` item to `queued` for a deliberate fresh run.
 
 Approval payload JSON is canonicalized, SHA-256 hashed and protected by a database trigger against modification. Secrets are rejected from approval payloads. Email and deployment actions require provider configuration. Purchases remain `awaiting_executor` for manual handling. Uncertain provider results become `unknown` and must be reconciled manually before any retry.
+
+Retry policy is configured with `OUTBOX_MAX_ATTEMPTS` (default 5), `OUTBOX_BACKOFF_SECONDS` (default 30) and `OUTBOX_BACKOFF_MAX_SECONDS` (default 3600). Backoff is `base * 2^(attempts-1)`, capped. When attempts are exhausted `next_retry_at` is cleared and execution is refused until an operator reconciles or requeues the item.
 
 ## Legacy / agent routes
 

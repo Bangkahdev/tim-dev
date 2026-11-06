@@ -12,6 +12,7 @@ import smtplib
 import ssl
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta
 from email.message import EmailMessage
 from email.utils import make_msgid
 from urllib.parse import urlparse
@@ -31,17 +32,55 @@ def _env(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
 
 
+def _retry_settings():
+    def _int(name, default):
+        try:
+            return max(1, int(_env(name, str(default))))
+        except ValueError:
+            return default
+    return (
+        _int("OUTBOX_MAX_ATTEMPTS", 5),
+        _int("OUTBOX_BACKOFF_SECONDS", 30),
+        _int("OUTBOX_BACKOFF_MAX_SECONDS", 3600),
+    )
+
+
+def _next_retry_at(attempts: int, base: int, cap: int) -> str:
+    delay = min(cap, base * (2 ** max(0, attempts - 1)))
+    return (datetime.now().astimezone() + timedelta(seconds=delay)).isoformat(timespec="seconds")
+
+
+def _retry_due(item) -> bool:
+    value = item.get("next_retry_at")
+    if not value:
+        return True
+    try:
+        return datetime.now().astimezone() >= datetime.fromisoformat(value)
+    except ValueError:
+        return True
+
+
 def execute_outbox(outbox_id: str):
     item = OPS.get_outbox_item(outbox_id)
     if item["status"] == "succeeded":
         return {"success": True, "already_completed": True, "outbox": OPS.list_outbox()}
-    if item["status"] in ("unknown", "executing"):
-        raise AdapterError("Status eksekusi belum dapat dipastikan. Jangan kirim ulang sebelum rekonsiliasi provider.")
+    if item["status"] == "unknown":
+        raise AdapterError("Status eksekusi belum dapat dipastikan. Rekonsiliasi hasil provider sebelum mengirim ulang.")
+    if item["status"] == "executing":
+        raise AdapterError("Outbox sedang dieksekusi oleh proses lain.")
     if item["approval_status"] != "approved":
         raise AdapterError("Outbox hanya dapat dieksekusi setelah approval Owner berstatus approved.")
     if item["status"] not in ("queued", "failed", "awaiting_executor"):
         raise AdapterError("Outbox item belum siap dieksekusi.")
-    OPS.claim_outbox(outbox_id)
+
+    max_attempts, base, cap = _retry_settings()
+    if item["status"] == "failed" and item["attempts"] >= max_attempts:
+        raise AdapterError("Batas percobaan tercapai. Rekonsiliasi hasil provider atau antrekan ulang secara manual.")
+    if item["status"] == "failed" and not _retry_due(item):
+        raise AdapterError(f"Retry dijadwalkan pada {item.get('next_retry_at')}. Tunggu jadwal backoff berikutnya.")
+
+    claimed = OPS.claim_outbox(outbox_id)
+    attempts = int(claimed.get("attempts", 1))
     action = item["action_type"]
     payload = item["payload"]
     try:
@@ -58,10 +97,12 @@ def execute_outbox(outbox_id: str):
         OPS.update_outbox(outbox_id, "unknown", error=str(exc))
         raise AdapterError("Provider tidak memberi hasil final. Outbox ditandai UNKNOWN untuk mencegah duplikasi.") from exc
     except AdapterError as exc:
-        OPS.update_outbox(outbox_id, "failed", error=str(exc))
+        self_retry = None if attempts >= max_attempts else _next_retry_at(attempts, base, cap)
+        OPS.update_outbox(outbox_id, "failed", error=str(exc), next_retry_at=self_retry)
         raise
     except Exception as exc:
-        OPS.update_outbox(outbox_id, "failed", error=f"{type(exc).__name__}: {exc}")
+        self_retry = None if attempts >= max_attempts else _next_retry_at(attempts, base, cap)
+        OPS.update_outbox(outbox_id, "failed", error=f"{type(exc).__name__}: {exc}", next_retry_at=self_retry)
         raise AdapterError("Eksekusi gagal. Periksa konfigurasi provider dan audit log.") from exc
 
 

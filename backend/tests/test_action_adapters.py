@@ -72,6 +72,100 @@ class ActionAdapterTests(unittest.TestCase):
         self.assertEqual(result["status"], "awaiting_executor")
         self.assertEqual(self.ops.list_outbox()[0]["status"], "awaiting_executor")
 
+    def _email_outbox(self):
+        return self._approved_outbox("email.send", {
+            "to": "owner@example.test", "subject": "Retry", "body": "Retry body"
+        })
+
+    def test_failure_schedules_backoff_and_blocks_early_retry(self):
+        outbox_id = self._email_outbox()
+        env = {"SMTP_HOST": "", "SMTP_USERNAME": "", "SMTP_PASSWORD": "", "SMTP_FROM": "",
+               "OUTBOX_MAX_ATTEMPTS": "5", "OUTBOX_BACKOFF_SECONDS": "60"}
+        with patch.dict(os.environ, env, clear=False):
+            with self.assertRaises(adapters.AdapterError):
+                adapters.execute_outbox(outbox_id)
+            row = self.ops.list_outbox()[0]
+            self.assertEqual(row["status"], "failed")
+            self.assertEqual(row["attempts"], 1)
+            self.assertTrue(row["next_retry_at"])
+            with self.assertRaisesRegex(adapters.AdapterError, "Retry dijadwalkan"):
+                adapters.execute_outbox(outbox_id)
+
+    def test_exhausted_attempts_require_manual_requeue(self):
+        outbox_id = self._email_outbox()
+        env = {"SMTP_HOST": "", "SMTP_USERNAME": "", "SMTP_PASSWORD": "", "SMTP_FROM": "",
+               "OUTBOX_MAX_ATTEMPTS": "1"}
+        with patch.dict(os.environ, env, clear=False):
+            with self.assertRaises(adapters.AdapterError):
+                adapters.execute_outbox(outbox_id)
+            row = self.ops.list_outbox()[0]
+            self.assertEqual(row["attempts"], 1)
+            self.assertIsNone(row["next_retry_at"])
+            with self.assertRaisesRegex(adapters.AdapterError, "Batas percobaan"):
+                adapters.execute_outbox(outbox_id)
+            requeued = self.ops.requeue_outbox(outbox_id, actor="operator")
+            self.assertEqual(requeued["status"], "queued")
+            self.assertEqual(requeued["attempts"], 0)
+
+    def test_due_retry_can_be_executed_after_backoff(self):
+        outbox_id = self._email_outbox()
+        with patch.dict(os.environ, {"SMTP_HOST": "", "SMTP_USERNAME": "", "SMTP_PASSWORD": "",
+                                     "SMTP_FROM": "", "OUTBOX_MAX_ATTEMPTS": "5",
+                                     "OUTBOX_BACKOFF_SECONDS": "3600"}, clear=False):
+            with self.assertRaises(adapters.AdapterError):
+                adapters.execute_outbox(outbox_id)
+            with self.ops._db() as db:
+                db.execute("UPDATE outbox_records SET next_retry_at='2000-01-01T00:00:00+00:00' WHERE id=?",
+                           (outbox_id,))
+            self.assertEqual([x["id"] for x in self.ops.list_due_outbox()], [outbox_id])
+            smtp = MagicMock()
+            smtp.__enter__.return_value = smtp
+            smtp.send_message.return_value = {}
+            with patch.dict(os.environ, {"SMTP_HOST": "smtp.example.test", "SMTP_PORT": "587",
+                                         "SMTP_USERNAME": "user", "SMTP_PASSWORD": "pw",
+                                         "SMTP_FROM": "company@example.test"}, clear=False):
+                with patch.object(adapters.smtplib, "SMTP", return_value=smtp):
+                    result = adapters.execute_outbox(outbox_id)
+            self.assertTrue(result["success"])
+            row = self.ops.list_outbox()[0]
+            self.assertEqual(row["status"], "succeeded")
+            self.assertIsNone(row["next_retry_at"])
+
+    def test_unknown_status_requires_operator_reconciliation(self):
+        outbox_id = self._email_outbox()
+        smtp = MagicMock()
+        smtp.__enter__.return_value = smtp
+        smtp.send_message.side_effect = RuntimeError("connection dropped after DATA")
+        with patch.dict(os.environ, {"SMTP_HOST": "smtp.example.test", "SMTP_PORT": "587",
+                                     "SMTP_USERNAME": "user", "SMTP_PASSWORD": "pw",
+                                     "SMTP_FROM": "company@example.test"}, clear=False):
+            with patch.object(adapters.smtplib, "SMTP", return_value=smtp):
+                with self.assertRaises(adapters.AdapterError):
+                    adapters.execute_outbox(outbox_id)
+        row = self.ops.list_outbox()[0]
+        self.assertEqual(row["status"], "unknown")
+        self.assertIsNone(row["next_retry_at"])
+        with self.assertRaisesRegex(adapters.AdapterError, "Rekonsiliasi"):
+            adapters.execute_outbox(outbox_id)
+
+        reconciled = self.ops.reconcile_outbox(
+            outbox_id, "succeeded", "Provider dashboard shows delivered.",
+            external_id="provider-123", actor="operator",
+        )
+        self.assertEqual(reconciled["status"], "succeeded")
+        self.assertEqual(reconciled["external_id"], "provider-123")
+        self.assertEqual(reconciled["resolved_by"], "operator")
+        self.assertTrue(reconciled["resolution_note"])
+        with self.assertRaisesRegex(ValueError, "final"):
+            self.ops.reconcile_outbox(outbox_id, "failed", "late change", actor="operator")
+
+    def test_reconciliation_requires_note_and_allowed_state(self):
+        outbox_id = self._email_outbox()
+        with self.assertRaisesRegex(ValueError, "catatan"):
+            self.ops.reconcile_outbox(outbox_id, "succeeded", "", actor="operator")
+        with self.assertRaisesRegex(ValueError, "failed"):
+            self.ops.reconcile_outbox(outbox_id, "maybe", "note", actor="operator")
+
 
 if __name__ == "__main__":
     unittest.main()

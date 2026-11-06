@@ -83,6 +83,7 @@ var _local_meeting_time_left: float = 0.0
 var _local_meeting_speaker_elapsed: float = 0.0
 var _local_meeting_attendees: Array[String] = []
 var _local_meeting_speaker_index: int = -1
+var _town_shift_on_duty: bool = true
 
 var _api_label: Label
 var _location_label: Label
@@ -315,6 +316,7 @@ func _spawn_characters() -> void:
 		npc.name = "NPC_" + employee.id
 		add_child(npc)
 		npc.set_ambient_plans(_ambient_plans_for(employee.id, employee.position))
+		_configure_employee_home(npc)
 		npcs[employee.id] = npc
 
 	receptionist = NPC_SCRIPT.new()
@@ -891,6 +893,28 @@ func _on_status_completed(result: int, response_code: int, _headers: PackedStrin
 	_project_label.text = "PROJECT · " + _project_title
 	if is_instance_valid(_company_ui):
 		_company_ui.set_company_snapshot(data)
+	_apply_activity_engine_state(data)
+
+func _apply_activity_engine_state(data: Dictionary) -> void:
+	# Use backend workshift state to drive visual commute (no backend state changes).
+	var engine: Variant = data.get("activity_engine", {})
+	if not engine is Dictionary:
+		return
+	var on_duty := bool(engine.get("duty_open", true))
+	var enabled := bool(engine.get("enabled", true))
+	if not enabled:
+		on_duty = true
+	if on_duty == _town_shift_on_duty:
+		return
+	_town_shift_on_duty = on_duty
+	for employee_id in npcs:
+		var npc = npcs[employee_id]
+		if is_instance_valid(npc) and npc.has_method("set_shift_on_duty"):
+			npc.set_shift_on_duty(on_duty)
+	if on_duty:
+		_show_toast("Jam kerja dimulai — karyawan berangkat ke kantor.")
+	else:
+		_show_toast("Jam kerja selesai — karyawan pulang ke rumah masing-masing.")
 
 func _set_connection(online: bool) -> void:
 	_connection_online = online
@@ -1583,3 +1607,18 @@ func _show_toast(message: String) -> void:
 	if is_instance_valid(_toast_panel):
 		_toast_panel.visible = true
 	_toast_elapsed = 4.5
+
+func _configure_employee_home(npc) -> void:
+	if not is_instance_valid(npc) or not npc.has_method("set_commute"):
+		return
+	var layout: Dictionary = OFFICE_WORLD_SCRIPT.employee_house_layout(str(npc.employee_id))
+	npc.set_commute(layout.get("door", npc.home_position),
+		layout.get("commute_to_work", []), layout.get("commute_home", []))
+	if not _town_shift_on_duty:
+		npc.global_position = layout.get("door", npc.home_position)
+		npc._at_residence = true
+		npc._ambient_phase = "at_home"
+		npc._activity_mode = "resting_home"
+		npc.activity_text = "Di rumah · istirahat"
+		if "_labels" in npc and npc._labels.has("status_label") and is_instance_valid(npc._labels.status_label):
+			npc._labels.status_label.text = "DI RUMAH"

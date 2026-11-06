@@ -100,6 +100,8 @@ class CompanyOperations:
                     action_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued',
                     attempts INTEGER NOT NULL DEFAULT 0, external_id TEXT,
                     last_error TEXT NOT NULL DEFAULT '', result_json TEXT NOT NULL DEFAULT '{}',
+                    next_retry_at TEXT, last_attempt_at TEXT,
+                    resolution_note TEXT NOT NULL DEFAULT '', resolved_by TEXT,
                     created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
                     FOREIGN KEY(approval_id) REFERENCES approval_records(id)
                 );
@@ -117,9 +119,22 @@ class CompanyOperations:
                 BEFORE UPDATE OF action_type,summary,payload_json,payload_sha256 ON approval_records
                 BEGIN SELECT RAISE(ABORT, 'approval payload is immutable'); END;
             """)
+            self._ensure_columns(db, "outbox_records", {
+                "next_retry_at": "TEXT",
+                "last_attempt_at": "TEXT",
+                "resolution_note": "TEXT NOT NULL DEFAULT ''",
+                "resolved_by": "TEXT",
+            })
             for department in DEPARTMENTS:
                 db.execute("INSERT OR IGNORE INTO department_catalog(id,name,description) VALUES(?,?,?)",
                            (department["id"], department["name"], department["description"]))
+
+    @staticmethod
+    def _ensure_columns(db, table: str, columns: dict[str, str]):
+        existing = {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
+        for name, definition in columns.items():
+            if name not in existing:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
     def _event(self, db, kind: str, actor: str, entity_id: str | None, detail: str):
         self.store._event(db, kind, actor, entity_id, str(detail)[:1000])
@@ -439,6 +454,17 @@ class CompanyOperations:
                 JOIN approval_records a ON a.id=o.approval_id ORDER BY o.created_at DESC LIMIT ?""", (limit,)).fetchall()
             return [dict(row) for row in rows]
 
+    def list_due_outbox(self, limit=50):
+        """Failed items whose backoff window has elapsed and may be retried."""
+        limit = max(1, min(int(limit), 200))
+        now = _now()
+        with LOCK, self._db() as db:
+            ids = [row["id"] for row in db.execute(
+                """SELECT id FROM outbox_records WHERE status='failed'
+                   AND next_retry_at IS NOT NULL AND next_retry_at<=?
+                   ORDER BY next_retry_at LIMIT ?""", (now, limit))]
+        return [self.get_outbox_item(item_id) for item_id in ids]
+
     def get_outbox_item(self, outbox_id):
         with LOCK, self._db() as db:
             row = db.execute("""SELECT o.*,a.summary,a.payload_json,a.payload_sha256,a.status AS approval_status
@@ -471,20 +497,71 @@ class CompanyOperations:
                         "Owner memulai eksekusi outbox yang telah disetujui.")
         return self.get_outbox_item(outbox_id)
 
-    def update_outbox(self, outbox_id, status, external_id="", error="", result=None):
+    def update_outbox(self, outbox_id, status, external_id="", error="", result=None,
+                      next_retry_at=None, actor="executor"):
         if status not in ("succeeded", "failed", "unknown", "awaiting_executor"):
             raise ValueError("Status outbox tidak valid.")
         with LOCK, self._db() as db:
             row = db.execute("SELECT action_type,status FROM outbox_records WHERE id=?", (outbox_id,)).fetchone()
             if row is None:
                 raise ValueError("Outbox item tidak ditemukan.")
+            now = _now()
             db.execute("""UPDATE outbox_records SET status=?,external_id=?,
-                last_error=?,result_json=?,updated_at=? WHERE id=?""",
+                last_error=?,result_json=?,next_retry_at=?,last_attempt_at=?,updated_at=? WHERE id=?""",
                 (status, str(external_id)[:500], str(error)[:1000],
-                 json.dumps(result or {}, ensure_ascii=False), _now(), outbox_id))
-            self._event(db, "outbox_reconciled", "executor", outbox_id,
-                        f"Eksekusi {row['action_type']} berstatus {status}.")
+                 json.dumps(result or {}, ensure_ascii=False), next_retry_at, now, now, outbox_id))
+            if next_retry_at:
+                self._event(db, "outbox_retry_scheduled", actor, outbox_id,
+                            f"Percobaan {row['action_type']} gagal; retry dijadwalkan pada {next_retry_at}.")
+            else:
+                self._event(db, "outbox_reconciled", actor, outbox_id,
+                            f"Eksekusi {row['action_type']} berstatus {status}.")
         return next(x for x in self.list_outbox() if x["id"] == outbox_id)
+
+    def reconcile_outbox(self, outbox_id, outcome, note="", external_id="", actor="operator"):
+        """Resolve an uncertain/failed outbox item after operator verification.
+
+        Reconciliation never re-sends anything; it only records the verified
+        provider outcome so a duplicate delivery cannot be triggered later.
+        """
+        if outcome not in ("succeeded", "failed"):
+            raise ValueError("Hasil rekonsiliasi harus succeeded atau failed.")
+        note = str(note).strip()
+        if not note:
+            raise ValueError("Rekonsiliasi membutuhkan catatan verifikasi operator.")
+        with LOCK, self._db() as db:
+            row = db.execute("SELECT action_type,status,attempts FROM outbox_records WHERE id=?", (outbox_id,)).fetchone()
+            if row is None:
+                raise ValueError("Outbox item tidak ditemukan.")
+            if row["status"] == "succeeded":
+                raise ValueError("Outbox yang sudah berhasil bersifat final dan tidak dapat diubah.")
+            if row["status"] == "executing":
+                raise ValueError("Outbox sedang dieksekusi; tunggu hasil sebelum rekonsiliasi.")
+            if row["status"] not in ("unknown", "failed", "awaiting_executor"):
+                raise ValueError("Outbox item belum berada pada status yang dapat direkonsiliasi.")
+            now = _now()
+            db.execute("""UPDATE outbox_records SET status=?,external_id=?,next_retry_at=NULL,
+                resolution_note=?,resolved_by=?,updated_at=? WHERE id=?""",
+                (outcome, str(external_id)[:500], note[:1000], actor,
+                 now, outbox_id))
+            self._event(db, "outbox_reconciled", actor, outbox_id,
+                        f"Operator menetapkan hasil {row['action_type']}: {outcome}. Catatan: {note[:600]}")
+        return self.get_outbox_item(outbox_id)
+
+    def requeue_outbox(self, outbox_id, actor="operator"):
+        """Return an exhausted failed outbox item to the queue for a fresh run."""
+        with LOCK, self._db() as db:
+            row = db.execute("SELECT action_type,status FROM outbox_records WHERE id=?", (outbox_id,)).fetchone()
+            if row is None:
+                raise ValueError("Outbox item tidak ditemukan.")
+            if row["status"] != "failed":
+                raise ValueError("Hanya outbox berstatus failed yang dapat diantrekan ulang.")
+            db.execute("""UPDATE outbox_records SET status='queued',attempts=0,last_error='',
+                result_json='{}',next_retry_at=NULL,resolution_note='',resolved_by=NULL,updated_at=?
+                WHERE id=?""", (_now(), outbox_id))
+            self._event(db, "outbox_requeued", actor, outbox_id,
+                        f"Operator mengantrekan ulang {row['action_type']} untuk percobaan baru.")
+        return self.get_outbox_item(outbox_id)
 
     def create_print_job(self, paper_id):
         paper = self.get_paper(paper_id)
