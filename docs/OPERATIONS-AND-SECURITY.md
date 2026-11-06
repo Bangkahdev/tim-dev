@@ -33,7 +33,9 @@ External side effects follow a three-step process:
 
 Email uses SMTP with TLS. The deployment adapter only accepts an HTTPS webhook URL and sends a bearer token plus an idempotency key. The webhook provider must honor that idempotency key to prevent duplicate deployment requests. Purchase actions are never auto-completed; they are marked `awaiting_executor` for manual handling.
 
-If a remote connection ends after a provider may have accepted a request, the outbox is marked `unknown`. The system does not auto-retry an unknown result. The Owner must inspect the provider before deciding how to reconcile it. A failed result is retryable only where the adapter reported a definitive failure before delivery.
+If a remote connection ends after a provider may have accepted a request, the outbox is marked `unknown`. The system never auto-retries an unknown result. The operator inspects the provider and calls `POST /api/outbox/{id}/reconcile` with the verified outcome and a note; reconciliation records the decision without re-sending and a `succeeded` result is final.
+
+A definitive failure is retryable with exponential backoff. `OUTBOX_MAX_ATTEMPTS` (default 5), `OUTBOX_BACKOFF_SECONDS` (default 30) and `OUTBOX_BACKOFF_MAX_SECONDS` (default 3600) control the policy. `next_retry_at` is stored on the item, an early execution is refused, and `POST /api/outbox/retry-due` runs only items whose window has elapsed. Once attempts are exhausted the item stops retrying and must be reconciled or explicitly requeued with `POST /api/outbox/{id}/requeue`. Every execution, scheduled retry, reconciliation and requeue is written to the audit trail.
 
 ## Data and recovery
 
