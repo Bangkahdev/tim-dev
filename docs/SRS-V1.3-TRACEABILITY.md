@@ -26,7 +26,7 @@ This matrix records the delivered implementation, not an assertion that the enti
 | APR-01–11 | Approval payload hash / immutability, review, outbox, SMTP / HTTPS webhook adapters, unknown result boundary | Implemented basic local workflow; no complete remote reconciliation |
 | CCC | Company overview, tasks, team, Paper inbox, meetings, approvals and archive panels | Implemented in client source; runtime unverified |
 | SYN-01–09 | Status polling and cursor-based HTTP event retrieval | Partial; no WebSocket replay/ack protocol |
-| NFR-SEC | .env secrets, loopback bind, optional bearer token on all API paths, approval gates | Partial; no short-lived Owner session or process sandbox |
+| NFR-SEC | .env secrets, loopback-only server, session-based auth required for all `/api/*` except login (bcrypt passwords, server-side random tokens, `BANGKAH_SESSION_HOURS` expiry, revoke on logout/disable), RBAC + department scope, actor from session only, deny-by-default unknown API routes, approval gates, legacy shared token only when `BANGKAH_LEGACY_TOKEN_ROLE` is explicitly set | Partial; no user-management HTTP API, no short-lived signed/JWT rotation beyond session expiry, no process/container sandbox or egress proxy |
 | NFR-PRF-01 | Project uses GL Compatibility, frame cap 120 and basic NPC workload | Unverified; no hardware benchmark |
 
 ## Acceptance boundaries
