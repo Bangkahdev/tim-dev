@@ -672,7 +672,16 @@ class CompanyOperations:
         return [self.get_print_job(x) for x in ids]
 
     def audit(self, after_id=0, limit=100):
-        after_id = max(0, int(after_id)); limit = max(1, min(int(limit), 500))
+        try:
+            after_id = int(after_id)
+        except (TypeError, ValueError):
+            after_id = 0
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError):
+            limit = 100
+        after_id = max(0, after_id)
+        limit = max(1, min(limit, 500))
         with LOCK, self._db() as db:
             rows = db.execute("SELECT * FROM events WHERE id>? ORDER BY id LIMIT ?", (after_id, limit)).fetchall()
         return [dict(row) for row in rows]

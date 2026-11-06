@@ -330,15 +330,23 @@ class OfficeHandler(BaseHTTPRequestHandler):
         if route == "/api/print-jobs":
             self.send_json({"print_jobs": OPS.list_print_jobs()}); return
         if route == "/api/audit" or route == "/api/events":
-            after_id = query.get("after_id", [0])[0]
-            limit = query.get("limit", [100])[0]
-            events = OPS.audit(after_id, limit)
+            after_raw = query.get("after_id", ["0"])[0]
+            limit_raw = query.get("limit", ["100"])[0]
             try:
-                fallback_cursor = int(after_id)
+                after_id = max(0, int(after_raw))
             except (TypeError, ValueError):
-                fallback_cursor = 0
-            next_cursor = max([int(item["id"]) for item in events] or [fallback_cursor])
-            self.send_json({"events": events, "next_after_id": next_cursor}); return
+                after_id = 0
+            try:
+                limit = max(1, min(int(limit_raw), 500))
+            except (TypeError, ValueError):
+                limit = 100
+            events = OPS.audit(after_id, limit)
+            next_cursor = events[-1]["id"] if events else after_id
+            try:
+                next_cursor = int(next_cursor)
+            except (TypeError, ValueError):
+                next_cursor = after_id
+            self.send_json({"events": events, "next_after_id": next_cursor, "after_id": after_id, "limit": limit}); return
         if route == "/api/usage":
             health = get_health_snapshot().get("employees", {})
             employees = []
