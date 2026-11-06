@@ -25,6 +25,7 @@ from core.company_operations import OPS
 from core.workstations import DESKTOP, DesktopAuthError, DesktopError
 from core.employee_activity import EmployeeActivityEngine
 from core.domain_service import DomainService
+from core.auth import authentication as AUTH
 from core.infra_service import INFRA
 from core.ftp_service import FTP
 from core.mail_service import MAIL
@@ -350,6 +351,14 @@ class OfficeHandler(BaseHTTPRequestHandler):
         if route == "/api/network/vpn/peers":
             self.send_json({"peers": NETWORK.list_vpn_peers()})
             return
+        if route == "/api/auth/me":
+            token = self.headers.get("Authorization","").replace("Bearer ","").strip()
+            user = AUTH.current_user(token)
+            if not user:
+                self.send_json({"success": False, "error": {"code":"UNAUTHORIZED","message":"Invalid session"}}, 401)
+                return
+            self.send_json({"success": True, "user": user})
+            return
         if route == "/api/desktop/session":
             try:
                 self.send_json({"session": DESKTOP.session_state(self._desktop_token())})
@@ -564,6 +573,20 @@ class OfficeHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(error)}, 400)
                 return
             self.send_json({"success": True, "record": result}, 201)
+            return
+        if route == "/api/auth/login":
+            u = str(body.get("username","")).strip()
+            pw = str(body.get("password",""))
+            res = AUTH.login(u, pw)
+            if not res:
+                self.send_json({"success": False, "error": {"code":"INVALID_CREDENTIALS","message":"Login failed"}}, 401)
+                return
+            self.send_json({"success": True, "session": res}, 200)
+            return
+        if route == "/api/auth/logout":
+            token = str(body.get("token","")).strip() or self.headers.get("Authorization","").replace("Bearer ","").strip()
+            AUTH.logout(token)
+            self.send_json({"success": True})
             return
         if route == "/api/infra/service/start":
             sid = str(body.get("service_id","")).strip()

@@ -2,6 +2,7 @@
 
 import os, threading, socket
 from core.office_store import LOCK, STORE, _now
+from core.validation import safe_username, safe_path
 
 FTP_ROOT = os.path.join(os.path.dirname(__file__), "..", "data", "ftp_storage")
 os.makedirs(FTP_ROOT, exist_ok=True)
@@ -39,6 +40,7 @@ class FTPService:
         return {"liveness": "OK", "running": self._running}
 
     def provision_home(self, username):
+        username = safe_username(username)
         path = os.path.join(FTP_ROOT, "users", username)
         os.makedirs(path, exist_ok=True)
         for sub in ("documents", "projects", "uploads"):

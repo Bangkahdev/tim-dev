@@ -48,6 +48,9 @@ var player
 var npcs: Dictionary = {}
 var receptionist
 var _interactables: Array[Dictionary] = []
+# Sistem duduk bebas: kursi swivel mengikuti rotasi pemain selama ia duduk.
+var _free_seat_pivot: Node3D = null
+var _free_seat_base_yaw: float = 0.0
 var _material_cache: Dictionary = {}
 var _status_http: HTTPRequest
 var _player_http: HTTPRequest
@@ -132,6 +135,7 @@ func _process(delta: float) -> void:
 		_status_elapsed = 0.0
 		_request_status()
 	_update_local_meeting(delta)
+	_update_free_seat_swivel(delta)
 	if _save_elapsed >= 5.0:
 		_save_elapsed = 0.0
 		_save_player_if_needed()
@@ -407,6 +411,34 @@ func _build_interaction_points() -> void:
 			_station_interactable(desk_id, str(station["title"]) + " Workstation",
 				str(station["workstation_id"]), str(station["account"]),
 				station["position"]))
+	_append_free_seat_interactables()
+
+# Kursi dan sofa yang dibangun office_environment.gd didaftarkan sebagai titik
+# interaksi "duduk". Semua kursi/sofa jadi dudukan nyata; kursi kantor punya
+# pivot swivel yang mengikuti badan pemain.
+func _append_free_seat_interactables() -> void:
+	var office_world = get_node_or_null("BangkahHeadquarters")
+	if not is_instance_valid(office_world) or not ("seats" in office_world):
+		return
+	var seat_index := 0
+	for seat_entry in office_world.seats:
+		var seat_position: Vector3 = seat_entry.get("position", Vector3.ZERO)
+		var seat_yaw: float = float(seat_entry.get("yaw", 0.0))
+		var seat_kind := str(seat_entry.get("kind", "office"))
+		var seat_label := str(seat_entry.get("label", "Kursi"))
+		var pivot_node = seat_entry.get("pivot", null)
+		_interactables.append({
+			"id": "free_seat_%d" % seat_index,
+			"label": seat_label,
+			"position": seat_position,
+			"prompt": "Duduk di " + seat_label.to_lower(),
+			"seat": seat_position,
+			"seat_yaw": seat_yaw,
+			"kind": seat_kind,
+			"pivot": pivot_node if pivot_node is Node3D else null,
+			"pivot_base_yaw": seat_yaw,
+		})
+		seat_index += 1
 
 # Interaction entry for a backend workstation. Station seat/camera/target
 # follow _add_workstation geometry: seat = P + (0, 0.05, 1.55),
@@ -933,6 +965,12 @@ func _update_interaction_prompt() -> void:
 		_prompt_label.visible = false
 		_prompt_panel.visible = false
 		return
+	# Saat duduk di kursi bebas, tampilkan instruksi berdiri.
+	if player.is_seated:
+		_prompt_label.text = "E · BERDIRI DARI KURSI"
+		_prompt_label.visible = true
+		_prompt_panel.visible = true
+		return
 	if is_instance_valid(_company_ui) and _company_ui.is_panel_open():
 		_prompt_label.visible = false
 		_prompt_panel.visible = false
@@ -980,11 +1018,18 @@ func _nearest_target() -> Dictionary:
 	return nearest
 
 func _on_player_interact() -> void:
+	# Duduk bebas di kursi: tekan E lagi untuk berdiri, mouse memutar kursi.
+	if is_instance_valid(player) and player.is_seated and not _desktop_active:
+		_leave_free_seat()
+		return
 	var target := _nearest_target()
 	if target.is_empty():
 		_show_toast("Tidak ada objek dalam jangkauan. Dekati workstation atau karyawan.")
 		return
 	var target_id := str(target.get("id", ""))
+	if str(target.get("kind", "")) in ["office", "meeting", "sofa"]:
+		_take_free_seat(target)
+		return
 	if target_id == "employee":
 		_open_employee_chat(str(target.get("employee_id", "")))
 		return
@@ -1067,6 +1112,43 @@ func _exit_workstation() -> void:
 		player.set_input_enabled(true)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_show_toast("Kamu berdiri dari workstation. Sesi desktop tetap aktif sampai logout.")
+
+## Duduk di kursi/sofa bebas. Mouse tetap aktif untuk memutar badan; pivot
+## kursi swivel mengikuti rotasi pemain sehingga terasa seperti kursi kantor.
+func _take_free_seat(target: Dictionary) -> void:
+	if not is_instance_valid(player):
+		return
+	if _desktop_active and is_instance_valid(_workstation_sys) and _workstation_sys.is_active():
+		return
+	if is_instance_valid(_chat_panel) and _chat_panel.visible:
+		_close_chat()
+	var pivot_node: Variant = target.get("pivot", null)
+	_free_seat_pivot = pivot_node if pivot_node is Node3D else null
+	_free_seat_base_yaw = float(target.get("pivot_base_yaw", target.get("seat_yaw", 0.0)))
+	player.activity = "resting" if str(target.get("kind", "")) == "sofa" else "sitting"
+	player.sit_at(target.get("seat", player.global_position), float(target.get("seat_yaw", 0.0)))
+	# sit_at mematikan input; nyalakan lagi supaya mouse memutar kursi.
+	# Gerak masih terkunci karena _physics_process memeriksa is_seated.
+	player.set_input_enabled(true)
+	_show_toast(str(target.get("label", "Kursi")) + ": duduk nyaman. Mouse memutar kursi, E untuk berdiri.")
+
+func _leave_free_seat() -> void:
+	if is_instance_valid(player) and player.is_seated:
+		player.stand_up()
+		player.activity = "idle"
+	_free_seat_pivot = null
+	_show_toast("Kamu berdiri kembali. Kursi tetap menghadap posisi terakhir.")
+
+## Pivot kursi menyalin rotasi badan pemain (relatif terhadap yaw dasar
+## kursinya), sehingga kursi berputar seperti kursi kantor sungguhan.
+func _update_free_seat_swivel(delta: float) -> void:
+	if _free_seat_pivot == null or not is_instance_valid(_free_seat_pivot):
+		return
+	if not is_instance_valid(player) or not player.is_seated:
+		_free_seat_pivot = null
+		return
+	var target_yaw: float = player.global_rotation.y - _free_seat_base_yaw
+	_free_seat_pivot.rotation.y = lerp_angle(_free_seat_pivot.rotation.y, target_yaw, minf(1.0, delta * 9.0))
 
 func _on_desktop_company_requested() -> void:
 	if is_instance_valid(_company_ui):
