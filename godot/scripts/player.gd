@@ -13,16 +13,29 @@ signal ui_requested(page_id: String)
 @export var mouse_sensitivity: float = 0.0019
 @export var eye_height: float = 1.66
 
+func _enter_tree() -> void:
+	# Reliable stair/ramp climbing across HQ floors.
+	floor_snap_length = 0.55
+	floor_max_angle = deg_to_rad(62.0)
+	floor_stop_on_slope = false
+	floor_constant_speed = true
+	floor_block_on_wall = false
+	wall_min_slide_angle = deg_to_rad(12.0)
+
 var controls_enabled: bool = true
 var is_moving: bool = false
 var activity: String = "idle"
+var _collision: CollisionShape3D
 var _camera: Camera3D
+var _camera_mount: Node3D
 var _third_person_camera: Camera3D
 var _third_person_pivot: Node3D
 var _third_person_spring: SpringArm3D
 var _world_visual: Node3D
 var _viewmodel: Node3D
 var _view_mode: String = "third_person"
+var _iso_enabled: bool = false
+var _iso_tween: Tween = null
 var _walk_phase: float = 0.0
 var _head_bob: float = 0.0
 var _external_animation_player: AnimationPlayer
@@ -43,16 +56,24 @@ var _rng := RandomNumberGenerator.new()
 var is_seated: bool = false
 var _saved_transform: Transform3D
 var _seated_blend: float = 0.0
+# Drivable vehicle (visual): player drives a simple car node around town/HQ.
+var is_driving: bool = false
+var _drive_node: Node3D = null
+var _drive_speed: float = 0.0
+var _drive_seat_offset: Vector3 = Vector3(0.0, 0.95, -0.25)
+var _drive_exit_offset: Vector3 = Vector3(1.65, 0.0, 0.0)
+var _drive_saved_tp_spring: float = 5.0
 
 func _ready() -> void:
 	_rng.randomize()
 	_ensure_inputs()
 	var collision := CollisionShape3D.new()
+	_collision = collision
 	var capsule := CapsuleShape3D.new()
 	capsule.radius = 0.32
 	capsule.height = 2.26
 	collision.shape = capsule
-	collision.position.y = 1.13
+	collision.position.y = 1.14
 	add_child(collision)
 
 	# Camera setup FIRST — ensures cameras exist even if character creation has issues.
@@ -60,13 +81,14 @@ func _ready() -> void:
 	camera_mount.name = "FirstPersonCameraMount"
 	camera_mount.position = Vector3(0.0, eye_height, 0.0)
 	add_child(camera_mount)
+	_camera_mount = camera_mount
 
 	_camera = Camera3D.new()
 	_camera.name = "OwnerFirstPersonCamera"
 	_camera.current = true
 	_camera.fov = 72.0
 	_camera.near = 0.06
-	_camera.far = 200.0
+	_camera.far = 420.0
 	camera_mount.add_child(_camera)
 
 	_viewmodel = Node3D.new()
@@ -87,20 +109,17 @@ func _ready() -> void:
 	_third_person_pivot.add_child(_third_person_spring)
 	_third_person_camera = Camera3D.new()
 	_third_person_camera.name = "OwnerFollowCamera"
-	_third_person_camera.fov = 62.0
+	_third_person_camera.fov = 72.0
 	_third_person_camera.current = false
 	_third_person_camera.near = 0.1
-	_third_person_camera.far = 250.0
+	_third_person_camera.far = 420.0
 	_third_person_camera.position = Vector3(0.42, 0.12, 0.0)
 	_third_person_spring.add_child(_third_person_camera)
 	_third_person_pivot.rotation.x = deg_to_rad(-7.0)
 
-	# Camera attributes with DoF for cinematic depth.
+	# Camera attributes — Design Bible: FAR DoF DISABLED (sharp distant city).
 	var cam_attrs := CameraAttributesPractical.new()
-	cam_attrs.set("dof_blur_far_enabled", true)
-	cam_attrs.set("dof_blur_far_distance", 22.0)
-	cam_attrs.set("dof_blur_far_transition", 14.0)
-	cam_attrs.set("dof_blur_far_amount", 0.12)
+	cam_attrs.set("dof_blur_far_enabled", false)
 	cam_attrs.set("dof_blur_near_enabled", false)
 	_camera.attributes = cam_attrs
 	_third_person_camera.attributes = cam_attrs
@@ -187,9 +206,13 @@ func _ensure_inputs() -> void:
 				InputMap.action_add_event(action_name, event)
 
 func _process(_delta: float) -> void:
-	# Character is always visible in third-person — don't hide it.
-	if _view_mode == "third_person" and _world_visual != null:
-		_world_visual.visible = true
+	if _world_visual == null:
+		return
+	if is_driving or is_seated:
+		_world_visual.visible = false
+	else:
+		_world_visual.visible = (_view_mode == "third_person")
+
 
 func _input(event: InputEvent) -> void:
 	# Camera look — processed in _input (before UI) so it always works.
@@ -199,7 +222,7 @@ func _input(event: InputEvent) -> void:
 			var pitch_delta: float = -event.relative.y * mouse_sensitivity
 			if is_instance_valid(_camera):
 				_camera.rotation.x = clampf(_camera.rotation.x + pitch_delta, deg_to_rad(-82.0), deg_to_rad(82.0))
-			if is_instance_valid(_third_person_pivot):
+			if is_instance_valid(_third_person_pivot) and not _iso_enabled:
 				_third_person_pivot.rotation.x = clampf(_third_person_pivot.rotation.x + pitch_delta, deg_to_rad(-35.0), deg_to_rad(25.0))
 		elif Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 			# Drag-to-look for touchpad / non-captured mode.
@@ -207,7 +230,7 @@ func _input(event: InputEvent) -> void:
 			var pitch_delta2: float = -event.relative.y * mouse_sensitivity * 1.5
 			if is_instance_valid(_camera):
 				_camera.rotation.x = clampf(_camera.rotation.x + pitch_delta2, deg_to_rad(-82.0), deg_to_rad(82.0))
-			if is_instance_valid(_third_person_pivot):
+			if is_instance_valid(_third_person_pivot) and not _iso_enabled:
 				_third_person_pivot.rotation.x = clampf(_third_person_pivot.rotation.x + pitch_delta2, deg_to_rad(-35.0), deg_to_rad(25.0))
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -225,7 +248,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif controls_enabled and event.keycode == KEY_F4:
 			ui_requested.emit("team")
 		elif controls_enabled and event.keycode == KEY_V:
-			_set_view_mode("third_person" if _view_mode == "first_person" else "first_person")
+			if _view_mode == "first_person":
+				_iso_enabled = false
+				_set_view_mode("third_person")
+			elif not _iso_enabled:
+				set_camera_mode(true)
+			else:
+				set_camera_mode(false)
+				_set_view_mode("first_person")
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_LEFT and Input.mouse_mode == Input.MOUSE_MODE_VISIBLE and controls_enabled:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -236,6 +266,11 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _physics_process(delta: float) -> void:
 	_phase += delta
+	if is_driving and is_instance_valid(_drive_node):
+		if _world_visual != null:
+			_world_visual.visible = false
+		_drive_physics(delta)
+		return
 	if is_seated:
 		velocity = Vector3.ZERO
 		_animate_seated(delta)
@@ -514,6 +549,19 @@ func _animate_seated(delta: float) -> void:
 		if eye is Node3D:
 			(eye as Node3D).scale.y = lerpf((eye as Node3D).scale.y, blink_target, minf(1.0, delta * 30.0))
 
+func set_camera_mode(is_isometric: bool) -> void:
+	_iso_enabled = is_isometric
+	if _iso_tween and _iso_tween.is_valid(): _iso_tween.kill()
+	_iso_tween = create_tween().set_parallel(true)
+	if is_isometric:
+		_set_view_mode("third_person")
+		_iso_tween.tween_property(_third_person_pivot, "rotation_degrees", Vector3(-60.0, 45.0, 0.0), 0.35)
+		_iso_tween.tween_property(_third_person_spring, "spring_length", 18.0, 0.35)
+	else:
+		# restore chase defaults
+		_iso_tween.tween_property(_third_person_pivot, "rotation_degrees", Vector3(-7.0, 0.0, 0.0), 0.35)
+		_iso_tween.tween_property(_third_person_spring, "spring_length", 5.0, 0.35)
+
 func _set_view_mode(mode: String) -> void:
 	_view_mode = mode
 	var first_person := mode == "first_person"
@@ -522,7 +570,7 @@ func _set_view_mode(mode: String) -> void:
 	if is_instance_valid(_third_person_camera):
 		_third_person_camera.current = not first_person
 	if _world_visual != null:
-		_world_visual.visible = not first_person
+		_world_visual.visible = (not first_person) and not is_driving and not is_seated
 	if _viewmodel != null:
 		_viewmodel.visible = first_person
 
@@ -536,6 +584,9 @@ func get_camera() -> Camera3D:
 	var active_camera := _camera if _view_mode == "first_person" else _third_person_camera
 	return active_camera if is_instance_valid(active_camera) else _camera
 
+func is_isometric() -> bool:
+	return _iso_enabled
+
 func get_view_mode() -> String:
 	return _view_mode
 
@@ -547,3 +598,140 @@ func set_input_enabled(enabled: bool) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	elif is_inside_tree():
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+func enter_vehicle(vehicle_node: Node3D, seat_offset: Vector3 = Vector3(-0.38, 0.0, 0.05), exit_offset: Vector3 = Vector3(1.85, 0.0, 0.0)) -> void:
+	if is_driving or not is_instance_valid(vehicle_node) or is_seated:
+		return
+	_drive_node = vehicle_node
+	_drive_seat_offset = seat_offset
+	_drive_exit_offset = exit_offset
+	_drive_speed = 0.0
+	is_driving = true
+	activity = "driving"
+	velocity = Vector3.ZERO
+	_saved_transform = global_transform
+	# Character sits inside the car: hide on-foot visual and disable body collision.
+	if _world_visual != null:
+		_world_visual.visible = false
+	if _viewmodel != null:
+		_viewmodel.visible = false
+	if _collision != null:
+		_collision.disabled = true
+	if is_instance_valid(_camera_mount):
+		_camera_mount.position = Vector3(-0.34, 1.02, 0.18)
+	if is_instance_valid(_third_person_spring):
+		_drive_saved_tp_spring = _third_person_spring.spring_length
+		_third_person_spring.spring_length = 7.2
+
+		# exclude car static bodies
+		var st := [_drive_node]
+		while st:
+			var n = st.pop_back()
+			if n is CollisionObject3D:
+				_third_person_spring.add_excluded_object((n as CollisionObject3D).get_rid())
+			for c in n.get_children(): st.append(c)
+	if is_instance_valid(_third_person_pivot):
+		_third_person_pivot.position = Vector3(0.0, 1.05, 0.0)
+	# Default to first-person "inside car" view; V toggles to chase cam.
+	_iso_enabled = false
+	_set_view_mode("first_person")
+	set_input_enabled(true)
+
+func exit_vehicle() -> void:
+	if not is_driving:
+		return
+	var exit_pos := global_position + _drive_exit_offset
+	if is_instance_valid(_drive_node):
+		exit_pos = _drive_node.global_transform * _drive_exit_offset
+	exit_pos.y = 0.0
+	global_position = exit_pos
+	is_driving = false
+	_drive_node = null
+	_drive_speed = 0.0
+	velocity = Vector3.ZERO
+	activity = "idle"
+	if _collision != null:
+		_collision.disabled = false
+	if is_instance_valid(_camera_mount):
+		_camera_mount.position = Vector3(0.0, eye_height, 0.0)
+	if is_instance_valid(_third_person_pivot):
+		_third_person_pivot.position = Vector3(0.0, 1.48, 0.0)
+	if is_instance_valid(_third_person_spring):
+		_third_person_spring.spring_length = _drive_saved_tp_spring
+	_iso_enabled = false
+	_set_view_mode("third_person")
+	if _world_visual != null:
+		_world_visual.visible = true
+		_world_visual.position = Vector3(0.0, 0.20, 0.0)
+		_world_visual.rotation = Vector3.ZERO
+	# let physics settle onto ground
+	set_input_enabled(true)
+
+func is_in_vehicle() -> bool:
+	return is_driving and is_instance_valid(_drive_node)
+
+func get_drive_node() -> Node3D:
+	return _drive_node if is_in_vehicle() else null
+
+func get_drive_exit_position() -> Vector3:
+	if not is_in_vehicle():
+		return global_position
+	var p: Vector3 = _drive_node.global_transform * _drive_exit_offset
+	p.y = 0.0
+	return p
+
+func _drive_physics(delta: float) -> void:
+	if not is_in_vehicle():
+		is_driving = false
+		return
+	var input_vector := Vector2.ZERO
+	if controls_enabled:
+		input_vector = Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+	var accel_input := -input_vector.y
+	var steer_input := input_vector.x
+	var max_fwd := 12.5
+	var max_rev := -4.8
+	var target_speed := max_fwd * accel_input if accel_input >= 0.0 else max_rev * absf(accel_input)
+	if absf(accel_input) > 0.01:
+		var rate := 10.5 if accel_input > 0.0 else 13.5
+		_drive_speed = move_toward(_drive_speed, target_speed, rate * delta)
+	else:
+		_drive_speed = move_toward(_drive_speed, 0.0, 5.8 * delta)
+	if absf(_drive_speed) > 0.2:
+		var steer_dir := 1.0 if _drive_speed >= 0.0 else -1.0
+		var steer_factor := clampf(absf(_drive_speed) / max_fwd, 0.18, 1.0)
+		_drive_node.rotate_y(-steer_input * 1.7 * delta * steer_dir * steer_factor)
+	var forward := -_drive_node.global_transform.basis.z
+	forward.y = 0.0
+	if forward.length_squared() > 0.0001:
+		forward = forward.normalized()
+	var motion := forward * _drive_speed * delta
+	var from := _drive_node.global_position + Vector3(0.0, 0.55, 0.0)
+	var to := from + motion.normalized() * (motion.length() + 1.25) if motion.length() > 0.0001 else from
+	var space := get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(from, to, 1)
+	query.collide_with_areas = false
+	if space != null and motion.length() > 0.0001 and space.intersect_ray(query).is_empty() == false:
+		_drive_speed = move_toward(_drive_speed, 0.0, 22.0 * delta)
+	else:
+		_drive_node.global_position += motion
+	_spin_drive_wheels(_drive_speed, delta)
+	var seat_world: Vector3 = _drive_node.global_transform * _drive_seat_offset
+	global_position = seat_world
+	velocity = Vector3.ZERO
+	is_moving = absf(_drive_speed) > 0.35
+	_animate_player(delta, absf(_drive_speed) > 7.5)
+	_update_external_animation()
+
+
+func _spin_drive_wheels(speed: float, delta: float) -> void:
+	if not is_instance_valid(_drive_node):
+		return
+	var rot := speed * delta * 0.9
+	var stack: Array = [_drive_node]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		if n is Node3D and str(n.name) == "Wheel":
+			(n as Node3D).rotate_x(rot)
+		for c in n.get_children():
+			stack.append(c)

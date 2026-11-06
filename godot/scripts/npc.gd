@@ -8,6 +8,10 @@ const CHARACTER_FACTORY = preload("res://scripts/character_factory.gd")
 @export var job_title: String = "Team Member"
 @export var shirt_color: Color = Color("#638a81")
 @export var hair_color: Color = Color("#30383a")
+@export var gender: String = "male"
+@export var wear_hijab: bool = false
+@export var skin_color: Color = Color("#c89e84")
+@export var body_type: String = "average" # slim | average | stocky | tall | short
 @export var is_receptionist: bool = false
 @export var home_position: Vector3 = Vector3.ZERO # workstation/desk home (work)
 
@@ -49,11 +53,17 @@ var _sit_transition: float = 0.0
 var _idle_variant: int = 0
 var _idle_timer: float = 0.0
 
+@onready var _player: Node3D = get_node_or_null("../Player_Owner")
+
 # Small-town commute: each employee has a residence and may travel between
 # house and HQ. Commute is visual only and never fabricates backend work state.
 var house_position: Vector3 = Vector3.INF
 var commute_to_work: Array = []
 var commute_to_home: Array = []
+# Town residents/family/citizens: stay in the town (home/market), never join
+# office work/meetings/commute, and remain interactable for visits.
+@export var is_resident: bool = false
+var resident_home: Vector3 = Vector3.INF
 var _at_residence: bool = false
 var _commuting: bool = false
 var _shift_on_duty: bool = true # set from activity_engine/main; default true preserves old behavior
@@ -67,26 +77,30 @@ func _ready() -> void:
 	capsule.radius = 0.30
 	capsule.height = 2.18
 	collision.shape = capsule
-	collision.position.y = 1.09
+	collision.position.y = 1.10
 	add_child(collision)
 
 	_visual = Node3D.new()
 	_visual.name = "CharacterVisual"
 	add_child(_visual)
-	var visual_data = CHARACTER_FACTORY.build(_visual, shirt_color, hair_color, display_name, employee_id)
+	var visual_data = CHARACTER_FACTORY.build(_visual, shirt_color, hair_color, display_name, employee_id, skin_color, gender, wear_hijab, body_type, 1)
 	_arms = visual_data.get("arms", [])
 	_legs = visual_data.get("legs", [])
 	_eyes = visual_data.get("eyes", [])
 	_head_pivot = visual_data.get("head_pivot")
 	_external_animation_player = visual_data.get("animation_player") as AnimationPlayer
 	_labels = visual_data
-	global_position = home_position
+	global_position = home_position + Vector3(0, 0.01, 0)
 	_blink_timer = _rng.randf_range(2.0, 5.0)
 
 	if is_receptionist:
 		_activity_mode = "typing"
-		activity_text = "Front desk · mengelola kunjungan"
+		activity_text = "Front desk Â· mengelola kunjungan"
 		_routine_timer = 4.0
+	elif is_resident:
+		_activity_mode = "idle"
+		activity_text = "Beraktivitas di rumah"
+		_routine_timer = _rng.randf_range(4.0, 8.0)
 	else:
 		_activity_mode = "idle"
 		activity_text = "Menunggu pekerjaan"
@@ -100,7 +114,7 @@ func set_commute(home_pos: Vector3, to_work_route: Array, to_home_route: Array) 
 
 func set_shift_on_duty(on_duty: bool) -> void:
 	_shift_on_duty = on_duty
-	if is_receptionist or _meeting_active:
+	if is_receptionist or is_resident or _meeting_active:
 		return
 	if not _shift_on_duty and _can_leave_for_home():
 		_begin_commute_home()
@@ -117,7 +131,7 @@ func set_ambient_plans(plans: Array) -> void:
 	_plans = plans
 
 func apply_employee_record(record: Dictionary) -> void:
-	if is_receptionist:
+	if is_receptionist or is_resident:
 		return
 	backend_record_received = true
 	var previous_status := office_status
@@ -212,9 +226,11 @@ func trigger_greeting() -> void:
 
 func _default_activity() -> String:
 	if is_receptionist:
-		return "Front desk · mengelola kunjungan"
+		return "Front desk Â· mengelola kunjungan"
+	if is_resident:
+		return "Di rumah Â· beraktivitas"
 	if office_status == "working":
-		return "Bekerja · tugas aktif"
+		return "Bekerja Â· tugas aktif"
 	if office_status in ["talking", "listening"]:
 		return "Berkomunikasi"
 	if office_status == "failed":
@@ -252,7 +268,7 @@ func _set_route(points: Array) -> void:
 		_update_status_label()
 
 func can_join_local_meeting() -> bool:
-	return not is_receptionist and not _meeting_active and office_status in ["idle", "completed"] and not _commuting and not _at_residence
+	return not is_receptionist and not is_resident and not _meeting_active and office_status in ["idle", "completed"] and not _commuting and not _at_residence
 
 func begin_local_meeting(route_points: Array, facing_yaw: float) -> bool:
 	if not can_join_local_meeting() or route_points.is_empty():
@@ -405,6 +421,8 @@ func _physics_process(delta: float) -> void:
 	_commute_cooldown = maxf(0.0, _commute_cooldown - delta)
 	if is_receptionist:
 		_update_receptionist(delta)
+	elif is_resident:
+		_update_ambient(delta)
 	elif office_status in ["idle", "completed"]:
 		_update_ambient(delta)
 	elif not _commuting and _at_residence and office_status == "working":
@@ -449,6 +467,28 @@ func _physics_process(delta: float) -> void:
 		stand()
 
 	_animate_character(delta)
+	_update_head_tracking(delta)
+
+func _update_head_tracking(delta: float) -> void:
+	# IK Head Tracking: leher mengikuti pemain saat dekat (natural, halus).
+	if _head_pivot == null or _player == null or not is_instance_valid(_player):
+		return
+	var to_player := _player.global_position - _head_pivot.global_position
+	var dist := to_player.length()
+	if dist > 8.0 or dist < 0.5:
+		return
+	# Only track when facing roughly toward player.
+	var forward := -_visual.global_transform.basis.z
+	var to_dir := to_player.normalized()
+	if forward.dot(to_dir) < 0.3:
+		return
+	var target_yaw := atan2(to_dir.x, to_dir.z)
+	var target_pitch := -atan2(to_dir.y, Vector2(to_dir.x, to_dir.z).length())
+	# Clamp to natural neck range.
+	target_pitch = clampf(target_pitch, -0.5, 0.5)
+	target_yaw = clampf(lerp_angle(_head_pivot.rotation.y, target_yaw, 0.0), -0.6, 0.6)
+	_head_pivot.rotation.y = lerpf(_head_pivot.rotation.y, target_yaw, minf(1.0, delta * 4.0))
+	_head_pivot.rotation.x = lerpf(_head_pivot.rotation.x, target_pitch, minf(1.0, delta * 4.0))
 
 func _on_route_completed() -> void:
 	if _ambient_phase == "meeting_approach":
