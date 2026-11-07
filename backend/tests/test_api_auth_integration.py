@@ -256,9 +256,6 @@ class ApiAuthIntegrationTests(unittest.TestCase):
         self.assertEqual(data["record"]["value"], "10.9.8.7")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
     def test_login_throttle_returns_429_with_retry_after_and_generic_message(self):
         sessions.clear_login_throttle()
@@ -292,3 +289,7 @@ if __name__ == "__main__":
         self.assertEqual(status, 401, data)
         self.assertEqual(data.get("error", {}).get("code"), "INVALID_CREDENTIALS")
         self.assertEqual(data.get("error", {}).get("message"), "Login failed")
+
+
+if __name__ == "__main__":
+    unittest.main()

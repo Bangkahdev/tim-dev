@@ -684,7 +684,9 @@ class OfficeHandler(BaseHTTPRequestHandler):
             u = str(body.get("username","")).strip()
             pw = str(body.get("password",""))
             try:
-                res = AUTH.login(u, pw, client_ip=trusted_client_ip(self))
+                _peer = _peer_ip(getattr(self, "client_address", ("", 0)))
+                _xff = bool(str(self.headers.get("X-Forwarded-For", "") or "").strip()) and (_peer is not None and _peer.is_loopback)
+                res = AUTH.login(u, pw, client_ip=trusted_client_ip(self), xff_present=_xff)
             except AUTH.LoginThrottled as error:
                 self.send_response(429)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
