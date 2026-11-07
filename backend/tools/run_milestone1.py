@@ -41,8 +41,15 @@ def main(argv=None) -> int:
     parser.add_argument("--isolated-db", action="store_true", help="fresh DB per run (recommended for clean data)")
     parser.add_argument("--external-sandbox", default="", help="note/evidence that pilot ran in disposable VM/container providing FS+network isolation")
     parser.add_argument("--worker", choices=["deterministic", "real"], default="deterministic", help="deterministic=backend integration fixture (NOT real Milestone 1). real=CrewAI/cloud AgentWorker (requires deps+model+external sandbox).")
+    parser.add_argument("--allow-unverified-real", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--max-attempts", type=int, default=20, help="safety cap on total attempts")
     args = parser.parse_args(argv)
+
+    if args.worker == "real" and not args.allow_unverified_real:
+        from core.sandbox_exec import sandbox_required
+        if not sandbox_required():
+            print("ERROR: --worker real requires BANGKAH_SANDBOX_REQUIRED=1 (and a validated external sandbox wrapper).", file=sys.stderr)
+            return 2
 
     workspace = Path(args.workspace) if args.workspace else (BASE_DIR / "workspace" / "projects")
     workspace.mkdir(parents=True, exist_ok=True)

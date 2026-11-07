@@ -173,20 +173,33 @@ def run_sandboxed(project_dir, args, timeout=120):
         env = {**os.environ, "PYTHONUNBUFFERED": "1"}
     run_args = list(args)
     try:
-        from core.sandbox_exec import enforce_sandbox, sandbox_status
+        from core.sandbox_exec import enforce_sandbox, ensure_sandbox_canaries, sandbox_status
         status = sandbox_status()
         if status.get("required") and not status.get("active"):
             try:
                 STORE.add_event("sandbox_blocked", "system", status.get("error", "sandbox required"), str(project_dir))
             except Exception:
                 pass
+        canary = ensure_sandbox_canaries(
+            project_dir,
+            audit=lambda t, a, d, e: STORE.add_event(t, a, d, e),
+        )
+        if status.get("required") and not canary.get("ok"):
+            raise ValueError(f"sandbox canary failed: {canary.get('details')}")
         run_args = enforce_sandbox(run_args, project_dir)
-    except RuntimeError:
+    except RuntimeError as exc:
         try:
-            STORE.add_event("sandbox_blocked", "system", "sandbox required but missing/misconfigured", str(project_dir))
+            STORE.add_event("sandbox_blocked", "system", str(exc), str(project_dir))
         except Exception:
             pass
         raise
+    except Exception as exc:
+        if "BANGKAH_SANDBOX_REQUIRED" in str(exc) or "canary" in str(exc).lower():
+            try:
+                STORE.add_event("sandbox_blocked", "system", str(exc), str(project_dir))
+            except Exception:
+                pass
+            raise
 
     completed = subprocess.run(
         run_args, cwd=project_dir, capture_output=True, text=True, timeout=timeout,
@@ -248,10 +261,6 @@ class CrewAIAgentWorker(AgentWorker):
             raise RuntimeError(f"real AgentWorker requires AICodingFactory/main: {exc}") from exc
 
         factory = AICodingFactory(self.callback)
-        # Use the factory's toolset/build path in the target project dir. The factory
-        # API is project-oriented; we constrain the instruction to wordcount + spec.
-        # This is the integration boundary; if the factory cannot target an existing
-        # clean dir deterministically, the run must fail and be fixed rather than faked.
         constrained = (
             f"{owner_command}\n\n"
             "Implement ONLY the Milestone 1 `wordcount` pilot in this project directory. "
@@ -261,13 +270,15 @@ class CrewAIAgentWorker(AgentWorker):
             "tests/test_wordcount.py (normal, empty, stdin -, missing file/arg exit 2), "
             "artifacts/test-output.txt from running the tests."
         )
-        # AICodingFactory.execute currently creates/names its own project path; callers
-        # should prefer tools/run_milestone1_real_agent.py (to be added) for a controlled
-        # invocation. Keep explicit failure here if execute signature/behavior doesn't fit.
         if not hasattr(factory, "execute"):
             raise RuntimeError("AICodingFactory.execute not available for real AgentWorker")
-        result = factory.execute(constrained, project_name_hint=project_dir.name)
-        return {"mode": self.mode, "honest": "real_crewai_attempt", "result": str(result)[:4000]}
+        result = factory.execute(
+            constrained,
+            project_name_hint=project_dir.name,
+            project_dir=project_dir,
+            workspace_root=project_dir.parent,
+        )
+        return {"mode": self.mode, "honest": "real_crewai_attempt", "project_dir": str(project_dir), "result": str(result)[:4000]}
 
 
 class BusinessCycle:

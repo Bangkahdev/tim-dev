@@ -324,7 +324,7 @@ def create_project_tools(project_dir, logger):
 
             run_args = list(args)
             try:
-                from core.sandbox_exec import enforce_sandbox, sandbox_status
+                from core.sandbox_exec import enforce_sandbox, ensure_sandbox_canaries, sandbox_status
                 status = sandbox_status()
                 if status.get("error") and not status.get("required"):
                     logger.warning("[SANDBOX] %s", status["error"])
@@ -334,6 +334,9 @@ def create_project_tools(project_dir, logger):
                         OPS.store.add_event("sandbox_blocked", "system", status.get("error", "sandbox required"), str(project_dir))
                     except Exception:
                         pass
+                canary = ensure_sandbox_canaries(project_dir, audit=lambda t, a, d, e: OPS.store.add_event(t, a, d, e))
+                if status.get("required") and not canary.get("ok"):
+                    return f"ERROR: sandbox canary failed (NFR-SEC-09/10 not evidenced): {canary.get('details')}"
                 run_args = enforce_sandbox(run_args, project_dir)
             except RuntimeError as exc:
                 try:
@@ -1131,18 +1134,18 @@ class AICodingFactory:
     # MAIN EXECUTION
     # --------------------------------------------------------
 
-    def execute(self, command, project_name_hint=None):
+    def execute(self, command, project_name_hint=None, project_dir=None, workspace_root=None):
 
-        project_name = create_project_name(
-            project_name_hint or command
-        )
-
-        project_dir = WORKSPACE / project_name
-
-        project_dir.mkdir(
-            parents=True,
-            exist_ok=True
-        )
+        if project_dir is not None:
+            project_dir = Path(project_dir).resolve()
+            project_dir.mkdir(parents=True, exist_ok=True)
+            project_name = project_dir.name
+            ws_root = Path(workspace_root).resolve() if workspace_root is not None else project_dir.parent
+        else:
+            project_name = create_project_name(project_name_hint or command)
+            ws_root = Path(workspace_root).resolve() if workspace_root is not None else WORKSPACE
+            project_dir = (ws_root / project_name).resolve()
+            project_dir.mkdir(parents=True, exist_ok=True)
 
         self.logger.log(
             "=" * 55
