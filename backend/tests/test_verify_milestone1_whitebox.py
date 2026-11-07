@@ -133,9 +133,11 @@ class VerifierSelfTest(unittest.TestCase):
         self.assertEqual(expected("a\nb\n"), {"lines": 2, "words": 2, "chars": 4})
         self.assertEqual(expected("a\nb"), {"lines": 2, "words": 2, "chars": 3})
         self.assertEqual(expected(""), {"lines": 0, "words": 0, "chars": 0})
+        self.assertEqual(expected("\n"), {"lines": 1, "words": 0, "chars": 1})
 
     def test_parse_output(self):
         self.assertEqual(_parse_output("lines=1 words=2 characters=11 x"), {"lines": 1, "words": 2, "chars": 11})
+        self.assertEqual(_parse_output("2 4 24 name"), {"lines": 2, "words": 4, "chars": 24})
 
     def test_correct_impl_passes_all_hidden(self):
         self._assert_all_pass(self._run(CORE_OK, CLI_OK))
@@ -143,17 +145,26 @@ class VerifierSelfTest(unittest.TestCase):
     def test_bytes_not_chars_fails_utf8(self):
         self._assert_fails(self._run(CORE_BYTES, CLI_OK), "utf8")
 
+    def test_missing_final_newline_fails(self):
+        # Counts lines as newline count only (drops final unterminated line).
+        bad = r'''
+def count_text(text):
+    return {"lines": text.count("\n"), "words": len(text.split()), "characters": len(text)}
+'''
+        self._assert_fails(self._run(bad, CLI_OK), "no_trailing_newline")
+
     def test_line_off_by_one_fails(self):
-        # Hidden cases use trailing-newline text, so an impl that always
-        # undercounts by 1 when lines>0 must fail them.
+        # Hidden cases include trailing-newline text, so an impl that always
+        # undercounts by 1 when lines>0 must fail.
         bad = r'''
 def count_text(text):
     lines = text.count("\n") + (1 if text and not text.endswith("\n") else 0)
     if lines:
         lines -= 1
-    words = len(text.split())
     return {"lines": lines, "words": words, "characters": len(text)}
 '''
+        # keep words defined correctly
+        bad = bad.replace('"words": words', '"words": len(text.split())')
         cases = self._run(bad, CLI_OK)
         self.assertTrue(
             any(not c["pass"] and c["name"] in ("hidden.normal_file", "hidden.stdin", "hidden.utf8_multibyte_chars") for c in cases),
