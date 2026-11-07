@@ -45,6 +45,11 @@ func _run() -> void:
 
 	scene._enter_workstation(target)
 	await create_timer(0.3).timeout
+	# Lingkungan headless tidak punya backend: paksa jalur online untuk menguji
+	# state machine login (jalur offline diuji terpisah di bawah).
+	desktop.set_offline_mode(false)
+	desktop.open_for("OWNER-PC-001", "Owner Workstation", "owner")
+	await create_timer(0.2).timeout
 	_check("workstation opens on login view", desktop._login_view.visible and not desktop._os_view.visible)
 	_check("player seated at workstation", scene.player.is_seated)
 

@@ -18,7 +18,14 @@ const EMPLOYEE_STATIONS := {
 	"dira_desk": {"workstation_id": "PC-FE-001", "title": "Dira", "account": "frontend", "position": Vector3(-29.0, 6.2, -8.9)},
 	"tika_desk": {"workstation_id": "PC-QA-001", "title": "Tika", "account": "qa", "position": Vector3(-5.0, 6.2, -8.9)},
 	"bima_desk": {"workstation_id": "PC-BE-001", "title": "Bima", "account": "backend", "position": Vector3(27.0, 6.2, -8.9)},
-	"naya_desk": {"workstation_id": "PC-API-001", "title": "Naya", "account": "api", "position": Vector3(29.0, 6.2, 12.65)},
+	"naya_desk": {"workstation_id": "PC-API-001", "title": "Naya", "account": "api", "position": Vector3(29.0, 0.0, 12.65)},
+}
+# Workstation tanpa NPC khusus. Semuanya wajib bisa diakses pemain (desktop OS).
+const EXTRA_STATIONS := {
+	"secretary_pc": {"workstation_id": "PC-SEC-001", "title": "Sekretaris", "account": "secretary", "position": Vector3(-10.8, 6.2, -31.3)},
+	"ui_design_desk": {"workstation_id": "PC-FE-002", "title": "UI Design", "account": "frontend", "position": Vector3(-34.5, 6.2, -8.9)},
+	"auto_test_desk": {"workstation_id": "PC-QA-002", "title": "Automated Test", "account": "qa", "position": Vector3(1.4, 6.2, -8.9)},
+	"service_mon_desk": {"workstation_id": "PC-BE-002", "title": "Service Monitoring", "account": "backend", "position": Vector3(34.0, 6.2, -8.9)},
 }
 const OFFICE_WORLD_SCRIPT = preload("res://scripts/office_environment.gd")
 const WORKSTATION_SYSTEM_SCRIPT = preload("res://scripts/workstation_sys.gd")
@@ -78,6 +85,9 @@ var _company_ui
 var _workstation_sys
 var _desktop_ui
 var _desktop_active: bool = false
+var _coffee_carried: bool = false
+var _coffee_cup: Node3D = null
+var _coffee_placed_count: int = 0
 var _local_meeting_active: bool = false
 var _local_meeting_time_left: float = 0.0
 var _local_meeting_speaker_elapsed: float = 0.0
@@ -413,10 +423,11 @@ func _build_interaction_points() -> void:
 		{"id":"reception", "label":"Reception Desk", "position":Vector3(0,0,22.7), "prompt":"Sapa resepsionis Mira"},
 		_station_interactable("workstation", "Owner Workstation", "OWNER-PC-001", "owner", Vector3(-29.3,12.4,-31.3)),
 		{"id":"owner_tray", "label":"Owner Paper Tray", "position":Vector3(-27.2,12.4,-29.8), "prompt":"Periksa dokumen di tray Owner"},
-		{"id":"secretary_desk", "label":"Secretary Desk", "position":Vector3(-10.8,6.2,-31.3), "prompt":"Buka agenda Sekretaris"},
 		{"id":"meeting", "label":"Boardroom", "position":Vector3(-29.5,0,10.0), "prompt":"Masuk ke ruang rapat"},
 		{"id":"printer", "label":"Office Printer", "position":Vector3(-23.2,0,29.9), "prompt":"Gunakan printer kantor"},
 		{"id":"coffee", "label":"Coffee Station", "position":Vector3(22.5,0,34.8), "prompt":"Ambil kopi di pantry"},
+		{"id":"coffee_lounge_table", "label":"Meja Lounge", "position":Vector3(7.0,0,32.1), "prompt":"Taruh kopi di meja lounge", "drop_position":Vector3(7.0,0.61,32.1)},
+		{"id":"coffee_pantry_bar", "label":"Bar Pantry", "position":Vector3(24.5,0,29.0), "prompt":"Taruh kopi di bar pantry", "drop_position":Vector3(24.5,1.865,29.0)},
 		{"id":"lounge", "label":"Staff Lounge", "position":Vector3(7.0,0,32.1), "prompt":"Beristirahat di lounge"},
 		{"id":"archive", "label":"Company Archive", "position":Vector3(-29.5,0,27.2), "prompt":"Buka arsip perusahaan"},
 		{"id":"lift_l1", "label":"Lift (Lantai 1)", "position":Vector3(15.3,0.0,8.7), "prompt":"E · Naik/Turun Lift (samping tangga naik/turun)", "lift_floor":"L1"},
@@ -433,16 +444,26 @@ func _build_interaction_points() -> void:
 			_station_interactable(desk_id, str(station["title"]) + " Workstation",
 				str(station["workstation_id"]), str(station["account"]),
 				station["position"]))
+	for desk_id in EXTRA_STATIONS:
+		var station: Dictionary = EXTRA_STATIONS[desk_id]
+		_interactables.append(
+			_station_interactable(desk_id, str(station["title"]) + " Workstation",
+				str(station["workstation_id"]), str(station["account"]),
+				station["position"]))
 	_append_free_seat_interactables()
 	_append_door_interactables()
 
 # Kursi dan sofa yang dibangun office_environment.gd didaftarkan sebagai titik
-# interaksi "duduk". Semua kursi/sofa jadi dudukan nyata; kursi kantor punya
-# pivot swivel yang mengikuti badan pemain.
+# interaksi "duduk". Kursi kantor yang punya komputer dipetakan ke workstation
+# terdekat: E langsung duduk + membuka layar komputer, bukan duduk biasa.
 func _append_free_seat_interactables() -> void:
 	var office_world = get_node_or_null("BangkahHeadquarters")
 	if not is_instance_valid(office_world) or not ("seats" in office_world):
 		return
+	var stations: Array = []
+	for item in _interactables:
+		if item.has("workstation_id"):
+			stations.append(item)
 	var seat_index := 0
 	for seat_entry in office_world.seats:
 		var seat_position: Vector3 = seat_entry.get("position", Vector3.ZERO)
@@ -450,7 +471,7 @@ func _append_free_seat_interactables() -> void:
 		var seat_kind := str(seat_entry.get("kind", "office"))
 		var seat_label := str(seat_entry.get("label", "Kursi"))
 		var pivot_node = seat_entry.get("pivot", null)
-		_interactables.append({
+		var entry: Dictionary = {
 			"id": "free_seat_%d" % seat_index,
 			"label": seat_label,
 			"position": seat_position,
@@ -460,7 +481,22 @@ func _append_free_seat_interactables() -> void:
 			"kind": seat_kind,
 			"pivot": pivot_node if pivot_node is Node3D else null,
 			"pivot_base_yaw": seat_yaw,
-		})
+		}
+		if seat_kind == "office":
+			var best: Dictionary = {}
+			var best_distance := 0.85
+			for station in stations:
+				var station_seat: Vector3 = station.get("seat", Vector3.ZERO)
+				var dx := station_seat.x - seat_position.x
+				var dz := station_seat.z - seat_position.z
+				var distance := sqrt(dx * dx + dz * dz)
+				if distance < best_distance and absf(station_seat.y - seat_position.y) < 0.6:
+					best_distance = distance
+					best = station
+			if not best.is_empty():
+				entry["workstation"] = best
+				entry["prompt"] = "E · Duduk & akses komputer — " + str(best.get("label", seat_label))
+		_interactables.append(entry)
 		seat_index += 1
 
 # Pintu juga jadi titik interaksi: E membuka/menutup daun pintu dengan animasi.
@@ -1049,6 +1085,11 @@ func _update_interaction_prompt() -> void:
 		_prompt_panel.visible = false
 		return
 	var prompt_text := str(target.get("prompt", "INTERACT"))
+	var target_id := str(target.get("id", ""))
+	if target_id == "coffee" and _coffee_carried:
+		prompt_text = "E · Kamu sudah membawa kopi — taruh di meja"
+	elif (target_id in ["coffee_lounge_table", "coffee_pantry_bar"]) and not _coffee_carried:
+		prompt_text = "E · Belum ada kopi — ambil dulu di coffee station"
 	if str(target.get("kind", "")) == "door":
 		var office_world = get_node_or_null("BangkahHeadquarters")
 		var label_text := "Pintu"
@@ -1110,10 +1151,20 @@ func _on_player_interact() -> void:
 		return
 	var target_id := str(target.get("id", ""))
 	if str(target.get("kind", "")) in ["office", "meeting", "sofa"]:
-		_take_free_seat(target)
+		var workstation = target.get("workstation", null)
+		if workstation is Dictionary and not (workstation as Dictionary).is_empty():
+			_enter_workstation(workstation)
+		else:
+			_take_free_seat(target)
 		return
 	if str(target.get("kind", "")) == "door":
 		_toggle_free_door(target)
+		return
+	if target_id == "coffee":
+		_take_coffee()
+		return
+	if target_id in ["coffee_lounge_table", "coffee_pantry_bar"]:
+		_place_coffee(target)
 		return
 	if target_id == "employee":
 		_open_employee_chat(str(target.get("employee_id", "")))
@@ -1204,6 +1255,7 @@ func _enter_workstation(target: Dictionary) -> void:
 	var seat_yaw := float(target.get("seat_yaw", 0.0))
 	var camera_position: Vector3 = target.get("camera", player.global_position)
 	var camera_target: Vector3 = target.get("camera_target", player.global_position + Vector3(0.0, 1.0, -1.0))
+	_desktop_ui.set_offline_mode(not _connection_online)
 	_workstation_sys.enter(player, workstation_id, seat, seat_yaw, camera_position, camera_target)
 	_desktop_ui.open_for(workstation_id, str(target.get("label", "Workstation")), str(target.get("account_id", "owner")))
 
@@ -1248,6 +1300,83 @@ func _leave_free_seat() -> void:
 		player.activity = "idle"
 	_free_seat_pivot = null
 	_show_toast("Kamu berdiri kembali. Kursi tetap menghadap posisi terakhir.")
+
+## Kopi pantry yang nyata: ambil di coffee station, cangkir menempel di tangan
+## pemain, lalu ditaruh di meja lounge atau bar pantry sebagai objek statis.
+func _build_coffee_cup() -> Node3D:
+	var cup := Node3D.new()
+	cup.name = "CoffeeCup"
+	var ceramic := StandardMaterial3D.new()
+	ceramic.albedo_color = Color("#f3efe6")
+	ceramic.roughness = 0.26
+	ceramic.metallic = 0.0
+	var body := MeshInstance3D.new()
+	var body_mesh := CylinderMesh.new()
+	body_mesh.top_radius = 0.055
+	body_mesh.bottom_radius = 0.045
+	body_mesh.height = 0.105
+	body_mesh.radial_segments = 20
+	body.mesh = body_mesh
+	body.material_override = ceramic
+	cup.add_child(body)
+	var coffee := MeshInstance3D.new()
+	var coffee_mesh := CylinderMesh.new()
+	coffee_mesh.top_radius = 0.046
+	coffee_mesh.bottom_radius = 0.046
+	coffee_mesh.height = 0.012
+	coffee_mesh.radial_segments = 20
+	coffee.mesh = coffee_mesh
+	var coffee_mat := StandardMaterial3D.new()
+	coffee_mat.albedo_color = Color("#4a2f20")
+	coffee_mat.roughness = 0.18
+	coffee.material_override = coffee_mat
+	coffee.position.y = 0.049
+	cup.add_child(coffee)
+	var handle := MeshInstance3D.new()
+	var handle_mesh := TorusMesh.new()
+	handle_mesh.inner_radius = 0.026
+	handle_mesh.outer_radius = 0.044
+	handle_mesh.rings = 16
+	handle_mesh.ring_segments = 10
+	handle.mesh = handle_mesh
+	handle.material_override = ceramic
+	handle.rotation.x = PI * 0.5
+	handle.position = Vector3(0.062, 0.0, 0.0)
+	cup.add_child(handle)
+	return cup
+
+func _take_coffee() -> void:
+	if _coffee_carried:
+		_show_toast("Kamu sudah membawa kopi. Taruh di meja lounge atau bar pantry (E).")
+		return
+	if not is_instance_valid(player):
+		return
+	_coffee_cup = _build_coffee_cup()
+	player.add_child(_coffee_cup)
+	_coffee_cup.position = Vector3(0.36, 1.08, -0.30)
+	_coffee_cup.rotation = Vector3.ZERO
+	_coffee_carried = true
+	player.activity = "carrying_coffee"
+	_show_toast("Kopi panas diambil dari coffee station. Bawa ke meja lounge atau bar pantry.")
+
+func _place_coffee(target: Dictionary) -> void:
+	if not _coffee_carried:
+		_show_toast("Belum ada kopi di tangan. Ambil dulu di coffee station pantry.")
+		return
+	var drop: Vector3 = target.get("drop_position", target.get("position", player.global_position))
+	var placed := _build_coffee_cup()
+	_coffee_placed_count += 1
+	placed.name = "CoffeeCup_Placed_%02d" % _coffee_placed_count
+	add_child(placed)
+	placed.global_position = drop
+	placed.rotation.y = deg_to_rad(-18.0)
+	if is_instance_valid(_coffee_cup):
+		_coffee_cup.queue_free()
+	_coffee_cup = null
+	_coffee_carried = false
+	if is_instance_valid(player):
+		player.activity = "idle"
+	_show_toast("Kopi ditaruh di %s. Silakan dinikmati." % str(target.get("label", "meja")).to_lower())
 
 ## Buka/tutup pintu: daun pintu dianimasikan lewat tween ke yaw tertutup atau
 ## terbuka. State disimpan di registry doors milik office_environment.

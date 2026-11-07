@@ -30,6 +30,29 @@ var _current_file: String = ""
 var _busy_files: bool = false
 var _busy_terminal: bool = false
 var _clock_elapsed: float = 0.0
+var _offline_mode: bool = false
+
+## Demo filesystem lokal saat backend tidak tersedia: komputer tetap bisa dipakai.
+const LOCAL_DIRS := {
+	".": [
+		{"name": "Projects", "type": "directory", "path": "Projects"},
+		{"name": "Documents", "type": "directory", "path": "Documents"},
+		{"name": "README.txt", "type": "file", "path": "README.txt"},
+	],
+	"Projects": [
+		{"name": "office-notes.txt", "type": "file", "path": "Projects/office-notes.txt"},
+		{"name": "roadmap.txt", "type": "file", "path": "Projects/roadmap.txt"},
+	],
+	"Documents": [
+		{"name": "employee-handbook.txt", "type": "file", "path": "Documents/employee-handbook.txt"},
+	],
+}
+const LOCAL_FILES := {
+	"README.txt": "BANGKAH HEADQUARTERS — WORKSTATION lokal\n\nSelamat datang. Komputer ini berjalan dalam mode lokal karena backend kantor tidak terhubung. Semua aplikasi dasar tetap dapat dibuka: Files, Terminal, dan Company.\n\nGunakan File > Documents > employee-handbook.txt untuk panduan singkat.",
+	"Projects/office-notes.txt": "CATATAN PROYEK\n\n- Rapikan denah kota dan jalan depan HQ.\n- Semua meja karyawan memakai PC dengan akses penuh.\n- Pantry: kopi bisa diambil, dibawa, lalu ditaruh di meja.",
+	"Projects/roadmap.txt": "ROADMAP\n\nQ1  Proyek kantor pusat selesai\nQ2  Distrik kota dan jalan utama\nQ3  Peningkatan karakter dan animasi\nQ4  Ekspansi kawasan bisnis",
+	"Documents/employee-handbook.txt": "PANDUAN KARYAWAN\n\n1. Duduk di kursi berkomputer untuk langsung membuka layar workstation.\n2. Setiap pintu dapat dibuka/ditutup dengan tombol E.\n3. Ambil kopi di pantry, bawa, lalu letakkan di meja lounge.\n4. Lift dan tangga menghubungkan lantai 1, 2, dan 3.",
+}
 
 var _root: Control
 var _login_view: Control
@@ -66,6 +89,12 @@ func set_server_url(url: String) -> void:
 func set_api_token(token: String) -> void:
 	_api_token = token.strip_edges()
 
+func set_offline_mode(enabled: bool) -> void:
+	_offline_mode = enabled
+
+func is_offline() -> bool:
+	return _offline_mode
+
 func is_open() -> bool:
 	return visible
 
@@ -86,6 +115,25 @@ func open_for(workstation_id: String, label: String, account_hint: String = "") 
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	if is_instance_valid(_login_account) and not account_hint.is_empty():
 		_login_account.text = account_hint
+	# Sesi lokal dari mode offline tidak boleh dianggap sesi backend saat
+	# koneksi kembali online: buang supaya panel login tampil normal.
+	if not _offline_mode and (_desktop_token == "local" or str(_session.get("account", {}).get("role", "")) == "local"):
+		_desktop_token = ""
+		_session = {}
+		_active_app = "files"
+	if _offline_mode:
+		# Backend tidak tersedia: langsung tampilkan layar OS lokal, bukan panel login.
+		if _desktop_token.is_empty():
+			_desktop_token = "local"
+			_session = {
+				"workstation": {"id": _workstation_id, "label": _workstation_label},
+				"account": {"name": "guest", "role": "local"},
+				"apps": ["files", "terminal", "company", "infrastructure"],
+				"expires_at": "",
+			}
+		_show_os()
+		_select_app(_active_app)
+		return
 	if _desktop_token.is_empty():
 		_show_login()
 	else:
@@ -481,9 +529,40 @@ func _render_files() -> void:
 	_file_save_button.pressed.connect(_save_file)
 	editor_box.add_child(_file_save_button)
 
-	_load_directory(_current_path)
+	if _offline_mode:
+		_render_local_directory(".")
+	else:
+		_load_directory(_current_path)
+
+func _render_local_directory(path: String) -> void:
+	_current_path = path
+	if is_instance_valid(_file_path_label):
+		_file_path_label.text = "/" + path if path != "." else "/"
+	if not is_instance_valid(_file_list):
+		return
+	_clear_children(_file_list)
+	var entries: Array = LOCAL_DIRS.get(path, [])
+	if entries.is_empty():
+		_file_list.add_child(_label("Folder kosong.", 11, MUTED))
+		return
+	for entry in entries:
+		var button := Button.new()
+		button.text = ("[DIR]   " if str(entry.get("type", "file")) == "directory" else "[FILE]  ") + str(entry.get("name", "?"))
+		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		button.custom_minimum_size = Vector2(0, 32)
+		_style_button(button, false)
+		button.pressed.connect(func(): _open_entry(entry))
+		_file_list.add_child(button)
+	if path == ".":
+		_file_editor_path.text = "MODE LOKAL — backend kantor tidak terhubung. File contoh tersedia untuk dibuka."
+		_file_editor.text = str(LOCAL_FILES.get("README.txt", ""))
+		_file_editor.editable = false
+		_file_save_button.disabled = true
 
 func _load_directory(path: String) -> void:
+	if _offline_mode:
+		_render_local_directory(path)
+		return
 	if _busy_files:
 		return
 	_busy_files = true
@@ -537,6 +616,13 @@ func _go_up_directory() -> void:
 func _open_file(path: String) -> void:
 	if path.is_empty():
 		return
+	if _offline_mode:
+		_current_file = path
+		_file_editor.text = str(LOCAL_FILES.get(path, "(File contoh kosong.)"))
+		_file_editor.editable = false
+		_file_editor_path.text = path + "  ·  MODE LOKAL"
+		_file_save_button.disabled = true
+		return
 	_request(HTTPClient.METHOD_GET, "/api/desktop/files/content?path=" + path.uri_encode(), null,
 		func(result, code, data): _on_file_loaded(path, result, code, data))
 
@@ -552,6 +638,9 @@ func _on_file_loaded(path: String, result: int, code: int, data: Variant) -> voi
 	_file_save_button.disabled = false
 
 func _save_file() -> void:
+	if _offline_mode:
+		toast_requested.emit("Mode lokal: perubahan file tidak disimpan permanen.")
+		return
 	if _current_file.is_empty() or _busy_files:
 		return
 	_busy_files = true
@@ -597,6 +686,30 @@ func _submit_terminal(command: String) -> void:
 	var raw := command.strip_edges()
 	if raw.is_empty() or _busy_terminal:
 		return
+	if _offline_mode:
+		_terminal_input.text = ""
+		_append_terminal("$ " + raw + "\n")
+		var parts := raw.split(" ", false, 1)
+		var head := str(parts[0]).to_lower()
+		match head:
+			"help":
+				_append_terminal("Perintah lokal: help, whoami, pwd, ls, date, echo <teks>, clear\n")
+			"whoami":
+				_append_terminal("guest (mode lokal)\n")
+			"pwd":
+				_append_terminal("/home/guest\n")
+			"ls":
+				_append_terminal("Projects  Documents  README.txt\n")
+			"date":
+				_append_terminal(Time.get_datetime_string_from_system() + "\n")
+			"echo":
+				_append_terminal((str(parts[1]) if parts.size() > 1 else "") + "\n")
+			"clear":
+				_terminal_log.text = ""
+			_:
+				_append_terminal("SYSTEM: perintah tidak dikenali di mode lokal (exit 127).\n")
+		_terminal_input.grab_focus()
+		return
 	_busy_terminal = true
 	_terminal_input.text = ""
 	_append_terminal("$ " + raw + "\n")
@@ -630,6 +743,23 @@ func _append_terminal(text: String) -> void:
 
 func _render_infrastructure() -> void:
 	_app_title.text = "INFRASTRUCTURE"
+	if _offline_mode:
+		_app_subtitle.text = "Status lokal workstation. Backend kantor belum terhubung."
+		var local_scroll := ScrollContainer.new()
+		local_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		_content.add_child(local_scroll)
+		var local_box := VBoxContainer.new()
+		local_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		local_box.add_theme_constant_override("separation", 6)
+		local_scroll.add_child(local_box)
+		local_box.add_child(_label("WORKSTATION", 10, MUTED, false, false))
+		local_box.add_child(_label("%s  ·  %s" % [_workstation_id, _workstation_label], 13, TEXT, true))
+		local_box.add_child(_label("Mode lokal — Files, Terminal, dan Company tetap aktif.", 11, MUTED))
+		local_box.add_child(_spacer(6))
+		local_box.add_child(_label("SISTEM", 10, MUTED, false, false))
+		local_box.add_child(_label("CPU 8 core · RAM 32 GB · Storage 1 TB SSD", 11, TEXT))
+		local_box.add_child(_label("Jaringan: offline (backend tidak terjangkau)", 11, WARN))
+		return
 	_app_subtitle.text = "Status ini dibaca langsung dari backend. Integrasi yang belum dikonfigurasi ditandai jujur."
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -721,6 +851,19 @@ func _add_integration_row(box: VBoxContainer, title: String, entry: Variant) -> 
 
 func _render_company() -> void:
 	_app_title.text = "COMPANY"
+	if _offline_mode:
+		_app_subtitle.text = "Ringkasan lokal perusahaan saat backend belum terhubung."
+		var local_box := VBoxContainer.new()
+		local_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		local_box.add_theme_constant_override("separation", 6)
+		_content.add_child(local_box)
+		local_box.add_child(_label("BANGKAH HEADQUARTERS", 16, TEXT, true))
+		local_box.add_child(_label("Teknologi · Engineering · Inovasi", 11, ACCENT))
+		local_box.add_child(_spacer(6))
+		local_box.add_child(_label("Karyawan inti: 7 · Lantai: 3 · Meeting room: 1", 11, TEXT))
+		local_box.add_child(_label("Proyek aktif: Pembangunan kantor pusat & distrik kota", 11, TEXT))
+		local_box.add_child(_label("Backend perusahaan tidak terhubung; data ini contoh lokal.", 10, MUTED))
+		return
 	_app_subtitle.text = "Ringkasan live dari API perusahaan. Dashboard lengkap tetap memakai panel yang ada."
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
