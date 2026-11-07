@@ -234,21 +234,36 @@ func _sphere(label: String, position: Vector3, radius: float, color: Color, scal
 	return mesh
 
 func _label(text_value: String, position: Vector3, size: float = 0.007, color: Color = Color("#f4f2e9"), parent: Node3D = null, y_off: float = 0.0) -> Label3D:
+	# Depth-tested and floor-aware: room titles must never bleed through walls,
+	# slabs, columns or the lift shaft, and every label must sit on its own floor.
 	var label := Label3D.new()
 	label.text = text_value.to_upper()
-	label.position = position + Vector3(0, y_off, 0) + Vector3(0, y_off, 0) + Vector3(0, y_off, 0)
+	label.position = position + Vector3(0, y_off + (0.0 if parent != null else _floor_y), 0)
 	label.font_size = 38
-	label.outline_size = 9
+	label.outline_size = 8
 	label.modulate = color
 	label.outline_modulate = Color(0.04, 0.08, 0.075, 0.92)
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.no_depth_test = true
+	label.no_depth_test = false
 	label.pixel_size = size
 	if parent != null:
 		parent.add_child(label)
 	else:
 		add_child(label)
 	return label
+
+
+## Warm task/room light. Position is floor-local (the active _floor_y is added).
+func _room_light(position: Vector3, color: Color = Color("#ffe8c8"), energy: float = 0.42, light_range: float = 10.0, shadows: bool = false) -> OmniLight3D:
+	var light := OmniLight3D.new()
+	light.name = "RoomLight"
+	light.position = position + Vector3(0, _floor_y, 0)
+	light.light_color = color
+	light.light_energy = energy
+	light.omni_range = light_range
+	light.shadow_enabled = shadows
+	add_child(light)
+	return light
 
 
 ## Flat painted text ("tali air") for road/sign logos — no 3D extrusion, no billboard.
@@ -307,14 +322,14 @@ func _raised_text(text_value: String, position: Vector3, yaw: float, letter_heig
 
 ## Logo perusahaan timbul (embossed): cincin torus, batang naik, dan teks
 ## kuningan 3D. Semua bagian menghadap sumbu lokal +Z seperti papan teks lain.
-func _add_company_logo(position: Vector3, yaw: float, width: float = 8.4, parent: Node3D = null, text_scale: float = 1.0) -> Node3D:
+func _add_company_logo(position: Vector3, yaw: float, width: float = 8.4, parent: Node3D = null, text_scale: float = 1.0, main_color: Color = Color("#d9c48a"), sub_color: Color = Color("#e8dfc4")) -> Node3D:
 	var root := Node3D.new()
 	root.name = "CompanyLogo"
 	root.position = position
 	root.rotation.y = yaw
 	(parent if parent != null else self).add_child(root)
-	var brass := Color("#d9c48a")
-	var brass_dark := Color("#a98f55")
+	var brass := main_color
+	var brass_dark := main_color.darkened(0.28)
 	var letter_h := width * 0.05 * text_scale
 	# --- Emblem: cincin + cakram + tiga batang naik ---
 	var emblem_x := -width * 0.40
@@ -347,7 +362,7 @@ func _add_company_logo(position: Vector3, yaw: float, width: float = 8.4, parent
 		_box("Logo growth bar", Vector3(emblem_x - bar_gap + bar_gap * float(bi), letter_h * 0.10 - letter_h * 0.23 + bh * 0.5, 0.045), Vector3(bar_w, bh, 0.07), brass, false, root, 0.34, 0.68)
 	# --- Teks utama + subteks ---
 	_raised_text("BANGKAH", Vector3(-width * 0.02, letter_h * 0.16, 0.06), 0.0, letter_h, 0.10, brass, root)
-	_raised_text("HEADQUARTERS", Vector3(-width * 0.02, -letter_h * 0.58, 0.06), 0.0, letter_h * 0.30, 0.06, Color("#e8dfc4"), root)
+	_raised_text("HEADQUARTERS", Vector3(-width * 0.02, -letter_h * 0.58, 0.06), 0.0, letter_h * 0.30, 0.06, sub_color, root)
 	# --- Batang aksen kanan (ritme vertikal) ---
 	for bi in range(3):
 		var bh := letter_h * (0.40 + 0.22 * float(bi))
@@ -681,11 +696,11 @@ func _build_site() -> void:
 		_lamps_pending.append(Vector3(111.8, 0.0, float(lz)))
 
 	# =========================================================================
-	# RESIDENTIAL — west loop (x=44.5..51.5) + four east-west home streets at
-	# z=94/118/142/166. Lots sit between the street sidewalks.
+	# RESIDENTIAL — west loop (x=44.5..51.5, z=90..170) joins the four home
+	# streets at z=94/118/142/166 so the grid ends cleanly at street edges.
 	# =========================================================================
-	_box("Residential loop", Vector3(48.0, -0.06, 121.1), Vector3(7.0, 0.12, 100.2), asphalt_dark, false)
-	for lz in range(76, 169, 8):
+	_box("Residential loop", Vector3(48.0, -0.06, 130.0), Vector3(7.0, 0.12, 80.0), asphalt_dark, false)
+	for lz in [102.0, 110.0, 126.0, 134.0, 150.0, 158.0]:
 		_box("Res loop dash", Vector3(48.0, 0.012, float(lz)), Vector3(0.18, 0.012, 3.2), line, false)
 	var res_x0 := 51.5
 	var res_x1 := 98.0
@@ -697,15 +712,16 @@ func _build_site() -> void:
 		_box("Res sidewalk S", Vector3((res_x0 + 95.5) * 0.5, -0.01, float(rz) + 4.6), Vector3(95.5 - res_x0, 0.12, 1.2), pave, true)
 		_lamps_pending.append(Vector3(94.0, 0.0, float(rz) - 5.6))
 		_lamps_pending.append(Vector3(94.0, 0.0, float(rz) + 5.6))
-	# Verge trees along the loop and the first row.
-	for tz in range(78, 169, 24):
-		_trees_pending.append(Vector3(45.2, 0.0, float(tz)))
+	# Verge trees: west of the loop (clear of the asphalt) and along the town frontage.
+	for tz in [102.0, 126.0, 150.0]:
+		_trees_pending.append(Vector3(43.4, 0.0, float(tz)))
 	for tx in range(58, 93, 12):
 		_trees_pending.append(Vector3(float(tx), 0.0, 73.2))
 
 	# =========================================================================
-	# COMMERCIAL — promenade x=139..146, green strip x=113..139, market plaza
-	# x=112.5..139 z=125..143. Kopdes buildings front the promenade.
+	# COMMERCIAL — green strip x=113..139, promenade x=139..146, market plaza
+	# x=112.5..139 z=125..143. Both Kopdes shops share the centreline x=126 so
+	# their lots keep symmetric green margins and face the spine cross paths.
 	# =========================================================================
 	_box("Commercial green", Vector3(126.0, -0.015, 98.0), Vector3(26.0, 0.05, 54.0), grass, false)
 	_box("Promenade", Vector3(142.5, -0.01, 107.0), Vector3(7.0, 0.12, 72.0), pave, true)
@@ -713,8 +729,8 @@ func _build_site() -> void:
 	for wz in [94.0, 118.0]:
 		_box("Commercial cross path", Vector3((112.5 + 139.0) * 0.5, -0.01, float(wz)), Vector3(139.0 - 112.5, 0.12, 2.4), pave, true)
 	# Shop forecourts open onto the promenade (Kopdes MP at z=80, Unit at z=104).
-	_box("Kopdes MP forecourt", Vector3(130.5, -0.01, 87.0), Vector3(17.0, 0.12, 2.4), pave, true)
-	_box("Kopdes Unit forecourt", Vector3(130.5, -0.01, 109.5), Vector3(17.0, 0.12, 2.4), pave, true)
+	_box("Kopdes MP forecourt", Vector3(126.0, -0.01, 90.9), Vector3(18.0, 0.12, 3.8), pave, true)
+	_box("Kopdes Unit forecourt", Vector3(126.0, -0.01, 113.9), Vector3(14.0, 0.12, 5.8), pave, true)
 
 	# =========================================================================
 	# MALL SITE — podium x=146..214 z=81..129, forecourt z=129..139, rear
@@ -779,14 +795,18 @@ func _build_site() -> void:
 		_lamps_pending.append(Vector3(142.2, 0.0, float(lz)))
 
 	# =========================================================================
-	# CITY MONUMENT — on the town corner, text facing the boulevard (-Z).
+	# CIVIC PLAZA — west verge, clear of the residential loop; the monument
+	# faces the boulevard (-Z) with flag poles behind it.
 	# =========================================================================
-	_box("City monument plaza", Vector3(50.0, -0.01, 74.0), Vector3(9.0, 0.12, 6.0), pave, true)
-	_box("City monument base", Vector3(50.0, 0.35, 74.0), Vector3(5.6, 0.70, 2.6), Color("#6b776f"), true)
-	_box("City monument", Vector3(50.0, 2.05, 74.0), Vector3(5.0, 2.60, 2.2), Color("#42584c"), false)
-	_box("City monument cap", Vector3(50.0, 3.40, 74.0), Vector3(5.4, 0.16, 2.5), Color("#6b776f"), false)
-	_painted_text("KOTA BANGKAH", Vector3(50.0, 2.55, 72.86), PI, 0.0075, Color("#e8fbff"), Color(0.05, 0.12, 0.14, 0.35))
-	_painted_text("BANGKAH CITY  ·  2026", Vector3(50.0, 2.12, 72.86), PI, 0.0032, Color("#9ad7c2"), Color(0, 0, 0, 0))
+	_box("City monument plaza", Vector3(37.5, -0.01, 78.0), Vector3(12.0, 0.12, 12.0), pave, true)
+	_box("City monument base", Vector3(37.5, 0.35, 78.0), Vector3(5.6, 0.70, 2.6), Color("#6b776f"), true)
+	_box("City monument", Vector3(37.5, 2.05, 78.0), Vector3(5.0, 2.60, 2.2), Color("#42584c"), false)
+	_box("City monument cap", Vector3(37.5, 3.40, 78.0), Vector3(5.4, 0.16, 2.5), Color("#6b776f"), false)
+	_painted_text("KOTA BANGKAH", Vector3(37.5, 2.55, 76.86), PI, 0.0075, Color("#e8fbff"), Color(0.05, 0.12, 0.14, 0.35))
+	_painted_text("BANGKAH CITY  ·  2026", Vector3(37.5, 2.12, 76.86), PI, 0.0032, Color("#9ad7c2"), Color(0, 0, 0, 0))
+	for fx in [32.9, 42.1]:
+		_cylinder("City flag pole", Vector3(float(fx), 2.3, 80.6), 0.05, 4.6, Color("#9aa3a0"))
+		_box("City flag", Vector3(float(fx) + 0.55, 4.3, 80.6), Vector3(1.1, 0.5, 0.04), Color("#3a4a42"), false)
 
 func _add_street_lamp(position: Vector3) -> void:
 	# Single decorative street lamp (pole + warm head + OmniLight).
@@ -886,8 +906,9 @@ func _build_shell() -> void:
 		if absf(mx) < 3.0:
 			continue
 		_box("L1 facade mullion", Vector3(mx, 2.75, 39.86), Vector3(0.10, 5.1, 0.10), Color("#1f2224"), false, null, 0.32, 0.55)
-	# Structural columns through 3 stories
-	for x in [-39, -20, 0, 20, 39]:
+	# Structural columns through 3 stories. The x=0 row is intentionally left out:
+	# a column on the entrance/reception axis blocked the lobby sightline.
+	for x in [-39, -20, 20, 39]:
 		for z in [-37, -18, 4, 25, 37]:
 			_box("Structural column", Vector3(x, total_h * 0.5 - 0.2, z), Vector3(0.42, total_h, 0.42), Color("#c5cec7"), true)
 	var top := L3_Y + FLOOR_H + 2.02
@@ -1003,10 +1024,16 @@ func _build_exterior_facade() -> void:
 		dl.shadow_enabled = false
 		add_child(dl)
 
-	# --- 3D emissive branding (day/night readable) ---
-	_box("L3 brand backer", Vector3(18.0, L3_Y + 3.9, fz + 0.10), Vector3(20.0, 1.35, 0.16), Color("#1f2a27"), false, null, 0.3, 0.4)
-	_add_company_logo(Vector3(18.0, L3_Y + 3.92, fz + 0.22), 0.0, 19.0)
-	_box("Brand emissive bar", Vector3(18.0, L3_Y + 3.35, fz + 0.18), Vector3(18.5, 0.07, 0.05), accent, false, null, 0.2, 0.0, false, accent)
+	# --- Company banner: pusat fasad L2 di atas kanopi masuk, terlihat dari boulevard ---
+	# Panel terang 22 x 4 m dengan nama perusahaan 3D setinggi ~2,4 m.
+	_box("Banner frame", Vector3(0, 9.30, fz + 0.10), Vector3(23.2, 4.5, 0.16), slate, false, null, 0.45, 0.2)
+	_box("Banner panel", Vector3(0, 9.30, fz + 0.19), Vector3(22.2, 3.9, 0.12), Color("#f5f1e6"), false, null, 0.52, 0.02)
+	for py in [11.24, 7.36]:
+		_box("Banner brass rule", Vector3(0, py, fz + 0.27), Vector3(21.9, 0.05, 0.05), brass, false, null, 0.28, 0.6)
+	for px in [-11.05, 11.05]:
+		_box("Banner brass side", Vector3(px, 9.30, fz + 0.27), Vector3(0.05, 3.86, 0.05), brass, false, null, 0.28, 0.6)
+	_add_company_logo(Vector3(0.0, 9.78, fz + 0.34), 0.0, 22.0, null, 2.2, Color("#1e3b31"), Color("#59665e"))
+	_box("Banner underlight", Vector3(0, 7.08, fz + 0.22), Vector3(21.0, 0.06, 0.05), accent, false, null, 0.2, 0.0, false, accent)
 	# keep existing L1 sign feel minimal (replaced by canopy/wood header); add subtle HQ marker
 	# Exterior Digital Totem near drop-off (welcome screen)
 	_box("Ext totem base", Vector3(-9.5, 0.30, 45.2), Vector3(0.65, 0.6, 0.45), Color("#1f2326"), false, null, 0.35, 0.4)
@@ -1121,28 +1148,29 @@ func _build_ceiling_and_lighting() -> void:
 	var _fys: Array[float] = [L1_Y, L2_Y, L3_Y]
 	for fy: float in _fys:
 		for z in [-37.5, -18.5, 4.0, 25.0, 37.5]:
-			_box("Ceiling cross beam", Vector3(0, fy + 5.22, z), Vector3(82, 0.18, 0.32), Color("#87948d"), false, null, 0.72, 0.12)
+			_box("Ceiling cross beam", Vector3(0, fy + 5.22, z), Vector3(82, 0.18, 0.32), Color("#939c95"), false, null, 0.72, 0.10)
 		for x in [-40, -19.5, -2.0, 18.5, 40]:
-			_box("Ceiling spine", Vector3(x, fy + 5.22, 0), Vector3(0.28, 0.18, 78), Color("#87948d"), false, null, 0.72, 0.12)
-		# drop-ceiling perimeter shadow gap (keliling)
+			_box("Ceiling spine", Vector3(x, fy + 5.22, 0), Vector3(0.28, 0.18, 78), Color("#939c95"), false, null, 0.72, 0.10)
+		# drop-ceiling perimeter shadow gap (keliling) + warm cove on all four sides
 		for zg in [-39.6, 39.6]:
-			_box("Ceiling shadow gap", Vector3(0, fy + 5.32, zg), Vector3(83.0, 0.035, 0.06), Color("#1a1f1d"), false, null, 0.9)
-			_box("Cove light", Vector3(0, fy + 5.28, zg + (-0.08 if zg > 0 else 0.08)), Vector3(78.0, 0.02, 0.05), Color("#f2dcb0"), false, null, 0.2, 0.0, false, Color("#ffe0a8"))
+			_box("Ceiling shadow gap", Vector3(0, fy + 5.32, zg), Vector3(83.0, 0.035, 0.06), Color("#22272a"), false, null, 0.9)
+			_box("Cove light", Vector3(0, fy + 5.28, zg + (-0.08 if zg > 0 else 0.08)), Vector3(78.0, 0.02, 0.05), Color("#f2dcb0"), false, null, 0.2, 0.0, false, Color("#ffe4b4"))
 		for xg in [-41.6, 41.6]:
-			_box("Ceiling shadow gap S", Vector3(xg, fy + 5.32, 0), Vector3(0.06, 0.035, 79.0), Color("#1a1f1d"), false, null, 0.9)
+			_box("Ceiling shadow gap S", Vector3(xg, fy + 5.32, 0), Vector3(0.06, 0.035, 79.0), Color("#22272a"), false, null, 0.9)
+			_box("Cove light S", Vector3(xg + (-0.08 if xg > 0 else 0.08), fy + 5.28, 0), Vector3(0.05, 0.02, 74.0), Color("#f2dcb0"), false, null, 0.2, 0.0, false, Color("#ffe4b4"))
 		for tile_x in range(-38, 39, 4):
 			for tile_z in range(-37, 38, 5):
-				_box("Acoustic ceiling panel", Vector3(float(tile_x) + 2.0, fy + CEIL_Y, float(tile_z) + 2.5), Vector3(3.70, 0.075, 4.68), Color("#e2e5df"), false, null, 0.92)
+				_box("Acoustic ceiling panel", Vector3(float(tile_x) + 2.0, fy + CEIL_Y, float(tile_z) + 2.5), Vector3(3.70, 0.075, 4.68), Color("#e9e5db"), false, null, 0.92)
 		for pt in [Vector3(-34,5.39,-27), Vector3(-14,5.39,-27), Vector3(8,5.39,-27), Vector3(30,5.39,-27), Vector3(-33,5.39,-4), Vector3(5,5.39,-4), Vector3(31,5.39,16), Vector3(8,5.39,34)]:
-			_box("HVAC ceiling grille", Vector3(pt.x, fy + pt.y, pt.z), Vector3(0.95, 0.018, 0.42), Color("#87918c"), false, null, 0.62, 0.22)
+			_box("HVAC ceiling grille", Vector3(pt.x, fy + pt.y, pt.z), Vector3(0.95, 0.018, 0.42), Color("#8b958f"), false, null, 0.62, 0.22)
 		var light_points := [Vector3(-29,0,-29), Vector3(-10,0,-29), Vector3(8,0,-29), Vector3(29,0,-29), Vector3(-29,0,-7), Vector3(-6,0,-7), Vector3(24,0,-7), Vector3(-29,0,15), Vector3(-1,0,15), Vector3(29,0,15), Vector3(8,0,33)]
 		for i in range(light_points.size()):
 			var lp: Vector3 = light_points[i]
-			_box("Linear ceiling light", Vector3(lp.x, fy + CEIL_Y - 0.30, lp.z), Vector3(4.6, 0.12, 0.55), Color("#f4f0df"), false, null, 0.22, 0.0, false, Color("#f5e8d0"))
+			_box("Linear ceiling light", Vector3(lp.x, fy + CEIL_Y - 0.30, lp.z), Vector3(4.6, 0.12, 0.55), Color("#f6f2e6"), false, null, 0.22, 0.0, false, Color("#fff0d4"))
 			var light := OmniLight3D.new()
 			light.position = Vector3(lp.x, fy + 4.72, lp.z)
-			light.light_color = Color("#fff0d8"); light.light_energy = 0.38; light.omni_range = 10.5
-			light.shadow_enabled = (i % 3 == 0 and fy == L1_Y)
+			light.light_color = Color("#ffeccd"); light.light_energy = 0.52; light.omni_range = 12.0
+			light.shadow_enabled = (i % 4 == 0 and fy == L1_Y)
 			add_child(light)
 	# Lobby ring LED pendants only on L1 (grand)
 	for pendant_z in [15.0, 24.0, 31.5]:
@@ -1265,7 +1293,7 @@ func _build_reception() -> void:
 	_box("Backlit logo panel", Vector3(0, 3.22, 17.62), Vector3(8.4, 1.15, 0.06), Color("#14181b"), false, null, 0.25, 0.5)
 	_box("Logo glow bar", Vector3(0, 2.72, 17.66), Vector3(7.8, 0.05, 0.04), cyan, false, null, 0.2, 0.0, false, cyan)
 	_add_company_logo(Vector3(0, 3.24, 17.70), 0.0, 8.0, null, 1.5)
-	_label("HEADQUARTERS  ·  TECHNOLOGY  ·  ENGINEERING", Vector3(0, 2.45, 17.72), 0.0046, Color("#b9d8d8"))
+	_painted_text("HEADQUARTERS  ·  TECHNOLOGY  ·  ENGINEERING", Vector3(0, 2.45, 17.73), 0.0, 0.0044, Color("#b9d8d8"))
 	# Floating curved reception desk: marble top + fluted oak base + under-desk warm glow
 	_box("Reception base oak", Vector3(0, 0.62, 20.85), Vector3(10.6, 1.05, 0.95), oak, true, null, 0.52)
 	_box("Reception base curve L", Vector3(-5.6, 0.62, 20.5), Vector3(1.3, 1.05, 0.8), oak, true, null, 0.52)
@@ -1275,7 +1303,7 @@ func _build_reception() -> void:
 	_box("Reception marble top", Vector3(0, 1.22, 20.78), Vector3(11.8, 0.14, 1.45), Color("#f3efe6"), false, null, 0.14, 0.03)
 	_box("Reception underglow", Vector3(0, 0.12, 20.7), Vector3(10.0, 0.03, 0.9), Color("#f0d8a8"), false, null, 0.2, 0.0, false, Color("#ffd9a0"))
 	_box("Reception brand strip", Vector3(0, 0.72, 21.38), Vector3(6.8, 0.10, 0.03), cyan, false, null, 0.2, 0.0, false, cyan)
-	_label("VISITOR CHECK-IN", Vector3(0, 1.12, 21.45), 0.0048, Color("#fff7e6"))
+	_painted_text("VISITOR CHECK-IN", Vector3(0, 1.12, 21.46), 0.0, 0.0046, Color("#fff7e6"))
 	_box("Reception monitor bezel", Vector3(0, 1.62, 20.30), Vector3(1.55, 0.88, 0.14), Color("#29383d"), false)
 	_box("Reception monitor screen", Vector3(0, 1.63, 20.21), Vector3(1.34, 0.68, 0.025), Color("#31534b"), false, null, 0.2, 0.0, false, Color("#5e9b7c"))
 	_box("Reception keyboard", Vector3(-1.0, 1.32, 20.75), Vector3(0.85, 0.04, 0.28), Color("#46524e"), false)
@@ -1318,6 +1346,21 @@ func _build_reception() -> void:
 		add_child(sl)
 	# Perimeter ceiling shadow gap (tali air) L1 lobby
 	_box("Lobby shadow gap", Vector3(0, 5.32, 39.62), Vector3(36.0, 0.03, 0.05), Color("#1a1f1d"), false, null, 0.9)
+	# Tidy arrival zone: entrance mat aligned to the doors, planters flanking the desk.
+	_box("Reception visitor mat", Vector3(0, 0.045, 22.8), Vector3(9.0, 0.02, 1.6), Color("#4d5457"), false, null, 0.9)
+	_box("Reception mat inlay", Vector3(0, 0.058, 22.8), Vector3(8.4, 0.012, 1.2), Color("#6a746c"), false, null, 0.85)
+	for px in [-7.2, 7.2]:
+		_box("Reception planter", Vector3(px, 0.42, 20.9), Vector3(0.78, 0.84, 0.78), Color("#b9bdb4"), false, null, 0.55)
+		_add_plant(Vector3(px, 0.84, 20.9), 0.72)
+	# Warm wash over the reception counter (two symmetric spots, no shadow cost).
+	for sx in [-3.2, 3.2]:
+		var wash := SpotLight3D.new()
+		wash.position = Vector3(sx, 4.42, 19.4)
+		wash.rotation_degrees = Vector3(-90, 0, 0)
+		wash.light_color = Color("#ffe9c6"); wash.light_energy = 0.45; wash.spot_range = 8.0; wash.spot_angle = 42.0
+		wash.shadow_enabled = false
+		add_child(wash)
+	_room_light(Vector3(0, 4.10, 20.6), Color("#ffe7c2"), 0.30, 12.0)
 
 func _add_lounge_sofa(position: Vector3, rotation_y: float, color: Color, width: float = 2.8) -> void:
 	var p := position + Vector3(0, _floor_y, 0)
@@ -1339,7 +1382,7 @@ func _add_lounge_sofa(position: Vector3, rotation_y: float, color: Color, width:
 
 func _build_owner_suite() -> void:
 	# L3 Executive Suite (mewah/modern, terisi rapi). Seat/workstation registries PRESERVED.
-	_label("LANTAI 3  /  EXECUTIVE SUITE  /  OWNER", Vector3(-29.5, 3.55, -38.1), 0.006)
+	_label("LANTAI 3  /  EXECUTIVE SUITE  /  OWNER", Vector3(-29.5, 4.02, -38.1), 0.006)
 	var walnut := Color("#6b4a2e"); var matte := Color("#1f2326"); var slate := Color("#2c302e")
 	var brass := Color("#c7a85a"); var smoke := Color(0.18,0.20,0.22,0.35); var leather := Color("#3b3028")
 	# Fluted/slate feature wall + cove warm strip (modern, not old)
@@ -1426,7 +1469,7 @@ func _build_owner_suite() -> void:
 	_label("INBOX TRAY", Vector3(-27.2, 1.72, -31.25), 0.0038, Color("#e8efe7"))
 
 func _build_secretary_office() -> void:
-	_label("EXECUTIVE SECRETARY", Vector3(-10.5, 3.55, -38.1), 0.006)
+	_label("EXECUTIVE SECRETARY", Vector3(-10.5, 4.02, -38.1), 0.006)
 	_box("Secretary back wall", Vector3(-10.8, 1.75, -38.95), Vector3(15.8, 3.45, 0.16), Color("#aebbb0"), true)
 	_add_workstation(Vector3(-10.8, 0, -31.3), "SECRETARY  /  AGENDA", Color("#99795d"), true)
 	_box("Secretary side credenza", Vector3(-4.2, 0.78, -33.8), Vector3(1.3, 1.5, 3.2), Color("#7f6c58"), true)
@@ -1446,7 +1489,7 @@ func _build_secretary_office() -> void:
 	_painted_text("AGENDA PERUSAHAAN", Vector3(-1.2, 1.82, -21.45), PI, 0.0024, Color("#eaf6f2"), Color(0,0,0,0))
 
 func _build_management_offices() -> void:
-	_label("LANTAI 2  /  CORE LEADERSHIP", Vector3(8.0, 3.5, -38.1), 0.006)
+	_label("LANTAI 2  /  CORE LEADERSHIP", Vector3(8.0, 4.02, -38.1), 0.006)
 	# Arman and Sinta occupy an open management suite with planning boards.
 	_add_workstation(Vector3(5.8, 0, -31.3), "ARMAN  /  LEAD MANAGER", Color("#876d54"), true)
 	_add_workstation(Vector3(13.2, 0, -31.3), "SINTA  /  PROJECT MANAGER", Color("#8e7763"), true)
@@ -1456,7 +1499,7 @@ func _build_management_offices() -> void:
 		for y in [1.55, 2.2, 2.85]:
 			_box("Sprint kanban card", Vector3(x, y, -38.66), Vector3(1.22, 0.42, 0.035), Color("#d5c9a9"), false)
 	# Architect's office / system design review.
-	_label("SYSTEM ARCHITECTURE", Vector3(29.0, 3.5, -38.1), 0.006)
+	_label("SYSTEM ARCHITECTURE", Vector3(29.0, 4.02, -38.1), 0.006)
 	_add_workstation(Vector3(29.0, 0, -31.3), "RAKA  /  SYSTEM ARCHITECT", Color("#7c8c8d"), true)
 	_box("Architecture display frame", Vector3(29.0, 2.2, -38.78), Vector3(6.0, 2.3, 0.12), Color("#34464d"), false)
 	_box("Architecture diagram screen", Vector3(29.0, 2.2, -38.68), Vector3(5.65, 2.0, 0.035), Color("#25434a"), false, null, 0.2, 0.0, false, Color("#4e9183"))
@@ -1466,7 +1509,7 @@ func _build_management_offices() -> void:
 
 func _build_engineering_floor() -> void:
 	# Frontend design studio.
-	_label("FRONTEND  /  DESIGN STUDIO", Vector3(-29.5, 3.45, -18.9), 0.0057)
+	_label("FRONTEND  /  DESIGN STUDIO", Vector3(-29.5, 4.02, -18.9), 0.0057)
 	_add_workstation(Vector3(-29.0, 0, -8.9), "DIRA  /  FRONTEND", Color("#9a735f"), true)
 	_add_workstation(Vector3(-34.5, 0, -8.9), "UI DESIGN", Color("#a38268"), false)
 	_box("Frontend design board frame", Vector3(-29.5, 2.1, -19.0), Vector3(5.5, 2.35, 0.12), Color("#53655f"), false)
@@ -1474,7 +1517,7 @@ func _build_engineering_floor() -> void:
 	for x in [-31.1, -29.5, -27.9]:
 		_box("UI design card", Vector3(x, 2.05, -18.86), Vector3(1.25, 1.4, 0.025), Color("#b7c8b9"), false)
 	# QA lab with a test bench and monitor stations.
-	_label("QUALITY ASSURANCE  /  TEST LAB", Vector3(-6.5, 3.45, -18.9), 0.0057)
+	_label("QUALITY ASSURANCE  /  TEST LAB", Vector3(-6.5, 4.02, -18.9), 0.0057)
 	_add_workstation(Vector3(-5.0, 0, -8.9), "TIKA  /  QA ENGINEER", Color("#748d7e"), true)
 	_add_workstation(Vector3(1.4, 0, -8.9), "AUTOMATED TEST STATION", Color("#8a9384"), true)
 	_box("QA test bench", Vector3(-6.8, 0.86, -14.8), Vector3(7.8, 1.65, 1.15), Color("#7a8983"), true)
@@ -1482,7 +1525,7 @@ func _build_engineering_floor() -> void:
 		_box("QA device", Vector3(x, 1.78, -14.7), Vector3(1.15, 0.72, 0.16), Color("#293940"), false)
 		_box("QA device screen", Vector3(x, 1.79, -14.605), Vector3(0.98, 0.53, 0.025), Color("#30544c"), false, null, 0.2, 0.0, false, Color("#5b9b7e"))
 	# Backend pod with collaborative engineering table.
-	_label("BACKEND ENGINEERING", Vector3(24.0, 3.45, -18.9), 0.0057)
+	_label("BACKEND ENGINEERING", Vector3(24.0, 4.02, -18.9), 0.0057)
 	_add_workstation(Vector3(27.0, 0, -8.9), "BIMA  /  BACKEND", Color("#6d8490"), true)
 	_add_workstation(Vector3(34.0, 0, -8.9), "SERVICE MONITORING", Color("#708a86"), true)
 	_box("Backend rack cabinet", Vector3(37.0, 1.2, -14.6), Vector3(1.6, 2.35, 0.9), Color("#3b4a4d"), true)
@@ -1502,7 +1545,7 @@ func _build_engineering_floor() -> void:
 	_add_plant(Vector3(10.0, 0, -2.2), 0.85)
 
 func _build_meeting_room() -> void:
-	_label("LANTAI 1  /  MAIN BOARDROOM", Vector3(-29.5, 3.45, 4.4), 0.0057)
+	_label("LANTAI 1  /  MAIN BOARDROOM", Vector3(-35.4, 4.12, 4.55), 0.0050)
 	var table_center := Vector3(-29.5, 0, 14.3)
 	# Oval-feel boardroom table (layered) + leather chairs (registry preserved: 10 seats)
 	_box("Boardroom table top", table_center + Vector3(0, 0.82, 0), Vector3(10.2, 0.16, 3.0), Color("#6f563f"), true, null, 0.38)
@@ -1528,6 +1571,24 @@ func _build_meeting_room() -> void:
 	_box("Boardroom credenza", Vector3(-29.5, 0.7, 23.2), Vector3(8.0, 1.35, 0.72), Color("#7b6856"), true)
 	for x in [-32.0, -29.5, -27.0]:
 		_cylinder("Meeting water bottle", Vector3(x, 1.49, 23.2), 0.10, 0.42, Color("#91b2af"), null, false, 0.1)
+	# --- Tidy dressing: rug, place settings, acoustic wall, clock, plants, warm light ---
+	_box("Boardroom wool rug", Vector3(-29.5, 0.145, 14.3), Vector3(13.4, 0.03, 6.4), Color("#6c6a60"), false, null, 0.95)
+	_box("Boardroom rug inset", Vector3(-29.5, 0.165, 14.3), Vector3(12.6, 0.02, 5.6), Color("#7b7a6d"), false, null, 0.95)
+	for x in [-4.2, -2.1, 0.0, 2.1, 4.2]:
+		for z in [-1.06, 1.06]:
+			_box("Boardroom placemat", table_center + Vector3(x, 0.905, z), Vector3(0.92, 0.016, 0.52), Color("#d9d2c2"), false)
+			_box("Boardroom name card", table_center + Vector3(x, 0.94, z * 1.12), Vector3(0.46, 0.07, 0.16), Color("#e8e2d2"), false)
+	for z in [-0.5, 0.5]:
+		_cylinder("Boardroom carafe", table_center + Vector3(-1.9, 0.98, z), 0.12, 0.30, Color("#9fbcb6"), null, false, 0.1)
+	# Acoustic felt panels on the solid west wall (echo control, warm texture).
+	for az in [7.6, 10.6, 13.6, 16.6, 19.6]:
+		_box("Boardroom acoustic panel", Vector3(-41.77, 2.25, az), Vector3(0.10, 2.45, 1.9), Color("#63736a"), false, null, 0.95)
+	_add_wall_clock(Vector3(-41.70, 3.05, 25.0))
+	_add_plant(Vector3(-38.6, 0, 22.9), 1.0)
+	_add_plant(Vector3(-20.7, 0, 22.9), 0.9)
+	_add_plant(Vector3(-38.6, 0, 6.3), 0.9)
+	_room_light(Vector3(-29.5, 4.35, 14.3), Color("#ffe8c4"), 0.55, 12.0)
+	_room_light(Vector3(-29.5, 4.35, 19.6), Color("#ffe8c4"), 0.32, 8.0)
 
 func _add_meeting_chair(position: Vector3, rotation_y: float) -> void:
 	var p := position + Vector3(0, _floor_y, 0)
@@ -1549,11 +1610,11 @@ func _add_meeting_chair(position: Vector3, rotation_y: float) -> void:
 	seats.append({"position": Vector3(p.x, p.y, p.z), "yaw": rotation_y, "kind": "meeting", "pivot": swivel, "label": "Kursi Rapat"})
 
 func _build_api_lab() -> void:
-	_label("API  /  INFRASTRUCTURE LAB", Vector3(29.0, 3.45, 4.4), 0.0057)
+	_label("API  /  INFRASTRUCTURE LAB", Vector3(33.2, 4.14, 4.55), 0.0050)
 	_add_workstation(Vector3(29.0, 0, 12.65), "NAYA  /  API SPECIALIST", Color("#987f5b"), true)
 	# Server racks, glowing LEDs (cyan/tech), diagnostics — visual; workstation/seat preserved.
 	var rack := Color("#344247"); var ledc := Color("#00FFFF")
-	for x in [21.0, 24.0, 37.0]:
+	for x in [20.8, 23.4, 26.0, 28.6]:
 		_box("Infrastructure rack", Vector3(x, 1.35, 22.0), Vector3(1.8, 2.65, 0.95), rack, true, null, 0.45, 0.2)
 		for level in range(6):
 			var y := 0.42 + float(level) * 0.38
@@ -1561,13 +1622,35 @@ func _build_api_lab() -> void:
 			for led in range(5):
 				var lc: Color = ledc if (level+led)%3!=0 else Color("#52ff9a")
 				_sphere("Rack LED", Vector3(x - 0.58 + float(led) * 0.145, y, 21.44), 0.028, lc, Vector3.ONE)
-	_box("API topology board frame", Vector3(30.0, 2.4, 24.65), Vector3(7.4, 1.65, 0.14), Color("#1f2326"), false, null, 0.3, 0.4)
-	_box("API topology board", Vector3(30.0, 2.4, 24.56), Vector3(7.1, 1.38, 0.04), Color("#0f1820"), false, null, 0.2, 0.0, false, Color("#1e5060"))
-	for x in [27.0, 29.0, 31.0, 33.0]:
-		_box("API topology node", Vector3(x, 2.4, 24.52), Vector3(0.75, 0.48, 0.03), Color("#7fd4d8"), false, null, 0.2, 0.0, false, Color("#3aa8b0"))
+	# Neat overhead cable tray above the rack row, with drops to each cabinet.
+	_box("Rack cable tray", Vector3(24.7, 3.42, 22.0), Vector3(10.6, 0.08, 0.34), Color("#2a3034"), false, null, 0.4, 0.35)
+	for x in [20.8, 23.4, 26.0, 28.6]:
+		_box("Rack cable drop", Vector3(x, 3.10, 22.0), Vector3(0.10, 0.55, 0.10), Color("#20272a"), false)
+	_box("API topology board frame", Vector3(24.7, 3.98, 24.65), Vector3(9.2, 1.15, 0.14), Color("#1f2326"), false, null, 0.3, 0.4)
+	_box("API topology board", Vector3(24.7, 3.98, 24.56), Vector3(8.9, 0.94, 0.04), Color("#0f1820"), false, null, 0.2, 0.0, false, Color("#1e5060"))
+	for x in [21.4, 23.6, 25.8, 28.0]:
+		_box("API topology node", Vector3(x, 3.98, 24.52), Vector3(1.15, 0.54, 0.03), Color("#7fd4d8"), false, null, 0.2, 0.0, false, Color("#3aa8b0"))
+	# Operations bench (visual) aligned to the room's west side, clear of the walk line.
+	_box("NOC bench", Vector3(22.7, 0.82, 12.3), Vector3(5.4, 0.12, 1.3), Color("#59655f"), false, null, 0.45, 0.15)
+	for bx in [20.6, 24.8]:
+		_box("NOC bench leg", Vector3(bx, 0.41, 12.3), Vector3(0.14, 0.82, 1.0), Color("#3a4645"), false)
+	for mx in [21.0, 22.7, 24.4]:
+		_box("NOC monitor", Vector3(mx, 1.30, 12.05), Vector3(1.25, 0.72, 0.06), Color("#0f171a"), false, null, 0.2, 0.0, false, Color("#2aa8b0"))
+	for sx in [21.0, 22.7, 24.4]:
+		_cylinder("NOC stool", Vector3(sx, 0.52, 10.7), 0.28, 0.10, Color("#4a5654"), null, false, 0.4)
+		_cylinder("NOC stool stem", Vector3(sx, 0.26, 10.7), 0.06, 0.52, Color("#6a7674"), null, false, 0.5)
+	# Monitoring status wall on the east side (reads from the workstation).
+	_box("NOC status frame", Vector3(41.45, 2.35, 13.6), Vector3(0.10, 2.0, 6.0), Color("#1f2326"), false)
+	_box("NOC status screen", Vector3(41.38, 2.35, 13.6), Vector3(0.04, 1.76, 5.6), Color("#0d1a20"), false, null, 0.18, 0.0, false, Color("#2aa8b0"))
+	for sz in [11.6, 13.6, 15.6]:
+		_box("NOC status card", Vector3(41.34, 2.35, sz), Vector3(0.02, 1.1, 1.5), Color("#7fd4d8"), false, null, 0.2, 0.0, false, Color("#3aa8b0"))
+	_add_plant(Vector3(39.4, 0, 6.4), 1.0)
+	_cylinder("API fire extinguisher", Vector3(19.4, 0.62, 24.2), 0.16, 0.95, Color("#a5322d"), null, false, 0.35)
+	_room_light(Vector3(26.0, 4.20, 17.5), Color("#d8f6ff"), 0.30, 12.0)
+	_room_light(Vector3(22.0, 4.20, 9.5), Color("#ffe9c8"), 0.26, 9.0)
 
 func _build_archive_and_print() -> void:
-	_label("COMPANY ARCHIVE  /  PRINT ROOM", Vector3(-29.5, 3.45, 25.8), 0.0057)
+	_label("COMPANY ARCHIVE  /  PRINT ROOM", Vector3(-35.4, 4.14, 25.8), 0.0050)
 	for z in [28.5, 33.0, 37.0]:
 		_add_shelf(Vector3(-37.0, 0.16, z), 3.5, 2.65, 0.9, "ARCHIVE")
 		_add_shelf(Vector3(-31.8, 0.16, z), 3.5, 2.65, 0.9, "REPORTS")
@@ -1583,6 +1666,23 @@ func _build_archive_and_print() -> void:
 	_box("Archive checkout counter", Vector3(-27.4, 0.75, 29.5), Vector3(5.1, 1.42, 0.90), Color("#82694f"), true)
 	_box("Archive counter top", Vector3(-27.4, 1.50, 29.5), Vector3(5.3, 0.14, 1.05), Color("#c4a984"), false)
 	_add_plant(Vector3(-21.5, 0, 37.3), 0.8)
+	# --- Tidy archive: clear aisle, reading table, trolley, bins, warm light ---
+	_box("Archive aisle stripe", Vector3(-34.4, 0.155, 32.6), Vector3(0.18, 0.02, 12.6), Color("#d8cfb9"), false, null, 0.85)
+	_box("Archive reading table", Vector3(-25.2, 0.76, 36.4), Vector3(3.2, 0.12, 1.2), Color("#8a6a46"), false, null, 0.4)
+	for tx in [-26.5, -23.9]:
+		_box("Archive reading leg", Vector3(tx, 0.38, 36.4), Vector3(0.12, 0.76, 1.0), Color("#5d6b63"), false)
+	for cz in [35.3, 37.5]:
+		_box("Archive reading chair", Vector3(-25.2, 0.62, cz), Vector3(0.9, 0.14, 0.86), Color("#4f675f"), false, null, 0.85)
+		_box("Archive chair back", Vector3(-25.2, 1.02, cz + (0.36 if cz > 36.4 else -0.36)), Vector3(0.9, 0.78, 0.14), Color("#445b53"), false)
+	_box("Archive book trolley", Vector3(-25.0, 0.52, 27.8), Vector3(1.4, 0.9, 0.7), Color("#6c7a72"), false, null, 0.6, 0.2)
+	for bx in [-25.5, -24.5]:
+		for bz in [27.6, 28.0]:
+			_cylinder("Archive trolley wheel", Vector3(bx, 0.10, bz), 0.10, 0.08, Color("#2c3230"), null, false, 0.3)
+	_cylinder("Archive bin", Vector3(-21.0, 0.42, 28.0), 0.28, 0.84, Color("#58655f"), null, false, 0.3)
+	_cylinder("Archive recycle bin", Vector3(-21.0, 0.42, 29.2), 0.28, 0.84, Color("#6f8a7a"), null, false, 0.3)
+	_add_wall_clock(Vector3(-41.70, 3.05, 30.0))
+	_room_light(Vector3(-30.5, 4.15, 32.0), Color("#ffe5bc"), 0.50, 12.0)
+	_room_light(Vector3(-24.5, 4.15, 36.2), Color("#ffe5bc"), 0.28, 7.0)
 
 func _build_owner_private_lounge() -> void:
 	# L3 — Ruang pribadi Owner
@@ -1622,7 +1722,7 @@ func _build_owner_private_lounge() -> void:
 
 func _build_staff_pantry_lounge() -> void:
 	# L1 — Pantry & staff lounge
-	_label("LANTAI 1  /  PANTRY  /  STAFF LOUNGE", Vector3(10.0, 3.45, 25.8), 0.0057)
+	_label("LANTAI 1  /  PANTRY  /  STAFF LOUNGE", Vector3(11.0, 4.14, 25.9), 0.0054)
 	# Pantry/coffee — keeps `coffee` interactable anchor (22.5,0,34.8 in main.gd) coherent.
 	_box("Pantry island bar", Vector3(27.5, 0.88, 29.0), Vector3(9.0, 1.62, 1.45), Color("#3a3f43"), true, null, 0.4)
 	_box("Pantry island top", Vector3(27.5, 1.73, 29.0), Vector3(9.25, 0.16, 1.65), Color("#d8d2c8"), false, null, 0.2, 0.06)
@@ -1632,9 +1732,15 @@ func _build_staff_pantry_lounge() -> void:
 	_cylinder("Pantry faucet", Vector3(34.0, 1.89, 35.8), 0.045, 0.54, Color("#bcc7c1"), null, false, 0.85)
 	_box("Microwave", Vector3(26.0, 2.0, 36.05), Vector3(1.25, 0.72, 0.78), Color("#77847f"), false)
 	_box("Refrigerator", Vector3(38.5, 1.45, 31.8), Vector3(1.7, 2.75, 1.55), Color("#c4cbc6"), true, null, 0.28, 0.3)
-	for x in [24.2, 27.5, 30.8]:
+	for x in [24.6, 27.5, 30.4]:
 		_cylinder("Bar stool stem", Vector3(x, 0.55, 26.9), 0.075, 0.98, Color("#65736d"), null, false, 0.55)
 		_cylinder("Bar stool seat", Vector3(x, 1.08, 26.9), 0.42, 0.14, Color("#61796e"))
+	# Three warm pendants over the island, evenly spaced with the stools.
+	for px in [24.6, 27.5, 30.4]:
+		_cylinder("Pantry pendant stem", Vector3(px, 4.00, 29.0), 0.028, 1.9, Color("#4c5a55"))
+		_box("Pantry pendant shade", Vector3(px, 3.02, 29.0), Vector3(0.52, 0.16, 0.52), Color("#d5c49e"), false, null, 0.3)
+		_box("Pantry pendant glow", Vector3(px, 2.95, 29.0), Vector3(0.42, 0.04, 0.42), Color("#f5e0b8"), false, null, 0.2, 0.0, false, Color("#ffe6b8"))
+		_room_light(Vector3(px, 2.95, 29.0), Color("#ffe6b8"), 0.24, 5.0)
 	# Staff lounge — sofas use cognac/charcoal palette (seats preserved via _add_lounge_sofa)
 	_box("Lounge rug", Vector3(9.0, 0.16, 32.0), Vector3(16.0, 0.06, 9.5), Color("#87998d"), false)
 	_add_lounge_sofa(Vector3(7.0, 0, 29.2), 0.0, Color("#8B5A2B"), 3.8) # cognac
@@ -1643,6 +1749,21 @@ func _build_staff_pantry_lounge() -> void:
 	_add_plant(Vector3(15.0, 0, 29.0), 1.0); _add_plant(Vector3(15.0, 0, 35.0), 1.0)
 	_box("Lounge wall display", Vector3(9.0, 2.1, 38.75), Vector3(5.6, 2.0, 0.14), Color("#41544b"), false)
 	_box("Lounge display screen", Vector3(9.0, 2.1, 38.65), Vector3(5.25, 1.66, 0.03), Color("#254039"), false, null, 0.18, 0.0, false, Color("#426d57"))
+	# Side tables, lamp, tray return and plants keep the lounge edges tidy.
+	_box("Lounge side table", Vector3(2.2, 0.48, 30.0), Vector3(1.3, 0.10, 1.1), Color("#7b6a56"), false, null, 0.5)
+	_box("Lounge side table base", Vector3(2.2, 0.22, 30.0), Vector3(0.24, 0.44, 0.24), Color("#2a2f33"), false, null, 0.3, 0.3)
+	_cylinder("Lounge floor lamp pole", Vector3(2.2, 0.95, 36.0), 0.045, 1.9, Color("#596b63"))
+	_box("Lounge floor lamp shade", Vector3(2.2, 1.92, 36.0), Vector3(0.46, 0.30, 0.46), Color("#e3d3b2"), false, null, 0.35)
+	_room_light(Vector3(2.2, 1.82, 36.0), Color("#ffe6bc"), 0.36, 6.0)
+	_box("Pantry tray return", Vector3(33.0, 0.55, 26.1), Vector3(1.8, 1.1, 0.8), Color("#4c5a55"), false, null, 0.5, 0.2)
+	_cylinder("Pantry bin", Vector3(39.0, 0.44, 25.8), 0.30, 0.88, Color("#58655f"), null, false, 0.3)
+	_cylinder("Pantry recycle bin", Vector3(38.1, 0.44, 25.8), 0.30, 0.88, Color("#6f8a7a"), null, false, 0.3)
+	_add_framed_poster(Vector3(3.2, 2.15, 38.60), Color("#8B5A2B"), "TEAM", PI * 0.5)
+	_add_framed_poster(Vector3(15.0, 2.15, 38.60), Color("#3a3f43"), "BREW", PI * 0.5)
+	_add_plant(Vector3(17.6, 0, 25.8), 0.9)
+	_add_plant(Vector3(1.8, 0, 27.4), 0.8)
+	_room_light(Vector3(7.0, 4.20, 32.0), Color("#ffe8c6"), 0.50, 12.0)
+	_room_light(Vector3(27.5, 4.20, 31.0), Color("#ffe8c6"), 0.42, 11.0)
 
 ## Kursi bebas yang tidak terikat workstation: klaster lounge di lobby luas
 ## plus kursi geser di QA supaya setiap bengkel/jabatan punya tempat duduk.
@@ -2110,7 +2231,7 @@ func _build_town_district() -> void:
 	_add_road_sign(Vector3(111.3, 0.0, 82.0), -PI * 0.5, "KOPDES MERAH PUTIH", "PROMENADE  ·  LAYANAN WARGA", Color("#3a3a38"), Color("#f2f1ea"))
 	_add_road_sign(Vector3(111.3, 0.0, 104.0), -PI * 0.5, "KOPDES UNIT", "ATM  ·  LAYANAN CEPAT", Color("#3a3a38"), Color("#f2f1ea"))
 	_add_road_sign(Vector3(111.3, 0.0, 124.0), -PI * 0.5, "PASAR KOTA", "SAYUR  ·  BUAH  ·  JAJAN", Color("#7a5a46"), Color("#f4ead2"))
-	_add_road_sign(Vector3(96.7, 0.0, 88.0), PI * 0.5, "BLOK RUMAH", "← BARAT  |  TIMUR →", Color("#3f574c"), Color("#eef1ea"))
+	_add_road_sign(Vector3(96.7, 0.0, 86.0), PI * 0.5, "BLOK A-D", "RUMAH KARYAWAN  ·  ← BARAT", Color("#3f574c"), Color("#eef1ea"))
 
 	# --- Employee homes on the new residential grid ---
 	var homes := [
@@ -2374,14 +2495,15 @@ func _build_market() -> void:
 	var layout: Dictionary = market_layout()
 	var c: Vector3 = layout.get("center", Vector3(126.0, 0.0, 134.0))
 	# Plaza surface is laid by _build_site (top 0.05) to keep sidewalk seams clean.
-	_box("Market sign post", Vector3(c.x - 9.0, 1.15, c.z - 8.2), Vector3(0.14, 2.3, 0.14), Color("#6a776f"), false, null, 0.5)
-	_box("Market sign", Vector3(c.x - 7.6, 1.6, c.z - 8.2), Vector3(2.8, 0.9, 0.12), Color("#7a5a46"), false, null, 0.45)
-	_painted_text("PASAR BANGKAH", Vector3(c.x - 7.6, 1.6, c.z - 8.11), 0.0, 0.0042, Color("#f4ead2"), Color(0,0,0,0))
+	_box("Market sign post", Vector3(c.x - 9.0, 1.15, c.z - 8.8), Vector3(0.14, 2.3, 0.14), Color("#6a776f"), false, null, 0.5)
+	_box("Market sign", Vector3(c.x - 7.6, 1.6, c.z - 8.8), Vector3(2.8, 0.9, 0.12), Color("#7a5a46"), false, null, 0.45)
+	# Sign faces the boulevard approach (south).
+	_painted_text("PASAR BANGKAH", Vector3(c.x - 7.6, 1.6, c.z - 8.89), PI, 0.0042, Color("#f4ead2"), Color(0,0,0,0))
 	var stalls := [
-		{"x": -7.0, "z": -2.0, "name": "Sayur", "c": Color("#6f8a5a")},
-		{"x": 7.0, "z": -2.0, "name": "Buah", "c": Color("#b07a52")},
-		{"x": -7.0, "z": 4.5, "name": "Warung Kopi", "c": Color("#6a7288")},
-		{"x": 7.0, "z": 4.5, "name": "Kue", "c": Color("#8a6a72")},
+		{"x": -7.0, "z": -3.0, "name": "Sayur", "c": Color("#6f8a5a")},
+		{"x": 7.0, "z": -3.0, "name": "Buah", "c": Color("#b07a52")},
+		{"x": -7.0, "z": 3.0, "name": "Warung Kopi", "c": Color("#6a7288")},
+		{"x": 7.0, "z": 3.0, "name": "Kue", "c": Color("#8a6a72")},
 	]
 	for s in stalls:
 		var sp := Vector3(c.x + float(s["x"]), 0, c.z + float(s["z"]))
@@ -2407,9 +2529,9 @@ func _build_kopdes(pos: Vector3 = Vector3.ZERO) -> void:
 	_build_grand_mall()
 
 func _build_grand_mall() -> void:
-	# KOPDES MERAH PUTIH MALL — 64 x 44 m single-storey commercial block on a
-	# 68 x 48 m podium. Front (+Z) faces the promenade/market; the rear parking
-	# bay and service drive face the boulevard.
+	# KOPDES MERAH PUTIH MALL — 64 x 44 m dua lantai di atas podium 68 x 48 m.
+	# Front (+Z) menghadap promenade/pasar; punggung (-Z) menghadap boulevard
+	# dan parkir. Mezzanine mengelilingi atrium, dengan eskalator di sisi timur.
 	var layout: Dictionary = kopdes_layout()
 	var pos: Vector3 = layout.get("center", Vector3(180.0, 0.0, 105.0))
 	var root := Node3D.new()
@@ -2417,192 +2539,547 @@ func _build_grand_mall() -> void:
 	root.position = pos
 	add_child(root)
 
-	# --- Palette netral, restrained ---
-	var wall_c := Color("#e8e6e0")
-	var wall_shade := Color("#d8d6d0")
-	var charcoal := Color("#3a3a38")
-	var metal_dark := Color("#4a4a48")
-	var glass_tint := Color(0.55, 0.60, 0.63, 0.20)
-	var floor_c := Color("#dcdad4")
-	var floor_mat := Color("#cbc9c2")
-	var sign_c := Color("#2a2a29")
-	var accent := Color("#6f5e4e")
+	# --- Palet merah putih terkendali: bata tua + putih hangat ---
+	var red := Color("#a5322d")
+	var red_dark := Color("#842521")
+	var red_soft := Color("#c05a52")
+	var white := Color("#f4f0e6")
+	var white_shade := Color("#e5dfd2")
+	var offwhite := Color("#fbf8f0")
+	var wall_c := white
+	var wall_shade := white_shade
+	var charcoal := Color("#35342f")
+	var metal_dark := Color("#4a4a46")
+	var smoked := Color("#46565c")
+	var glass_tint := Color(0.55, 0.62, 0.66, 0.18)
+	var floor_c := Color("#ddd8cc")
+	var floor_mat := Color("#cac4b6")
+	var sign_c := red_dark
+	var accent := red_soft
 	var plant_c := Color("#7a8a78")
 
 	# --- Site & podium: x=146..214, z=81..129 ---
 	var mall_w := 64.0
 	var mall_d := 44.0
-	var wall_h := 5.6
+	var wall_h := 11.0
+	var gf_h := 5.0
+	var mezz_y := 5.30
 	_box("Mall podium", Vector3(0, -0.035, 0), Vector3(mall_w + 4.0, 0.09, mall_d + 4.0), Color("#b7c0aa"), true, root, 0.78)
 	_box("Mall forecourt", Vector3(0, -0.01, 29.0), Vector3(mall_w + 4.0, 0.12, 10.0), Color("#c9d0c6"), true, root, 0.62)
 	_box("Mall floor", Vector3(0, 0.06, 0), Vector3(mall_w - 6.0, 0.06, mall_d - 6.0), floor_c, true, root, 0.55)
 
-	# --- Shell ---
-	_box("Back wall", Vector3(0, wall_h * 0.5, -mall_d * 0.5), Vector3(mall_w + 2.0, wall_h, 0.6), wall_c, true, root, 0.8)
-	_box("Left wall", Vector3(-mall_w * 0.5 - 1.0, wall_h * 0.5, 0), Vector3(0.6, wall_h, mall_d + 2.0), wall_c, true, root, 0.8)
-	_box("Right wall", Vector3(mall_w * 0.5 + 1.0, wall_h * 0.5, 0), Vector3(0.6, wall_h, mall_d + 2.0), wall_c, true, root, 0.8)
-	_box("Roof", Vector3(0, wall_h + 0.3, 0), Vector3(mall_w + 6.0, 0.45, mall_d + 6.0), Color("#7a6660"), false, root, 0.6)
-	_box("Roof eave", Vector3(0, wall_h + 0.52, 0), Vector3(mall_w + 2.0, 0.22, mall_d + 2.0), wall_shade, false, root, 0.55)
+	# --- Shell dua lantai: putih dengan pita, plinth, dan parapet merah ---
+	_box("Back wall", Vector3(0, wall_h * 0.5, -mall_d * 0.5), Vector3(mall_w + 2.0, wall_h, 0.6), white, true, root, 0.82)
+	_box("Left wall", Vector3(-mall_w * 0.5 - 1.0, wall_h * 0.5, 0), Vector3(0.6, wall_h, mall_d + 2.0), white, true, root, 0.82)
+	_box("Right wall", Vector3(mall_w * 0.5 + 1.0, wall_h * 0.5, 0), Vector3(0.6, wall_h, mall_d + 2.0), white, true, root, 0.82)
+	# Plinth merah di kaki bangunan (semua sisi).
+	_box("Front plinth", Vector3(0, 0.34, mall_d * 0.5 + 0.32), Vector3(66.0, 0.68, 0.24), red_dark, false, root, 0.55, 0.1)
+	_box("Rear plinth", Vector3(0, 0.34, -mall_d * 0.5 - 0.32), Vector3(66.0, 0.68, 0.24), red_dark, false, root, 0.55, 0.1)
+	for sx in [-1.0, 1.0]:
+		_box("Side plinth", Vector3(sx * (mall_w * 0.5 + 0.32), 0.34, 0), Vector3(0.24, 0.68, 46.0), red_dark, false, root, 0.55, 0.1)
+	# Pita lantai merah keliling di antara L1 dan L2.
+	for sz in [-1.0, 1.0]:
+		_box("Floor band E-W", Vector3(0, 5.25, sz * (mall_d * 0.5 + 0.34)), Vector3(66.0, 0.7, 0.20), red, false, root, 0.5, 0.12)
+		_box("Floor band trim", Vector3(0, 5.65, sz * (mall_d * 0.5 + 0.36)), Vector3(66.0, 0.05, 0.05), offwhite, false, root, 0.35, 0.1)
+	for sx in [-1.0, 1.0]:
+		_box("Floor band N-S", Vector3(sx * (mall_w * 0.5 + 1.34), 5.25, 0), Vector3(0.20, 0.7, 46.0), red, false, root, 0.5, 0.12)
+	# Cornice merah di atas lantai dua + parapet.
+	for sz in [-1.0, 1.0]:
+		_box("Parapet front/back", Vector3(0, 10.78, sz * (mall_d * 0.5 + 0.30)), Vector3(65.4, 0.44, 0.22), red, false, root, 0.5, 0.12)
+		_box("Parapet cap", Vector3(0, 11.06, sz * (mall_d * 0.5 + 0.32)), Vector3(65.6, 0.10, 0.26), white, false, root, 0.5)
+	for sx in [-1.0, 1.0]:
+		_box("Side parapet", Vector3(sx * (mall_w * 0.5 + 0.82), 10.78, 0), Vector3(0.22, 0.44, 45.4), red, false, root, 0.5, 0.12)
+	# Atap terang + parapet atap + unit atap.
+	_box("Roof", Vector3(0, 11.28, 0), Vector3(mall_w + 6.0, 0.40, mall_d + 6.0), Color("#d9d4c7"), false, root, 0.72)
+	for sz in [-1.0, 1.0]:
+		_box("Roof parapet", Vector3(0, 11.72, sz * (mall_d * 0.5 + 2.7)), Vector3(mall_w + 6.2, 0.84, 0.40), white, false, root, 0.78)
+		_box("Roof parapet cap", Vector3(0, 12.18, sz * (mall_d * 0.5 + 2.7)), Vector3(mall_w + 6.4, 0.12, 0.52), red, false, root, 0.5, 0.1)
+	for sx in [-1.0, 1.0]:
+		_box("Roof parapet side", Vector3(sx * (mall_w * 0.5 + 2.7), 11.72, 0), Vector3(0.40, 0.84, mall_d + 6.2), white, false, root, 0.78)
+		_box("Roof parapet side cap", Vector3(sx * (mall_w * 0.5 + 2.7), 12.18, 0), Vector3(0.52, 0.12, mall_d + 6.4), red, false, root, 0.5, 0.1)
+	_box("Roof unit A", Vector3(-18.0, 11.82, -14.0), Vector3(8.0, 1.0, 5.0), white_shade, false, root, 0.72)
+	_box("Roof unit A trim", Vector3(-18.0, 12.34, -14.0), Vector3(8.2, 0.10, 5.2), red, false, root, 0.5, 0.1)
+	_box("Roof unit B", Vector3(20.0, 11.76, 12.0), Vector3(7.0, 0.9, 8.0), white_shade, false, root, 0.72)
+	_box("Roof unit B trim", Vector3(20.0, 12.23, 12.0), Vector3(7.2, 0.10, 8.2), red, false, root, 0.5, 0.1)
+	# Skylight lantern di atas atrium (merah-putih).
+	_box("Lantern curb", Vector3(0, 11.62, 0), Vector3(20.0, 0.55, 28.0), white_shade, false, root, 0.7)
+	_box("Lantern curb cap", Vector3(0, 11.92, 0), Vector3(20.2, 0.12, 28.2), red, false, root, 0.5, 0.1)
+	_box("Lantern glass N", Vector3(0, 12.60, -13.9), Vector3(18.0, 1.5, 0.08), glass_tint, false, root, 0.10, 0.05, true)
+	_box("Lantern glass S", Vector3(0, 12.60, 13.9), Vector3(18.0, 1.5, 0.08), glass_tint, false, root, 0.10, 0.05, true)
+	_box("Lantern glass W", Vector3(-9.9, 12.60, 0), Vector3(0.08, 1.5, 26.0), glass_tint, false, root, 0.10, 0.05, true)
+	_box("Lantern glass E", Vector3(9.9, 12.60, 0), Vector3(0.08, 1.5, 26.0), glass_tint, false, root, 0.10, 0.05, true)
+	for mx in [-9.0, -4.5, 0.0, 4.5, 9.0]:
+		_box("Lantern mullion N-S", Vector3(mx, 12.60, -13.9), Vector3(0.10, 1.55, 0.10), red, false, root, 0.4, 0.2)
+		_box("Lantern mullion N-S", Vector3(mx, 12.60, 13.9), Vector3(0.10, 1.55, 0.10), red, false, root, 0.4, 0.2)
+	for mz in [-13.0, -6.5, 0.0, 6.5, 13.0]:
+		_box("Lantern mullion E-W", Vector3(-9.9, 12.60, mz), Vector3(0.10, 1.55, 0.10), red, false, root, 0.4, 0.2)
+		_box("Lantern mullion E-W", Vector3(9.9, 12.60, mz), Vector3(0.10, 1.55, 0.10), red, false, root, 0.4, 0.2)
+	_box("Lantern cap", Vector3(0, 13.45, 0), Vector3(20.4, 0.22, 28.4), white, false, root, 0.72)
+	for sz in [-1.0, 1.0]:
+		_box("Lantern cap trim", Vector3(0, 13.60, sz * 14.15), Vector3(20.6, 0.10, 0.32), red, false, root, 0.5, 0.1)
+	for sx in [-1.0, 1.0]:
+		_box("Lantern cap trim", Vector3(sx * 10.15, 13.60, 0), Vector3(0.32, 0.10, 28.6), red, false, root, 0.5, 0.1)
 
-	# --- Facade curtain wall (front +Z) ---
+	# --- Fasad depan (+Z): kaca lantai dasar, pita merah, jendela lantai dua ---
 	var front_z := mall_d * 0.5 + 0.32
-	var facade_h := wall_h - 0.9
-	var facade_y := wall_h * 0.5 - 0.45
-	_box("Curtain wall center", Vector3(0, facade_y, front_z), Vector3(36.0, facade_h, 0.10), glass_tint, false, root, 0.12, 0.06, true)
-	_box("Curtain wall L", Vector3(-24.0, facade_y, front_z), Vector3(12.0, facade_h, 0.10), glass_tint, false, root, 0.12, 0.06, true)
-	_box("Curtain wall R", Vector3(24.0, facade_y, front_z), Vector3(12.0, facade_h, 0.10), glass_tint, false, root, 0.12, 0.06, true)
-	for mx in [-30.0, -24.0, -18.0, -12.0, -6.0, 0.0, 6.0, 12.0, 18.0, 24.0, 30.0]:
-		_box("Mullion vertical", Vector3(mx, facade_y, front_z + 0.06), Vector3(0.10, facade_h, 0.10), metal_dark, false, root, 0.35, 0.5)
-	for fy in [facade_y - facade_h * 0.33, facade_y + facade_h * 0.33]:
-		_box("Mullion horizontal", Vector3(0, fy, front_z + 0.06), Vector3(60.0, 0.10, 0.10), metal_dark, false, root, 0.35, 0.5)
-	for sx in [-30.0, 30.0]:
-		_box("Stone panel", Vector3(sx, facade_y, front_z), Vector3(4.0, facade_h, 0.10), Color("#e2e0d8"), false, root, 0.7, 0.2)
+	for bx in [-20.0, 20.0]:
+		_box("Ground glass", Vector3(bx, 2.74, front_z), Vector3(23.0, 4.05, 0.10), glass_tint, false, root, 0.12, 0.06, true)
+	for mx in [-31.0, -24.5, -18.0, -11.5, -8.4, 8.4, 11.5, 18.0, 24.5, 31.0]:
+		_box("Ground mullion", Vector3(mx, 2.74, front_z + 0.06), Vector3(0.14, 4.15, 0.12), red, false, root, 0.42, 0.18)
+	for my in [0.82, 4.66]:
+		_box("Ground transom", Vector3(0, my, front_z + 0.06), Vector3(63.0, 0.10, 0.12), red, false, root, 0.42, 0.18)
+	for px in [-32.4, -8.2, 8.2, 32.4]:
+		_box("Front pier", Vector3(px, 2.95, front_z - 0.03), Vector3(1.0, 5.9, 0.36), white, false, root, 0.76)
+	# Jendela lantai dua: spandrel putih, kusen merah, kaca bendera.
+	var upper_bays := [
+		{"x": -26.0, "w": 11.6}, {"x": -14.5, "w": 7.6},
+		{"x": 14.5, "w": 7.6}, {"x": 26.0, "w": 11.6},
+	]
+	for bay in upper_bays:
+		var bx := float(bay["x"]); var bw := float(bay["w"])
+		_box("Upper spandrel", Vector3(bx, 7.05, front_z - 0.02), Vector3(bw + 0.6, 2.9, 0.10), white, false, root, 0.8)
+		_box("Upper glass", Vector3(bx, 7.05, front_z + 0.09), Vector3(bw - 0.1, 2.05, 0.08), smoked, false, root, 0.18, 0.25)
+		_box("Upper frame top", Vector3(bx, 8.15, front_z + 0.10), Vector3(bw + 0.2, 0.16, 0.12), red, false, root, 0.45, 0.15)
+		_box("Upper frame bottom", Vector3(bx, 5.95, front_z + 0.10), Vector3(bw + 0.2, 0.16, 0.12), red, false, root, 0.45, 0.15)
+		for fx in [bx - bw * 0.5 + 0.09, bx + bw * 0.5 - 0.09]:
+			_box("Upper frame jamb", Vector3(fx, 7.05, front_z + 0.10), Vector3(0.16, 2.35, 0.12), red, false, root, 0.45, 0.15)
+		_box("Upper mullion", Vector3(bx, 7.05, front_z + 0.15), Vector3(0.10, 2.1, 0.10), red, false, root, 0.42, 0.2)
+	for px in [-20.3, 20.3]:
+		_box("Upper pier", Vector3(px, 7.05, front_z - 0.02), Vector3(1.0, 3.0, 0.10), white, false, root, 0.8)
+	# Jendela tengah di atas pintu masuk.
+	_box("Center upper glass", Vector3(0, 7.10, front_z + 0.09), Vector3(10.2, 2.3, 0.08), smoked, false, root, 0.18, 0.25)
+	_box("Center upper frame top", Vector3(0, 8.31, front_z + 0.10), Vector3(10.6, 0.18, 0.12), red, false, root, 0.45, 0.15)
+	_box("Center upper frame bottom", Vector3(0, 5.89, front_z + 0.10), Vector3(10.6, 0.18, 0.12), red, false, root, 0.45, 0.15)
+	for fx in [-5.21, 5.21]:
+		_box("Center upper frame jamb", Vector3(fx, 7.10, front_z + 0.10), Vector3(0.18, 2.6, 0.12), red, false, root, 0.45, 0.15)
+	for mx in [-3.4, 0.0, 3.4]:
+		_box("Center upper mullion", Vector3(mx, 7.10, front_z + 0.15), Vector3(0.10, 2.35, 0.10), red, false, root, 0.42, 0.2)
+	# Papan nama utama: pita merah lebar dengan huruf putih timbul.
+	_box("Sign band", Vector3(0, 9.55, front_z + 0.06), Vector3(36.0, 1.95, 0.24), red, false, root, 0.5, 0.12, false, Color(0.18, 0.04, 0.03))
+	_box("Sign rule top", Vector3(0, 10.50, front_z + 0.20), Vector3(36.2, 0.05, 0.05), offwhite, false, root, 0.3, 0.1)
+	_box("Sign rule bottom", Vector3(0, 8.60, front_z + 0.20), Vector3(36.2, 0.05, 0.05), offwhite, false, root, 0.3, 0.1)
+	_raised_text("KOPDES MERAH PUTIH", Vector3(0, 9.80, front_z + 0.26), 0.0, 1.45, 0.16, offwhite, root)
+	_painted_text("MALL  ·  PUSAT PERBELANJAAN", Vector3(0, 8.80, front_z + 0.26), 0.0, 0.011, Color("#f8e9dd"), Color(0,0,0,0), root)
 
-	# --- Main entrance (front, +Z) ---
-	var ent_w := 8.0
-	var ent_h := 3.8
-	var ent_depth := 3.6
-	_box("Entrance canopy roof", Vector3(0, 3.62, front_z + ent_depth * 0.5), Vector3(12.0, 0.14, ent_depth), charcoal, false, root, 0.45, 0.3)
-	_box("Entrance canopy soffit", Vector3(0, 3.50, front_z + ent_depth * 0.5), Vector3(11.2, 0.06, ent_depth - 0.2), Color("#dcdad4"), false, root, 0.5)
-	for cx in [-5.6, 5.6]:
-		_cylinder("Entrance column", Vector3(cx, 1.7, front_z + ent_depth * 0.5), 0.24, 3.3, metal_dark, root)
-		_box("Column base", Vector3(cx, 0.12, front_z + ent_depth * 0.5), Vector3(0.8, 0.12, 0.8), charcoal, false, root, 0.3)
-		_box("Column cap", Vector3(cx, 3.32, front_z + ent_depth * 0.5), Vector3(0.8, 0.12, 0.8), charcoal, false, root, 0.3)
-	# Door frame as lintel + jambs, with clear glass leaves.
-	_box("Door frame top", Vector3(0, 4.12, front_z + 0.12), Vector3(ent_w + 0.6, 0.34, 0.14), metal_dark, false, root, 0.35, 0.5)
-	for jx in [-4.3, 4.3]:
-		_box("Door frame jamb", Vector3(jx, 2.05, front_z + 0.12), Vector3(0.30, 4.1, 0.14), metal_dark, false, root, 0.35, 0.5)
-	_box("Door L", Vector3(-1.9, 1.95, front_z + 0.16), Vector3(3.5, 3.7, 0.06), glass_tint, false, root, 0.06, 0.03, true)
-	_box("Door R", Vector3(1.9, 1.95, front_z + 0.16), Vector3(3.5, 3.7, 0.06), glass_tint, false, root, 0.06, 0.03, true)
-	_box("Door handle L", Vector3(-0.35, 1.85, front_z + 0.22), Vector3(0.06, 0.7, 0.06), metal_dark, false, root, 0.2, 0.7)
-	_box("Door handle R", Vector3(0.35, 1.85, front_z + 0.22), Vector3(0.06, 0.7, 0.06), metal_dark, false, root, 0.2, 0.7)
-	# Entrance sign band — dark matte backer with warm lettering so it stays
-	# legible even when the facade itself is in shade.
-	_box("Sign backer", Vector3(0, 5.02, front_z + 0.12), Vector3(26.0, 0.92, 0.12), Color("#2f302e"), false, root, 0.45, 0.15)
-	_box("Sign accent L", Vector3(-12.55, 5.02, front_z + 0.19), Vector3(0.10, 0.92, 0.03), accent, false, root, 0.5, 0.2)
-	_box("Sign accent R", Vector3(12.55, 5.02, front_z + 0.19), Vector3(0.10, 0.92, 0.03), accent, false, root, 0.5, 0.2)
-	_painted_text("KOPDES MERAH PUTIH", Vector3(0, 5.14, front_z + 0.20), 0.0, 0.0082, Color("#f6efe2"), Color(0,0,0,0), root)
-	_painted_text("MALL  ·  PUSAT PERBELANJAAN KOTA BANGKAH", Vector3(0, 4.72, front_z + 0.20), 0.0, 0.0034, Color("#d8cfc0"), Color(0,0,0,0), root)
-	# Canopy fascia keeps the entrance from reading as a bare slab from street level.
-	_box("Canopy fascia", Vector3(0, 3.70, front_z + ent_depth - 0.04), Vector3(12.0, 0.34, 0.12), charcoal, false, root, 0.4, 0.2)
-	_painted_text("SELAMAT DATANG", Vector3(0, 3.70, front_z + ent_depth + 0.04), 0.0, 0.0032, Color("#e6ddcc"), Color(0,0,0,0), root)
+	# --- Pintu masuk utama: portal merah + kanopi putih ---
+	var ent_depth := 4.6
+	for px in [-7.4, 7.4]:
+		_box("Portal column", Vector3(px, 4.25, front_z + 0.24), Vector3(1.1, 8.5, 1.0), red, false, root, 0.5, 0.12)
+		_box("Portal base", Vector3(px, 0.36, front_z + 0.28), Vector3(1.45, 0.72, 1.35), red_dark, false, root, 0.5, 0.1)
+		_box("Portal cap", Vector3(px, 8.55, front_z + 0.28), Vector3(1.5, 0.22, 1.4), offwhite, false, root, 0.6)
+	_box("Portal header", Vector3(0, 8.42, front_z + 0.24), Vector3(16.2, 0.9, 1.0), red, false, root, 0.5, 0.12)
+	_box("Portal header trim", Vector3(0, 8.92, front_z + 0.74), Vector3(16.2, 0.10, 0.10), offwhite, false, root, 0.4)
+	# Kusen pintu + daun kaca.
+	_box("Door frame top", Vector3(0, 4.62, front_z + 0.12), Vector3(11.2, 0.36, 0.16), red_dark, false, root, 0.4, 0.15)
+	for jx in [-5.2, 5.2]:
+		_box("Door frame jamb", Vector3(jx, 2.35, front_z + 0.12), Vector3(0.32, 4.6, 0.16), red_dark, false, root, 0.4, 0.15)
+	for dx in [-2.6, 2.6]:
+		_box("Door leaf", Vector3(dx, 2.28, front_z + 0.16), Vector3(5.0, 4.45, 0.06), glass_tint, false, root, 0.06, 0.03, true)
+	_box("Door center post", Vector3(0, 2.28, front_z + 0.18), Vector3(0.10, 4.45, 0.10), red, false, root, 0.4, 0.2)
+	_box("Door handle L", Vector3(-0.42, 2.05, front_z + 0.24), Vector3(0.06, 0.85, 0.06), metal_dark, false, root, 0.2, 0.7)
+	_box("Door handle R", Vector3(0.42, 2.05, front_z + 0.24), Vector3(0.06, 0.85, 0.06), metal_dark, false, root, 0.2, 0.7)
+	_box("Door mat", Vector3(0, 0.10, front_z + 0.9), Vector3(10.0, 0.02, 2.2), red_soft, false, root, 0.85)
+	# Transom kaca di atas pintu (sampai portal).
+	_box("Entrance transom glass", Vector3(0, 6.55, front_z + 0.08), Vector3(10.2, 3.2, 0.08), glass_tint, false, root, 0.10, 0.05, true)
+	for mx in [-5.2, -2.6, 0.0, 2.6, 5.2]:
+		_box("Transom mullion", Vector3(mx, 6.55, front_z + 0.14), Vector3(0.10, 3.25, 0.10), red, false, root, 0.42, 0.2)
+	for my in [5.7, 7.4]:
+		_box("Transom rail", Vector3(0, my, front_z + 0.14), Vector3(10.3, 0.10, 0.10), red, false, root, 0.42, 0.2)
+	# Kanopi putih dengan fasia merah.
+	_box("Canopy roof", Vector3(0, 5.06, front_z + ent_depth * 0.5 + 0.2), Vector3(16.6, 0.22, ent_depth), offwhite, false, root, 0.6)
+	_box("Canopy soffit", Vector3(0, 4.94, front_z + ent_depth * 0.5 + 0.2), Vector3(16.0, 0.06, ent_depth - 0.2), white_shade, false, root, 0.7)
+	_box("Canopy fascia", Vector3(0, 4.96, front_z + ent_depth + 0.16), Vector3(16.6, 0.62, 0.14), red, false, root, 0.5, 0.1)
+	_box("Canopy fascia trim", Vector3(0, 5.28, front_z + ent_depth + 0.22), Vector3(16.7, 0.05, 0.05), offwhite, false, root, 0.35, 0.1)
+	_painted_text("SELAMAT DATANG", Vector3(0, 4.96, front_z + ent_depth + 0.24), 0.0, 0.016, Color("#fbf1e6"), Color(0,0,0,0), root)
+	for cx in [-7.0, 7.0]:
+		_cylinder("Canopy post", Vector3(cx, 2.48, front_z + ent_depth), 0.16, 4.96, red, root)
+		_box("Canopy post base", Vector3(cx, 0.12, front_z + ent_depth), Vector3(0.5, 0.24, 0.5), red_dark, false, root, 0.5)
+	for dx in [-6.0, -2.0, 2.0, 6.0]:
+		_box("Canopy downlight", Vector3(dx, 4.90, front_z + 2.6), Vector3(0.30, 0.03, 0.30), Color("#fff2d6"), false, root, 0.2, 0.0, false, Color("#ffe6b8"))
+		var cl := OmniLight3D.new()
+		cl.position = pos + Vector3(dx, 4.45, front_z + 2.2)
+		cl.light_color = Color("#ffe1ae"); cl.light_energy = 0.16; cl.omni_range = 8.0
+		cl.shadow_enabled = false
+		add_child(cl)
 
-	# --- Interior: central atrium, household wing left, office wing right ---
+	# --- Interior L1: atrium, sayap rumah (barat), sayap kantor (timur) ---
 	var atrium_w := 16.0
 	var atrium_d := 24.0
 	_box("Atrium floor", Vector3(0, 0.10, 0), Vector3(atrium_w, 0.04, atrium_d), floor_mat, true, root, 0.35, 0.05)
-	_box("Atrium rug", Vector3(0, 0.12, 2.0), Vector3(10.0, 0.02, 14.0), Color("#c9c7c0"), false, root, 0.8)
-	# Reception / info desk facing the entrance.
-	_box("Reception desk base", Vector3(0, 0.80, 7.0), Vector3(5.0, 1.1, 2.2), Color("#c8b89a"), true, root, 0.7)
+	_box("Atrium rug", Vector3(0, 0.12, 2.0), Vector3(10.0, 0.02, 14.0), Color("#cfc9bc"), false, root, 0.8)
+	# Inlay merah tipis mengelilingi atrium.
+	_box("Atrium inlay N", Vector3(0, 0.135, -11.85), Vector3(15.6, 0.01, 0.22), red, false, root, 0.6)
+	_box("Atrium inlay S", Vector3(0, 0.135, 11.85), Vector3(15.6, 0.01, 0.22), red, false, root, 0.6)
+	for ix in [-7.85, 7.85]:
+		_box("Atrium inlay E-W", Vector3(ix, 0.135, 0), Vector3(0.22, 0.01, 23.7), red, false, root, 0.6)
+	# Meja informasi: dasar putih, panel depan merah, papan nama merah.
+	_box("Reception desk base", Vector3(0, 0.80, 7.0), Vector3(5.0, 1.1, 2.2), white, true, root, 0.7)
+	_box("Reception front", Vector3(0, 0.76, 8.12), Vector3(4.8, 0.9, 0.06), red, false, root, 0.5, 0.1)
 	_box("Reception desk top", Vector3(0, 1.92, 7.0), Vector3(5.4, 0.10, 2.5), floor_c, false, root, 0.3, 0.05)
-	_painted_text("INFORMASI", Vector3(0, 2.06, 8.0), 0.0, 0.0038, Color("#fff6f2"), Color(0,0,0,0), root)
-	_painted_text("KOPDES MERAH PUTIH", Vector3(0, 1.76, 8.0), 0.0, 0.0030, Color("#5a5a58"), Color(0,0,0,0), root)
-	# Left wing: household needs.
-	_box("Home wing sign", Vector3(-20.0, 2.55, 4.0), Vector3(12.0, 0.75, 0.08), Color("#f3ead8"), false, root, 0.5)
-	_painted_text("KEBUTUHAN RUMAH", Vector3(-20.0, 2.55, 4.06), 0.0, 0.0036, Color("#5a4a3a"), Color(0,0,0,0), root)
-	_box("Home counter", Vector3(-16.0, 0.7, 9.5), Vector3(4.8, 1.2, 2.0), Color("#c8b89a"), true, root, 0.7)
+	_box("Reception sign", Vector3(0, 2.30, 7.9), Vector3(4.2, 0.58, 0.10), red, false, root, 0.5, 0.1)
+	_painted_text("INFORMASI", Vector3(0, 2.30, 7.97), 0.0, 0.010, Color("#fff6f2"), Color(0,0,0,0), root)
+	# Sayap barat: kebutuhan rumah.
+	_box("Home wing sign", Vector3(-20.0, 2.65, 4.0), Vector3(13.0, 0.85, 0.10), red, false, root, 0.5, 0.1)
+	_painted_text("KEBUTUHAN RUMAH", Vector3(-20.0, 2.65, 4.08), 0.0, 0.011, Color("#fdf3e8"), Color(0,0,0,0), root)
+	_box("Home counter", Vector3(-16.0, 0.70, 9.5), Vector3(4.8, 1.2, 2.0), white, true, root, 0.7)
+	_box("Home counter front", Vector3(-16.0, 0.64, 10.52), Vector3(4.6, 0.9, 0.05), red, false, root, 0.5, 0.1)
 	for gx in [-24.0, -18.0, -12.0]:
 		for gz in [-12.0, -6.0, 0.0, 6.0, 12.0]:
-			_box("Home shelf", Vector3(gx, 1.15, gz), Vector3(2.0, 2.4, 3.4), Color("#bfae8a"), true, root, 0.72)
+			_box("Home shelf", Vector3(gx, 1.15, gz), Vector3(2.0, 2.4, 3.4), Color("#c3b08a"), true, root, 0.72)
+			_box("Home shelf cap", Vector3(gx, 2.36, gz), Vector3(2.05, 0.09, 3.45), red, false, root, 0.55, 0.1)
 			for gy in [0.55, 1.15]:
-				_box("Home goods", Vector3(gx, gy, gz), Vector3(1.5, 0.2, 2.8), Color("#ddd4c2"), false, root, 0.82)
-	# Right wing: office needs.
-	_box("Office wing sign", Vector3(20.0, 2.55, 4.0), Vector3(12.0, 0.75, 0.08), Color("#eef3ec"), false, root, 0.5)
-	_painted_text("KEBUTUHAN KANTOR", Vector3(20.0, 2.55, 4.06), 0.0, 0.0036, Color("#3f4a44"), Color(0,0,0,0), root)
-	_box("Office counter", Vector3(16.0, 0.7, 9.5), Vector3(4.8, 1.2, 2.0), Color("#b8c4b8"), true, root, 0.7)
+				_box("Home goods", Vector3(gx, gy, gz), Vector3(1.5, 0.2, 2.8), Color("#e3dac8"), false, root, 0.82)
+	# Sayap timur: kebutuhan kantor.
+	_box("Office wing sign", Vector3(20.0, 2.65, 4.0), Vector3(13.0, 0.85, 0.10), red, false, root, 0.5, 0.1)
+	_painted_text("KEBUTUHAN KANTOR", Vector3(20.0, 2.65, 4.08), 0.0, 0.011, Color("#fdf3e8"), Color(0,0,0,0), root)
+	_box("Office counter", Vector3(16.0, 0.70, 9.5), Vector3(4.8, 1.2, 2.0), white, true, root, 0.7)
+	_box("Office counter front", Vector3(16.0, 0.64, 10.52), Vector3(4.6, 0.9, 0.05), red, false, root, 0.5, 0.1)
 	for gx in [12.0, 18.0, 24.0]:
 		for gz in [-12.0, -6.0, 0.0, 6.0, 12.0]:
-			_box("Office shelf", Vector3(gx, 1.15, gz), Vector3(2.0, 2.4, 3.4), Color("#aeb8ad"), true, root, 0.72)
+			_box("Office shelf", Vector3(gx, 1.15, gz), Vector3(2.0, 2.4, 3.4), Color("#b8bfb2"), true, root, 0.72)
+			_box("Office shelf cap", Vector3(gx, 2.36, gz), Vector3(2.05, 0.09, 3.45), red, false, root, 0.55, 0.1)
 			for gy in [0.55, 1.15]:
-				_box("Office goods", Vector3(gx, gy, gz), Vector3(1.5, 0.2, 2.8), Color("#e2e8e0"), false, root, 0.82)
-	# Back: cashier / service center.
-	_box("Cashier desk", Vector3(0, 0.7, -13.0), Vector3(8.0, 1.3, 2.6), Color("#c8b89a"), true, root, 0.7)
-	_box("Cashier top", Vector3(0, 1.4, -13.0), Vector3(8.4, 0.10, 2.9), floor_c, false, root, 0.3, 0.05)
-	_painted_text("KASIR PUSAT  ·  LAYANAN PELANGGAN", Vector3(0, 1.55, -14.2), 0.0, 0.0038, Color("#3a3a38"), Color(0,0,0,0), root)
+				_box("Office goods", Vector3(gx, gy, gz), Vector3(1.5, 0.2, 2.8), Color("#e6ebe4"), false, root, 0.82)
+	# Cahaya hangat interior agar jendela kaca depan terbaca dari luar.
+	for lx in [-20.0, -30.0, 20.0, 30.0]:
+		var il := OmniLight3D.new()
+		il.position = pos + Vector3(lx, 3.40, 15.0)
+		il.light_color = Color("#ffe6bc")
+		il.light_energy = 0.34
+		il.omni_range = 12.0
+		il.shadow_enabled = false
+		add_child(il)
+	for lx in [-4.0, 4.0]:
+		var il2 := OmniLight3D.new()
+		il2.position = pos + Vector3(lx, 3.60, 19.0)
+		il2.light_color = Color("#ffe6bc")
+		il2.light_energy = 0.38
+		il2.omni_range = 10.0
+		il2.shadow_enabled = false
+		add_child(il2)
+	# Kasir pusat di belakang atrium.
+	_box("Cashier desk", Vector3(0, 0.70, -13.0), Vector3(8.0, 1.3, 2.6), white, true, root, 0.7)
+	_box("Cashier front", Vector3(0, 0.64, -11.68), Vector3(7.8, 0.95, 0.05), red, false, root, 0.5, 0.1)
+	_box("Cashier top", Vector3(0, 1.40, -13.0), Vector3(8.4, 0.10, 2.9), floor_c, false, root, 0.3, 0.05)
+	_box("Cashier sign", Vector3(0, 2.15, -13.4), Vector3(7.6, 0.55, 0.10), red, false, root, 0.5, 0.1)
+	_painted_text("KASIR PUSAT  ·  LAYANAN", Vector3(0, 2.15, -13.33), 0.0, 0.010, Color("#fdf3e8"), Color(0,0,0,0), root)
 
-	# --- Ceiling lighting (emissive grid + sparse real lights) ---
+	# --- Mezzanine L2: pelat mengelilingi void atrium ---
+	# Void: x -8..8, z -12..12. Pelat: barat/timur 21 m, utara/selatan 7 m.
+	_box("Mezz slab W", Vector3(-18.5, mezz_y, 0), Vector3(21.0, 0.24, 38.0), floor_c, false, root, 0.6)
+	_box("Mezz slab E", Vector3(18.5, mezz_y, 0), Vector3(21.0, 0.24, 38.0), floor_c, false, root, 0.6)
+	_box("Mezz slab N", Vector3(0, mezz_y, -15.5), Vector3(16.0, 0.24, 7.0), floor_c, false, root, 0.6)
+	_box("Mezz slab S", Vector3(0, mezz_y, 15.5), Vector3(16.0, 0.24, 7.0), floor_c, false, root, 0.6)
+	# Fasia merah tepi void + nosing.
+	for fx in [-8.0, 8.0]:
+		_box("Mezz void fascia", Vector3(fx, 5.10, 0), Vector3(0.14, 0.60, 24.0), red, false, root, 0.5, 0.12)
+		_box("Mezz nosing", Vector3(fx, 5.45, 0), Vector3(0.20, 0.05, 24.0), offwhite, false, root, 0.4)
+	_box("Mezz void fascia N", Vector3(0, 5.10, -12.0), Vector3(16.0, 0.60, 0.14), red, false, root, 0.5, 0.12)
+	_box("Mezz void fascia S A", Vector3(-2.4, 5.10, 12.0), Vector3(11.2, 0.60, 0.14), red, false, root, 0.5, 0.12)
+	_box("Mezz void fascia S B", Vector3(7.2, 5.10, 12.0), Vector3(1.6, 0.60, 0.14), red, false, root, 0.5, 0.12)
+	# Railing kaca + handrail merah (celah di sisi selatan untuk eskalator).
+	_box("Rail W glass", Vector3(-8.03, 5.98, 0), Vector3(0.05, 1.05, 24.0), Color(0.72, 0.82, 0.86, 0.22), false, root, 0.06, 0.02, true)
+	_box("Rail E glass", Vector3(8.03, 5.98, 0), Vector3(0.05, 1.05, 24.0), Color(0.72, 0.82, 0.86, 0.22), false, root, 0.06, 0.02, true)
+	_box("Rail N glass", Vector3(0, 5.98, -12.03), Vector3(16.0, 1.05, 0.05), Color(0.72, 0.82, 0.86, 0.22), false, root, 0.06, 0.02, true)
+	_box("Rail S glass A", Vector3(-2.4, 5.98, 12.03), Vector3(11.2, 1.05, 0.05), Color(0.72, 0.82, 0.86, 0.22), false, root, 0.06, 0.02, true)
+	_box("Rail S glass B", Vector3(7.2, 5.98, 12.03), Vector3(1.6, 1.05, 0.05), Color(0.72, 0.82, 0.86, 0.22), false, root, 0.06, 0.02, true)
+	_box("Rail W top", Vector3(-8.03, 6.55, 0), Vector3(0.12, 0.08, 24.2), red, false, root, 0.4, 0.15)
+	_box("Rail E top", Vector3(8.03, 6.55, 0), Vector3(0.12, 0.08, 24.2), red, false, root, 0.4, 0.15)
+	_box("Rail N top", Vector3(0, 6.55, -12.03), Vector3(16.2, 0.08, 0.12), red, false, root, 0.4, 0.15)
+	_box("Rail S top A", Vector3(-2.4, 6.55, 12.03), Vector3(11.4, 0.08, 0.12), red, false, root, 0.4, 0.15)
+	_box("Rail S top B", Vector3(7.2, 6.55, 12.03), Vector3(1.8, 0.08, 0.12), red, false, root, 0.4, 0.15)
+	for p in [Vector2(-8.0, -12.0), Vector2(8.0, -12.0), Vector2(-8.0, 12.0), Vector2(8.0, 12.0), Vector2(0.0, -12.0), Vector2(0.0, 12.0)]:
+		_box("Rail post", Vector3(p.x, 5.98, p.y), Vector3(0.09, 1.12, 0.09), red, false, root, 0.4, 0.2)
+	for p in [Vector2(-8.0, -6.0), Vector2(-8.0, 6.0), Vector2(8.0, -6.0), Vector2(8.0, 6.0)]:
+		_box("Rail post", Vector3(float(p.x), 5.98, float(p.y)), Vector3(0.09, 1.12, 0.09), red, false, root, 0.4, 0.2)
+
+	# --- Dinding display lantai dua + toko ---
+	_box("Upper wall W", Vector3(-28.7, 8.10, 0), Vector3(0.24, 5.4, 38.0), white_shade, false, root, 0.85)
+	_box("Upper wall E", Vector3(28.7, 8.10, 0), Vector3(0.24, 5.4, 38.0), white_shade, false, root, 0.85)
+	_box("Upper wall N", Vector3(0, 8.10, -18.7), Vector3(58.0, 5.4, 0.24), white_shade, false, root, 0.85)
+	_box("Upper wall S", Vector3(0, 8.10, 18.7), Vector3(58.0, 5.4, 0.24), white_shade, false, root, 0.85)
+	# Etalase kaca + kusen merah pada tiap dinding.
+	_box("Upper glass W", Vector3(-28.52, 7.05, 0), Vector3(0.06, 2.6, 24.0), glass_tint, false, root, 0.10, 0.05, true)
+	_box("Upper glass E", Vector3(28.52, 7.05, 0), Vector3(0.06, 2.6, 24.0), glass_tint, false, root, 0.10, 0.05, true)
+	_box("Upper glass N", Vector3(0, 7.05, -18.52), Vector3(24.0, 2.6, 0.06), glass_tint, false, root, 0.10, 0.05, true)
+	_box("Upper glass S", Vector3(0, 7.05, 18.52), Vector3(24.0, 2.6, 0.06), glass_tint, false, root, 0.10, 0.05, true)
+	for mz in [-12.0, -6.0, 0.0, 6.0, 12.0]:
+		_box("Upper mullion W", Vector3(-28.52, 7.05, mz), Vector3(0.10, 2.65, 0.10), red, false, root, 0.42, 0.2)
+		_box("Upper mullion E", Vector3(28.52, 7.05, mz), Vector3(0.10, 2.65, 0.10), red, false, root, 0.42, 0.2)
+	for mx in [-12.0, -6.0, 0.0, 6.0, 12.0]:
+		_box("Upper mullion N", Vector3(mx, 7.05, -18.52), Vector3(0.10, 2.65, 0.10), red, false, root, 0.42, 0.2)
+		_box("Upper mullion S", Vector3(mx, 7.05, 18.52), Vector3(0.10, 2.65, 0.10), red, false, root, 0.42, 0.2)
+	# Papan nama lantai dua.
+	_box("Upper sign W", Vector3(-28.56, 9.00, 0), Vector3(0.14, 0.95, 16.0), red, false, root, 0.5, 0.12)
+	_box("Upper sign E", Vector3(28.56, 9.00, 0), Vector3(0.14, 0.95, 16.0), red, false, root, 0.5, 0.12)
+	_box("Upper sign N", Vector3(0, 9.00, -18.56), Vector3(20.0, 0.95, 0.14), red, false, root, 0.5, 0.12)
+	_box("Upper sign S", Vector3(0, 9.00, 18.56), Vector3(20.0, 0.95, 0.14), red, false, root, 0.5, 0.12)
+	_painted_text("PERABOT RUMAH", Vector3(-28.46, 9.00, 0), PI * 0.5, 0.019, Color("#fdf3e8"), Color(0,0,0,0), root)
+	_painted_text("PERLENGKAPAN KANTOR", Vector3(28.46, 9.00, 0), -PI * 0.5, 0.019, Color("#fdf3e8"), Color(0,0,0,0), root)
+	_painted_text("KAFETARIA", Vector3(0, 9.00, -18.46), 0.0, 0.022, Color("#fdf3e8"), Color(0,0,0,0), root)
+	_painted_text("BUKU & MAINAN", Vector3(0, 9.00, 18.46), PI, 0.020, Color("#fdf3e8"), Color(0,0,0,0), root)
+
+	# --- Isi mezzanine: meja display, kafe, toko buku ---
+	for sx in [-1.0, 1.0]:
+		for dz in [-8.0, 0.0, 8.0]:
+			_box("Upper display table", Vector3(sx * 19.0, 5.80, dz), Vector3(4.6, 0.75, 1.6), white, false, root, 0.6)
+			_box("Upper display trim", Vector3(sx * 19.0, 6.19, dz), Vector3(4.7, 0.06, 1.7), red, false, root, 0.5, 0.1)
+			_box("Upper display goods", Vector3(sx * 19.0, 6.30, dz), Vector3(2.4, 0.22, 1.0), Color("#cdbfa4"), false, root, 0.8)
+		for dz in [-6.0, 6.0]:
+			_box("Upper rack", Vector3(sx * 26.5, 6.45, dz), Vector3(1.1, 2.0, 4.0), Color("#b9ac90"), false, root, 0.72)
+			_box("Upper rack cap", Vector3(sx * 26.5, 7.48, dz), Vector3(1.15, 0.08, 4.05), red, false, root, 0.55, 0.1)
+	# Kafe di sisi utara.
+	_box("Cafe counter", Vector3(0, 5.97, -16.7), Vector3(12.0, 1.1, 1.2), white, false, root, 0.65)
+	_box("Cafe counter front", Vector3(0, 5.88, -16.08), Vector3(11.8, 0.85, 0.06), red, false, root, 0.5, 0.1)
+	_box("Cafe machine", Vector3(-3.4, 6.85, -16.7), Vector3(1.2, 0.65, 0.8), Color("#8f9490"), false, root, 0.4, 0.5)
+	for tx in [-6.0, 0.0, 6.0]:
+		_cylinder("Cafe table", Vector3(tx, 6.02, -14.2), 0.66, 0.06, Color("#a98f6a"), root)
+		_cylinder("Cafe table leg", Vector3(tx, 5.72, -14.2), 0.08, 0.6, Color("#5a5348"), root)
+		for chx in [-0.95, 0.95]:
+			_box("Cafe chair", Vector3(tx + chx, 5.70, -14.2), Vector3(0.46, 0.5, 0.46), white, false, root, 0.65)
+	# Toko buku/mainan di sisi selatan.
+	for bx in [-5.0, 1.0, 7.0]:
+		_box("Book table", Vector3(bx, 5.80, 16.2), Vector3(3.0, 0.75, 1.5), white, false, root, 0.6)
+		_box("Book table trim", Vector3(bx, 6.19, 16.2), Vector3(3.1, 0.06, 1.6), red, false, root, 0.5, 0.1)
+		_box("Book stack", Vector3(bx, 6.34, 16.2), Vector3(1.6, 0.26, 0.9), Color("#b9c4b4"), false, root, 0.8)
+
+	# --- Eskalator: lantai 1 ke mezzanine (visual, di sisi timur atrium) ---
+	var esc := Node3D.new()
+	esc.name = "Escalator"
+	# Pivot dipilih agar ujung atas tepat di tepi pelat (z=12, y=5.42).
+	esc.position = Vector3(4.8, 2.82, 7.5)
+	esc.rotation.x = -atan2(5.2, 9.0)
+	root.add_child(esc)
+	_box("Escalator body", Vector3.ZERO, Vector3(1.9, 0.26, 10.4), Color("#8c8880"), false, esc, 0.7)
+	for st in range(14):
+		var sz := -4.75 + 0.72 * float(st)
+		_box("Escalator step", Vector3(0, 0.18, sz), Vector3(1.6, 0.07, 0.52), Color("#c8c3b7"), false, esc, 0.75)
+	for bal in [-1.0, 1.0]:
+		_box("Escalator glass", Vector3(bal, 0.78, 0), Vector3(0.06, 1.15, 10.2), Color(0.74, 0.84, 0.88, 0.20), false, esc, 0.08, 0.02, true)
+		_box("Escalator handrail", Vector3(bal, 1.40, 0), Vector3(0.12, 0.09, 10.4), red, false, esc, 0.45, 0.15)
+	_box("Escalator landing low", Vector3(4.8, 0.14, 3.2), Vector3(3.2, 0.10, 2.4), Color("#b7b2a6"), false, root, 0.7)
+	_box("Escalator landing high", Vector3(4.8, 5.37, 13.0), Vector3(3.2, 0.10, 2.4), Color("#b7b2a6"), false, root, 0.7)
+	_box("Escalator comb low", Vector3(4.8, 0.19, 3.4), Vector3(1.8, 0.06, 0.4), red, false, root, 0.5)
+	_box("Escalator comb high", Vector3(4.8, 5.43, 12.0), Vector3(1.8, 0.06, 0.4), red, false, root, 0.5)
+
+	# --- Plafon lantai dua + skylight + lampu ---
+	_box("Mezz ceiling W", Vector3(-18.5, 10.84, 0), Vector3(21.0, 0.08, 38.0), offwhite, false, root, 0.8)
+	_box("Mezz ceiling E", Vector3(18.5, 10.84, 0), Vector3(21.0, 0.08, 38.0), offwhite, false, root, 0.8)
+	_box("Mezz ceiling N", Vector3(0, 10.84, -15.5), Vector3(16.0, 0.08, 7.0), offwhite, false, root, 0.8)
+	_box("Mezz ceiling S", Vector3(0, 10.84, 15.5), Vector3(16.0, 0.08, 7.0), offwhite, false, root, 0.8)
+	_box("Atrium skylight", Vector3(0, 10.94, 0), Vector3(15.2, 0.06, 23.2), Color("#e8f4ff"), false, root, 0.15, 0.0, false, Color("#dcefff"))
+	for sx in [-7.4, -3.7, 0.0, 3.7, 7.4]:
+		_box("Skylight mullion", Vector3(sx, 10.90, 0), Vector3(0.10, 0.08, 23.4), red, false, root, 0.45, 0.1)
+	for sz in [-11.4, 0.0, 11.4]:
+		_box("Skylight mullion", Vector3(0, 10.90, sz), Vector3(15.4, 0.08, 0.10), red, false, root, 0.45, 0.1)
+	for lx in [-20.0, -12.0, 12.0, 20.0]:
+		for lz in [-14.0, 0.0, 14.0]:
+			_box("Upper light", Vector3(lx, 10.80, lz), Vector3(1.6, 0.06, 1.6), Color("#fff1d4"), false, root, 0.2, 0.0, false, Color("#ffe9c4"))
+	# Tanaman di tepi void mezzanine.
+	for tp in [Vector3(-7.0, 5.42, -11.2), Vector3(7.0, 5.42, -11.2), Vector3(-7.0, 5.42, 11.2), Vector3(7.0, 5.42, 11.2)]:
+		_add_plant(pos + tp, 0.55)
+
+	# --- Pencahayaan: plafon lantai 1, mezzanine, dan atrium ---
 	for lx in [-24.0, -12.0, 0.0, 12.0, 24.0]:
 		for lz in [-14.0, -7.0, 0.0, 7.0, 14.0]:
-			_box("Recessed light", Vector3(lx, wall_h - 0.4, lz), Vector3(1.0, 0.08, 1.0), Color("#f3e8c8"), false, root, 0.22, 0.05, false, Color("#f0e8d8"))
+			_box("Recessed light", Vector3(lx, 4.72, lz), Vector3(1.0, 0.06, 1.0), Color("#fff0d2"), false, root, 0.22, 0.05, false, Color("#ffe9c8"))
 	for lx in [-20.0, 0.0, 20.0]:
 		for lz in [-12.0, 0.0, 12.0]:
 			var ml := OmniLight3D.new()
-			ml.position = pos + Vector3(lx, wall_h - 1.2, lz)
-			ml.light_color = Color("#f3efe8")
-			ml.light_energy = 0.2
-			ml.omni_range = 11.0
+			ml.position = pos + Vector3(lx, 4.25, lz)
+			ml.light_color = Color("#fff0dc")
+			ml.light_energy = 0.34
+			ml.omni_range = 14.0
 			ml.shadow_enabled = false
 			add_child(ml)
+	for lx in [-18.0, 18.0]:
+		for lz in [-14.0, 14.0]:
+			var ml2 := OmniLight3D.new()
+			ml2.position = pos + Vector3(lx, 9.90, lz)
+			ml2.light_color = Color("#fff0dc")
+			ml2.light_energy = 0.48
+			ml2.omni_range = 18.0
+			ml2.shadow_enabled = false
+			add_child(ml2)
+	for lx in [-25.0, 25.0]:
+		for lz in [-8.0, 8.0]:
+			var ml3 := OmniLight3D.new()
+			ml3.position = pos + Vector3(lx, 9.30, lz)
+			ml3.light_color = Color("#fff0dc")
+			ml3.light_energy = 0.30
+			ml3.omni_range = 12.0
+			ml3.shadow_enabled = false
+			add_child(ml3)
+	for lx in [-5.0, 5.0]:
+		for lz in [-8.0, 8.0]:
+			var ml4 := OmniLight3D.new()
+			ml4.position = pos + Vector3(lx, 7.60, lz)
+			ml4.light_color = Color("#ffe9c8")
+			ml4.light_energy = 0.28
+			ml4.omni_range = 12.0
+			ml4.shadow_enabled = false
+			add_child(ml4)
+	# Lampu gantung atrium.
+	for px in [-4.0, 0.0, 4.0]:
+		_box("Pendant cable", Vector3(px, 9.55, 0), Vector3(0.03, 2.7, 0.03), Color("#3f3d39"), false, root, 0.5)
+		_box("Pendant shade", Vector3(px, 8.12, 0), Vector3(0.62, 0.24, 0.62), red, false, root, 0.5, 0.1)
+		_box("Pendant bulb", Vector3(px, 7.98, 0), Vector3(0.30, 0.16, 0.30), Color("#fff4dc"), false, root, 0.2, 0.0, false, Color("#ffe7bc"))
+	var al := OmniLight3D.new()
+	al.position = pos + Vector3(0, 8.4, 0)
+	al.light_color = Color("#ffe8c6")
+	al.light_energy = 0.60
+	al.omni_range = 24.0
+	al.shadow_enabled = false
+	add_child(al)
+
+	# --- Punggung mall (-Z): signage besar menghadap boulevard + parkir ---
+	_box("Rear sign band", Vector3(0, 9.40, -mall_d * 0.5 - 0.42), Vector3(34.0, 1.85, 0.22), red, false, root, 0.5, 0.12, false, Color(0.18, 0.04, 0.03))
+	_box("Rear sign rule top", Vector3(0, 10.32, -mall_d * 0.5 - 0.54), Vector3(34.2, 0.05, 0.05), offwhite, false, root, 0.3, 0.1)
+	_box("Rear sign rule bottom", Vector3(0, 8.48, -mall_d * 0.5 - 0.54), Vector3(34.2, 0.05, 0.05), offwhite, false, root, 0.3, 0.1)
+	_raised_text("KOPDES MERAH PUTIH", Vector3(0, 9.72, -mall_d * 0.5 - 0.60), PI, 1.28, 0.14, offwhite, root)
+	_painted_text("PARKIR  ·  MASUK DARI BOULEVARD", Vector3(0, 8.92, -mall_d * 0.5 - 0.60), PI, 0.011, Color("#f8e9dd"), Color(0,0,0,0), root)
+	for wx in [-18.0, 18.0]:
+		for wy in [2.95, 7.20]:
+			_box("Rear window", Vector3(wx, wy, -mall_d * 0.5 - 0.40), Vector3(10.0, 2.2, 0.08), smoked, false, root, 0.18, 0.25)
+			_box("Rear window frame top", Vector3(wx, wy + 1.20, -mall_d * 0.5 - 0.46), Vector3(10.4, 0.18, 0.12), red, false, root, 0.45, 0.15)
+			_box("Rear window frame bottom", Vector3(wx, wy - 1.20, -mall_d * 0.5 - 0.46), Vector3(10.4, 0.18, 0.12), red, false, root, 0.45, 0.15)
+			for fx in [wx - 4.91, wx + 4.91]:
+				_box("Rear window jamb", Vector3(fx, wy, -mall_d * 0.5 - 0.46), Vector3(0.18, 2.4, 0.12), red, false, root, 0.45, 0.15)
+			_box("Rear window mullion", Vector3(wx, wy, -mall_d * 0.5 - 0.50), Vector3(0.10, 2.2, 0.10), red, false, root, 0.42, 0.2)
+	# Kanopi pintu layanan belakang (tanpa tiang, menempel dinding).
+	_box("Rear canopy", Vector3(0, 4.62, -mall_d * 0.5 - 1.66), Vector3(13.0, 0.18, 3.2), offwhite, false, root, 0.6)
+	_box("Rear canopy fascia", Vector3(0, 4.52, -mall_d * 0.5 - 3.22), Vector3(13.0, 0.52, 0.12), red, false, root, 0.5, 0.1)
+	_box("Rear canopy trim", Vector3(0, 4.80, -mall_d * 0.5 - 3.22), Vector3(13.1, 0.05, 0.05), offwhite, false, root, 0.35, 0.1)
+	for dx in [-4.2, 0.0, 4.2]:
+		_box("Rear canopy light", Vector3(dx, 4.50, -mall_d * 0.5 - 2.4), Vector3(0.30, 0.03, 0.30), Color("#fff2d6"), false, root, 0.2, 0.0, false, Color("#ffe6b8"))
 
 	# --- Rear parking (x=152..208, z=72..80.5) + service path ---
 	_box("Mall rear parking", Vector3(0, -0.005, -29.0), Vector3(56.0, 0.07, 8.5), Color("#4f5855"), true, root, 0.6)
 	for bx in range(11):
-		_box("Rear bay line", Vector3(-26.0 + 5.2 * float(bx), 0.042, -29.0), Vector3(0.12, 0.012, 7.0), Color("#f0f1ea"), false, root)
+		var lx := -26.0 + 5.2 * float(bx)
+		# Keep the service drive (x=176..184) clear of its centre marking.
+		if absf(lx) < 1.0:
+			continue
+		_box("Rear bay line", Vector3(lx, 0.042, -29.0), Vector3(0.12, 0.012, 7.0), Color("#f0f1ea"), false, root)
 	_box("Rear service path", Vector3(0, -0.01, -23.2), Vector3(3.0, 0.12, 3.4), Color("#c9d0c6"), true, root, 0.62)
-	_box("Rear service door", Vector3(0, 1.2, -22.3), Vector3(2.2, 2.4, 0.12), charcoal, false, root, 0.4)
+	_box("Rear service door", Vector3(0, 1.2, -22.3), Vector3(2.2, 2.4, 0.12), red_dark, false, root, 0.45, 0.1)
+	_box("Rear service frame", Vector3(0, 2.48, -22.26), Vector3(2.5, 0.14, 0.10), offwhite, false, root, 0.4)
 	# Low hedge screening the parking (gap at the service drive).
 	for hx in [-16.0, 16.0]:
 		_box("Rear hedge", Vector3(hx, 0.24, -23.3), Vector3(28.0, 0.48, 0.5), Color("#5f7d63"), true, root, 0.9)
 
-	# --- Forecourt planters/trees and approach lamps ---
+	# --- Forecourt: tiang bendera merah-putih, planter, pohon, lampu ---
+	for fx in [-12.0, 0.0, 12.0]:
+		_cylinder("Mall flag pole", Vector3(fx, 3.10, 29.0), 0.06, 6.2, Color("#9aa3a0"), root)
+		_box("Mall flag red", Vector3(fx + 0.60, 5.72, 29.0), Vector3(1.15, 0.36, 0.04), red, false, root, 0.6)
+		_box("Mall flag white", Vector3(fx + 0.60, 5.36, 29.0), Vector3(1.15, 0.36, 0.04), offwhite, false, root, 0.6)
 	for px in [-28.0, 28.0]:
-		_box("Planter", Vector3(px, 0.33, 25.0), Vector3(2.4, 0.62, 2.4), Color("#b7c0aa"), false, root, 0.55)
+		_box("Planter", Vector3(px, 0.33, 25.0), Vector3(2.4, 0.62, 2.4), offwhite, false, root, 0.6)
+		_box("Planter trim", Vector3(px, 0.58, 25.0), Vector3(2.45, 0.10, 2.45), red, false, root, 0.5, 0.1)
 		_add_plant(pos + Vector3(px, 0.95, 25.0), 0.85)
 	for tx in [-30.0, 30.0]:
 		_trees_pending.append(pos + Vector3(tx, 0.0, 32.0))
 	for lx in [-20.0, 20.0]:
 		_lamps_pending.append(pos + Vector3(lx, 0.0, 26.0))
-	# Mall wing trees/hedge along the promenade side.
+	# Mall wing trees on the promenade strip, clear of the podium footprint.
 	for tz in [-12.0, 4.0]:
-		_trees_pending.append(pos + Vector3(-30.0, 0.0, tz))
+		_trees_pending.append(pos + Vector3(-36.0, 0.0, tz))
 
 func _build_kopdes_merah_putih() -> void:
-	# Kopdes Merah Putih (iconic 2 lantai) — landmark lokal; estetika netral
-	# per VISUAL-STYLE-GUIDE.md: tanpa merah menyala, tanpa glow berlebihan.
+	# Kopdes Merah Putih (2 lantai) — landmark komersial dengan identitas
+	# merah-putih: plinth, pita lantai, kanopi, dan papan nama merah.
 	var l: Dictionary = kopdes_merah_putih_layout()
 	var b: Vector3 = l.get("base", TOWN_ORIGIN + Vector3(-44,0,40))
 	var root := Node3D.new(); root.name = "KopdesMerahPutih"; root.position = b; add_child(root)
-	var accent := Color("#6f5e4e")   # restrained warm timber
-	var white := Color("#f4f1ea"); var glass := Color(0.55,0.7,0.74,0.20)
-	var frame := Color(0.16,0.18,0.19,0.55)  # dark aluminum mullion
-	_box("KMP lot", Vector3(0,-0.005,1.5), Vector3(18.0,0.09,15.0), Color("#b7c0aa"), true, root, 0.78)
-	_box("KMP building L1", Vector3(0,1.45,0), Vector3(14.0,2.9,11.0), white, true, root, 0.82)
-	_box("KMP building L2", Vector3(0,4.0,0), Vector3(14.0,2.2,11.0), white, true, root, 0.82)
-	_box("KMP roof", Vector3(0,5.25,0), Vector3(14.8,0.3,11.8), Color("#6f7a76"), false, root)
-	# Timber accents (pillars/canopy), restrained
-	_box("KMP lisplang", Vector3(0,5.0,5.55), Vector3(14.6,0.35,0.18), accent, false, root, 0.45)
-	for px in [-5.2,-1.8,1.8,5.2]: _box("KMP pillar", Vector3(px,2.1,5.55), Vector3(0.35,4.2,0.35), accent, false, root, 0.45)
-	_box("KMP canopy", Vector3(0,3.05,6.9), Vector3(10.5,0.16,2.6), accent, false, root, 0.5)
-	for cx in [-4.0,0.0,4.0]: _cylinder("KMP canopy post", Vector3(cx,1.5,7.9), 0.08,3.0, Color("#4a3f3a"), root)
-	# Large front glass
-	_box("KMP glass L", Vector3(-4.0,1.55,5.58), Vector3(4.2,2.4,0.08), glass, false, root, 0.12,0.08,true)
-	_box("KMP glass R", Vector3(4.0,1.55,5.58), Vector3(4.2,2.4,0.08), glass, false, root, 0.12,0.08,true)
-	# Sign board (understated, no red)
-	_box("KMP sign board", Vector3(0,3.85,5.62), Vector3(10.2,0.95,0.12), Color("#c8c6c0"), false, root, 0.4, 0.0, false, Color("#e0ded8"))
-	_painted_text("KOPERASI DESA MERAH PUTIH", Vector3(0,3.85,5.7), 0.0, 0.0044, Color("#2a2a29"), Color(0,0,0,0), root)
-	# Flag (neutral)
-	_cylinder("Flag pole", Vector3(-7.8,2.2,6.8), 0.05,4.4, Color("#9aa3a0"), root)
-	_box("Flag dark", Vector3(-7.25,3.95,6.8), Vector3(1.1,0.35,0.04), Color("#3a3a38"), false, root)
-	_box("Flag white", Vector3(-7.25,3.6,6.8), Vector3(1.1,0.35,0.04), white, false, root)
-	# Interior hint
-	_box("KMP counter", Vector3(0,0.55,-2.5), Vector3(3.2,1.1,1.2), Color("#c8b89a"), true, root)
-	_box("KMP shelf", Vector3(-4.8,1.0,-1.5), Vector3(1.2,2.0,4.5), Color("#cfc4b0"), true, root)
+	var red := Color("#a5322d")
+	var red_dark := Color("#842521")
+	var white := Color("#f5f1e7")
+	var offwhite := Color("#fbf8f0")
+	var glass := Color(0.55, 0.7, 0.74, 0.20)
+	_box("KMP lot", Vector3(0, -0.005, 1.5), Vector3(18.0, 0.09, 15.0), Color("#b7c0aa"), true, root, 0.78)
+	# Massa dua lantai putih + plinth/pita/parapet merah.
+	_box("KMP building L1", Vector3(0, 1.50, 0), Vector3(14.0, 3.0, 11.0), white, true, root, 0.82)
+	_box("KMP building L2", Vector3(0, 4.10, 0), Vector3(14.0, 2.2, 11.0), white, true, root, 0.82)
+	_box("KMP plinth", Vector3(0, 0.29, 0.02), Vector3(14.35, 0.58, 11.35), red_dark, false, root, 0.55, 0.1)
+	_box("KMP floor band", Vector3(0, 3.05, 0.02), Vector3(14.35, 0.40, 11.35), red, false, root, 0.5, 0.1)
+	_box("KMP floor band trim", Vector3(0, 3.30, 0.02), Vector3(14.4, 0.05, 11.4), offwhite, false, root, 0.35)
+	_box("KMP roof", Vector3(0, 5.30, 0), Vector3(14.8, 0.30, 11.8), Color("#d8d2c4"), false, root, 0.72)
+	_box("KMP parapet", Vector3(0, 5.52, 0), Vector3(14.9, 0.30, 11.9), red, false, root, 0.5, 0.1)
+	_box("KMP parapet cap", Vector3(0, 5.70, 0), Vector3(15.0, 0.10, 12.0), offwhite, false, root, 0.5)
+	# Pilaster sudut merah.
+	for px in [-6.85, 6.85]:
+		_box("KMP pilaster", Vector3(px, 2.65, 5.55), Vector3(0.45, 5.3, 0.30), red, false, root, 0.5, 0.1)
+		_box("KMP pilaster cap", Vector3(px, 5.28, 5.58), Vector3(0.55, 0.14, 0.36), offwhite, false, root, 0.5)
+	# Etalase lantai dasar: kaca, kusen merah, pintu tengah.
+	for gx in [-3.7, 3.7]:
+		_box("KMP glass", Vector3(gx, 1.80, 5.55), Vector3(4.3, 2.5, 0.08), glass, false, root, 0.12, 0.08, true)
+		_box("KMP glass frame", Vector3(gx, 1.80, 5.49), Vector3(4.45, 2.65, 0.08), red, false, root, 0.45, 0.15)
+		_box("KMP glass inner", Vector3(gx, 1.80, 5.56), Vector3(4.1, 2.35, 0.08), glass, false, root, 0.12, 0.08, true)
+	_box("KMP door frame", Vector3(0, 1.55, 5.56), Vector3(2.7, 3.1, 0.10), red, false, root, 0.45, 0.15)
+	_box("KMP door glass", Vector3(0, 1.55, 5.62), Vector3(2.35, 2.9, 0.06), glass, false, root, 0.10, 0.05, true)
+	_box("KMP door handle", Vector3(-0.35, 1.55, 5.68), Vector3(0.06, 0.8, 0.06), red_dark, false, root, 0.3, 0.6)
+	# Kanopi putih dengan fasia merah.
+	_box("KMP canopy", Vector3(0, 3.20, 6.55), Vector3(10.6, 0.18, 2.6), offwhite, false, root, 0.6)
+	_box("KMP canopy fascia", Vector3(0, 3.12, 7.82), Vector3(10.6, 0.42, 0.12), red, false, root, 0.5, 0.1)
+	for cx in [-4.4, 4.4]:
+		_cylinder("KMP canopy post", Vector3(cx, 1.65, 7.6), 0.10, 3.3, red, root)
+		_box("KMP post base", Vector3(cx, 0.12, 7.6), Vector3(0.36, 0.24, 0.36), red_dark, false, root, 0.5)
+	# Papan nama merah dengan huruf putih timbul.
+	_box("KMP sign board", Vector3(0, 4.28, 5.60), Vector3(12.2, 1.35, 0.14), red, false, root, 0.5, 0.12)
+	_box("KMP sign rule", Vector3(0, 4.98, 5.69), Vector3(12.3, 0.04, 0.04), offwhite, false, root, 0.3)
+	_raised_text("MERAH PUTIH", Vector3(0, 4.20, 5.72), 0.0, 0.62, 0.10, offwhite, root)
+	_painted_text("KOPERASI DESA", Vector3(0, 4.78, 5.72), 0.0, 0.0050, Color("#ffe9dd"), Color(0,0,0,0), root)
+	# Bendera merah putih di halaman.
+	_cylinder("Flag pole", Vector3(-7.8, 2.9, 6.8), 0.05, 5.8, Color("#9aa3a0"), root)
+	_box("Flag red", Vector3(-7.25, 5.55, 6.8), Vector3(1.1, 0.35, 0.04), red, false, root)
+	_box("Flag white", Vector3(-7.25, 5.20, 6.8), Vector3(1.1, 0.35, 0.04), offwhite, false, root)
+	# Interior hint.
+	_box("KMP counter", Vector3(0, 0.55, -2.5), Vector3(3.2, 1.1, 1.2), white, true, root)
+	_box("KMP counter front", Vector3(0, 0.52, -1.88), Vector3(3.0, 0.85, 0.05), red, false, root, 0.5, 0.1)
+	_box("KMP shelf", Vector3(-4.8, 1.0, -1.5), Vector3(1.2, 2.0, 4.5), Color("#cfc4b0"), true, root)
+	_add_plant(b + Vector3(8.0, 0.0, 7.2), 0.7)
+	var kl := OmniLight3D.new()
+	kl.position = b + Vector3(0, 2.9, 7.4)
+	kl.light_color = Color("#ffe6b8"); kl.light_energy = 0.16; kl.omni_range = 6.0
+	kl.shadow_enabled = false
+	add_child(kl)
 
 func _build_kopdes_unit() -> void:
-	# Kopdes Unit standard (1 lantai, cabang cepat) — estetika netral.
+	# Kopdes Unit (1 lantai, layanan cepat) — versi ringkas palet merah-putih.
 	var l: Dictionary = kopdes_unit_layout()
 	var b: Vector3 = l.get("base", TOWN_ORIGIN + Vector3(-44,0,68))
 	var root := Node3D.new(); root.name = "KopdesUnit"; root.position = b; add_child(root)
-	var accent := Color("#6f5e4e")
-	var white := Color("#f7f4ee")
-	_box("Unit lot", Vector3(0,-0.005,1.0), Vector3(14.0,0.09,12.0), Color("#b7c0aa"), true, root, 0.78)
-	_box("Unit building", Vector3(0,1.35,0), Vector3(10.5,2.7,8.5), white, true, root, 0.82)
-	_box("Unit roof", Vector3(0,2.85,0), Vector3(11.2,0.28,9.2), Color("#7a8580"), false, root)
-	_box("Unit sign", Vector3(0,2.35,4.32), Vector3(8.5,0.75,0.12), Color("#c8c6c0"), false, root, 0.4, 0.0, false, Color("#e0ded8"))
-	_painted_text("KOPDES UNIT", Vector3(0,2.35,4.4), 0.0, 0.0046, Color("#2a2a29"), Color(0,0,0,0), root)
-	_box("Unit glass", Vector3(0,1.25,4.3), Vector3(6.0,1.9,0.08), Color(0.55,0.7,0.74,0.22), false, root, 0.12,0.08,true)
-	_box("Unit counter", Vector3(0,0.55,-1.8), Vector3(2.6,1.1,1.0), Color("#c8b89a"), true, root)
-	_label("ATM / LAYANAN CEPAT", Vector3(0,1.35,-1.2), 0.0032, Color("#4a3f3a"))
+	var red := Color("#a5322d")
+	var red_dark := Color("#842521")
+	var white := Color("#f6f2e9")
+	var offwhite := Color("#fbf8f0")
+	var glass := Color(0.55, 0.7, 0.74, 0.22)
+	_box("Unit lot", Vector3(0, -0.005, 1.0), Vector3(14.0, 0.09, 12.0), Color("#b7c0aa"), true, root, 0.78)
+	_box("Unit building", Vector3(0, 1.55, 0), Vector3(10.5, 3.0, 8.5), white, true, root, 0.82)
+	_box("Unit plinth", Vector3(0, 0.27, 0.02), Vector3(10.75, 0.54, 8.75), red_dark, false, root, 0.55, 0.1)
+	_box("Unit roof", Vector3(0, 3.14, 0), Vector3(11.2, 0.28, 9.2), Color("#d8d2c4"), false, root, 0.72)
+	_box("Unit parapet", Vector3(0, 3.34, 0), Vector3(11.3, 0.22, 9.3), red, false, root, 0.5, 0.1)
+	_box("Unit glass", Vector3(0, 1.15, 4.27), Vector3(5.8, 1.6, 0.08), glass, false, root, 0.12, 0.08, true)
+	_box("Unit glass frame", Vector3(0, 1.15, 4.21), Vector3(6.1, 1.75, 0.08), red, false, root, 0.45, 0.15)
+	_box("Unit door frame", Vector3(0, 1.00, 4.28), Vector3(1.9, 1.9, 0.10), red_dark, false, root, 0.45, 0.15)
+	_box("Unit door glass", Vector3(0, 1.00, 4.33), Vector3(1.6, 1.75, 0.06), glass, false, root, 0.10, 0.05, true)
+	# Papan nama merah + huruf putih timbul.
+	_box("Unit sign", Vector3(0, 2.62, 4.30), Vector3(9.2, 0.82, 0.12), red, false, root, 0.5, 0.12)
+	_raised_text("KOPDES UNIT", Vector3(0, 2.62, 4.40), 0.0, 0.44, 0.08, offwhite, root)
+	# Kanopi putih bergaris merah.
+	_box("Unit canopy", Vector3(0, 2.05, 5.35), Vector3(8.2, 0.14, 1.9), offwhite, false, root, 0.6)
+	_box("Unit canopy fascia", Vector3(0, 1.99, 6.28), Vector3(8.2, 0.32, 0.10), red, false, root, 0.5, 0.1)
+	for cx in [-3.6, 3.6]:
+		_cylinder("Unit canopy post", Vector3(cx, 1.02, 6.1), 0.07, 2.05, red, root)
+	for px in [-5.05, 5.05]:
+		_box("Unit pilaster", Vector3(px, 1.62, 4.24), Vector3(0.32, 3.1, 0.24), red, false, root, 0.5, 0.1)
+	_cylinder("Unit flag pole", Vector3(6.2, 2.0, 4.4), 0.04, 4.0, Color("#9aa3a0"), root)
+	_box("Unit flag red", Vector3(6.55, 3.75, 4.4), Vector3(0.8, 0.25, 0.03), red, false, root)
+	_box("Unit flag white", Vector3(6.55, 3.50, 4.4), Vector3(0.8, 0.25, 0.03), offwhite, false, root)
+	_box("Unit counter", Vector3(0, 0.55, -1.8), Vector3(2.6, 1.1, 1.0), white, true, root)
+	_box("Unit counter front", Vector3(0, 0.52, -1.28), Vector3(2.4, 0.85, 0.05), red, false, root, 0.5, 0.1)
+	_label("ATM / LAYANAN CEPAT", Vector3(0, 1.35, -1.2), 0.0032, Color("#4a3f3a"))
+	_add_plant(b + Vector3(-7.3, 0.0, 5.4), 0.6)
 
 func _add_street_lamp_multimesh(positions: Array[Vector3]) -> void:
 	# Repeated street/area lamps as MultiMeshInstance3D (visual) + per-instance lights.
@@ -2661,20 +3138,23 @@ func _add_street_props() -> void:
 	for pz in [74.0, 90.0, 102.0, 116.0, 130.0, 141.0]:
 		_box("Promenade planter", Vector3(140.0, 0.33, float(pz)), Vector3(1.2, 0.56, 1.2), Color("#b7bdb6"), true, null, 0.55)
 		_add_plant(Vector3(140.0, 0.61, float(pz)), 0.62)
-	# Monument plaza: two benches face the monument (north).
-	_add_city_bench(Vector3(46.6, 0.05, 76.2), PI)
-	_add_city_bench(Vector3(53.4, 0.05, 76.2), PI)
-	# Market square: benches on the south edge, clear of stalls and walkways.
+	# Civic plaza: two benches look north at the monument text.
+	_add_city_bench(Vector3(35.0, 0.05, 74.2), 0.0)
+	_add_city_bench(Vector3(40.0, 0.05, 74.2), 0.0)
+	for pp in [Vector3(33.2, 0.0, 81.8), Vector3(41.8, 0.0, 81.8)]:
+		_box("Civic planter", pp + Vector3(0, 0.33, 0), Vector3(1.2, 0.56, 1.2), Color("#b7bdb6"), true, null, 0.55)
+		_add_plant(pp + Vector3(0, 0.61, 0), 0.62)
+	# Market square: benches on the south edge look north into the stalls.
 	for bx in [-4.0, 4.0]:
-		_add_city_bench(Vector3(126.0 + float(bx), 0.05, 141.0), PI)
-	# Mall rear parking: four cars in marked bays, parallel to the boulevard.
+		_add_city_bench(Vector3(126.0 + float(bx), 0.05, 141.0), 0.0)
+	# Mall rear parking: four cars nose north into the marked bays.
 	for car in [
 		{"x": 156.6, "c": Color("#6a7f90")},
 		{"x": 167.0, "c": Color("#8a6a5a")},
 		{"x": 187.8, "c": Color("#5f7a66")},
 		{"x": 198.2, "c": Color("#7a6f86")},
 	]:
-		_add_parked_car(Vector3(float(car["x"]), 0.03, 76.5), PI * 0.5, car["c"], "", "", false, "")
+		_add_parked_car(Vector3(float(car["x"]), 0.03, 76.5), 0.0, car["c"], "", "", false, "")
 	# (Crosswalks are drawn once in _build_site to avoid z-fighting.)
 
 func _apply_led_billboard_shader(bb_node: Node3D) -> void:
@@ -2760,12 +3240,13 @@ static func kopdes_layout() -> Dictionary:
 	return {"id":"kopdes", "center": center, "door": center + Vector3(0.0, 0.05, 22.5)}
 
 static func kopdes_merah_putih_layout() -> Dictionary:
-	# Iconic landmark 2 lantai di strip promenade komersial.
-	var base := Vector3(122.0, 0.0, 80.0)
+	# Iconic landmark 2 lantai, centred on the commercial strip (x=126).
+	var base := Vector3(126.0, 0.0, 80.0)
 	return {"id":"kopdes_mp", "base": base, "door": base + Vector3(0.0, 0.05, 8.2)}
 
 static func kopdes_unit_layout() -> Dictionary:
-	var base := Vector3(122.0, 0.0, 104.0)
+	# Same centreline as the flagship shop, aligned with the z=118 cross path.
+	var base := Vector3(126.0, 0.0, 104.0)
 	return {"id":"kopdes_unit", "base": base, "door": base + Vector3(0.0, 0.05, 6.6)}
 
 ## Town market square — hub for roaming and social interaction.

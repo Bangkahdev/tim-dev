@@ -204,6 +204,7 @@ class CompanyOperations:
             if target == "completed" and not evidence:
                 raise ValueError("Tugas tidak dapat diselesaikan tanpa bukti hasil.")
             parsed_evidence = []
+            raw_evidence = []
             for item in evidence:
                 if not isinstance(item, dict):
                     raise ValueError("Setiap evidence harus berupa objek.")
@@ -213,6 +214,9 @@ class CompanyOperations:
                 if not reference or len(reference) > 1000:
                     raise ValueError("Evidence membutuhkan reference maksimal 1000 karakter.")
                 parsed_evidence.append((str(uuid.uuid4()), task_id, kind, reference, detail[:1000], _now()))
+                raw_evidence.append({"type": kind, "reference": reference, "note": detail, **{k: v for k, v in item.items() if k not in ("type","reference","note")}})
+            if target == "completed":
+                self._validate_completion_evidence(raw_evidence)
             now = _now()
             db.execute("UPDATE tasks SET status=?,updated_at=? WHERE id=?", (target, now, task_id))
             if parsed_evidence:
@@ -225,6 +229,57 @@ class CompanyOperations:
                 self._event(db, "task_transition", actor, task_id,
                             f"Tugas '{row['title']}' berubah {current} → {target}.")
         return {"id": task_id, "status": target, "evidence_added": len(parsed_evidence)}
+
+
+    @staticmethod
+    def _validate_completion_evidence(evidence_items):
+        """Validate completion evidence honestly.
+
+        - Evidence with structured test fields (exit_code/test_exit_code/passed) or
+          a test/qa type MUST show a passing result (exit 0 / pass). A failing test
+          result is always rejected.
+        - Non-test deliverables (document/source/review/pipeline artifacts) require a
+          concrete, non-empty reference (>=3 chars) and are accepted as deliverable
+          evidence; independent verification (Owner verifier / real test execution) is
+          the authority for correctness — agents do not self-attest correctness.
+        """
+        import re as _re
+        if not evidence_items:
+            raise ValueError("Tugas tidak dapat diselesaikan tanpa bukti hasil.")
+        for item in evidence_items:
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("type", "")).lower()
+            blob = f"{item.get('reference','')} {item.get('note','')}"
+            low = blob.lower()
+            # explicit structured test result
+            if "exit_code" in item or "test_exit_code" in item or "passed" in item:
+                try:
+                    code = int(item.get("exit_code", item.get("test_exit_code", 0 if item.get("passed") else 1)))
+                except Exception:
+                    code = 1
+                passed = bool(item.get("passed")) if "passed" in item and "exit_code" not in item and "test_exit_code" not in item else (code == 0)
+                if not passed or code != 0:
+                    raise ValueError(f"Bukti tes menunjukkan kegagalan (exit_code={code}).")
+                return
+            # text indicates a test result -> enforce pass
+            m = _re.search(r"exit(?:[_ ]?code)?\s*[=:]?\s*(-?\d+)", low)
+            if m or kind in ("test", "qa") or _re.search(r"\bqa_status\b", low):
+                if m and int(m.group(1)) != 0:
+                    raise ValueError(f"Bukti tes menunjukkan kegagalan (exit_code={m.group(1)}).")
+                if m and int(m.group(1)) == 0:
+                    return
+                if _re.search(r"\bqa_status\s*[=:]\s*(fail|error)\b", low):
+                    raise ValueError("Bukti tes menunjukkan kegagalan (qa_status FAIL).")
+                if _re.search(r"\b(pass(ed)?|exit\s*0|qa_status\s*[=:]\s*pass)\b", low):
+                    return
+                if kind in ("test", "qa"):
+                    raise ValueError("Bukti tes/QA harus memuat hasil terverifikasi (exit_code 0 atau PASS).")
+            # non-test deliverable: require a concrete reference
+            ref = str(item.get("reference", "")).strip()
+            if ref and len(ref) >= 3:
+                return
+        raise ValueError("Bukti completion harus memuat referensi artefak konkret (atau hasil tes terverifikasi), bukan nilai kosong/bebas.")
 
     def meetings(self):
         items = self.store.snapshot()["meetings"]
