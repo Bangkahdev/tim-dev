@@ -33,6 +33,7 @@ from core.project_state import ProjectState
 from core.lead_manager import LeadManager
 from core.employee_health import EMPLOYEES, record_activity
 from core.office_store import STORE
+from core.safe_env import safe_subprocess_env
 
 
 # ============================================================
@@ -328,10 +329,7 @@ def create_project_tools(project_dir, logger):
                 text=True,
                 timeout=COMMAND_TIMEOUT,
                 shell=False,
-                env={
-                    **os.environ,
-                    "PYTHONUNBUFFERED": "1"
-                }
+                env=safe_subprocess_env({"PYTHONUNBUFFERED": "1"})
             )
 
             output = (

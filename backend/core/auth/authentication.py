@@ -1,7 +1,9 @@
-from core.auth.sessions import verify_user, create_session, revoke_session, get_session
+from core.auth.sessions import verify_user, create_session, revoke_session, get_session, LoginThrottled
 
-def login(username, password):
-    user = verify_user(username, password)
+__all__ = ["login", "logout", "current_user", "LoginThrottled"]
+
+def login(username, password, client_ip=None, clock=None):
+    user = verify_user(username, password, client_ip=client_ip, clock=clock)
     if not user:
         return None
     token = create_session(user["username"])

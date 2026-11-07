@@ -1,6 +1,7 @@
 import os
 import re
 import secrets
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -9,6 +10,18 @@ from core.rbac import ROLES
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{3,64}$")
 DEFAULT_SESSION_HOURS = 8
+
+MAX_FAILURES = 5
+WINDOW_SECONDS = 10 * 60
+LOCK_BASE_SECONDS = 15 * 60
+LOCK_MAX_SECONDS = 60 * 60
+GLOBAL_MAX_FAILURES = 30
+GLOBAL_WINDOW_SECONDS = 10 * 60
+GLOBAL_LOCK_SECONDS = 15 * 60
+
+_ATTEMPTS: dict[str, tuple[int, float, float]] = {}
+_ATTEMPTS_LOCK = threading.Lock()
+_FAKE_HASH = None
 
 
 def _db():
@@ -59,6 +72,94 @@ def _init():
 
 
 _init()
+
+
+def _clock(clock):
+    return clock if callable(clock) else time.time
+
+
+def _now_ts(clock):
+    return float(_clock(clock)())
+
+
+def _ip(value):
+    import ipaddress
+    value = str(value or "").strip()
+    if not value:
+        return "unknown"
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError:
+        return "unknown"
+
+
+def _key(kind, *parts):
+    return kind + ":" + "|".join(str(p) for p in parts)
+
+
+def clear_login_throttle():
+    """Test helper: forget failed-login counters."""
+    with _ATTEMPTS_LOCK:
+        _ATTEMPTS.clear()
+
+
+def _attempt_state(key, now_ts, window):
+    with _ATTEMPTS_LOCK:
+        count, first, lock_until = _ATTEMPTS.get(key, (0, now_ts, 0.0))
+        if lock_until and now_ts < lock_until:
+            return count, lock_until - now_ts
+        if lock_until and now_ts >= lock_until:
+            count, first, lock_until = 0, now_ts, 0.0
+        if now_ts - first > window:
+            count, first, lock_until = 0, now_ts, 0.0
+        _ATTEMPTS[key] = (count, first, lock_until)
+        return count, 0.0
+
+
+def _record_failure(key, now_ts, window, max_failures, lock_base, lock_max=None):
+    lock_max = lock_max or lock_base
+    with _ATTEMPTS_LOCK:
+        count, first, lock_until = _ATTEMPTS.get(key, (0, now_ts, 0.0))
+        if lock_until and now_ts < lock_until:
+            return lock_until - now_ts
+        if now_ts - first > window or (lock_until and now_ts >= lock_until):
+            count, first = 0, now_ts
+        count += 1
+        lock_until = 0.0
+        retry_after = 0.0
+        if count >= max_failures:
+            over = count - max_failures
+            duration = min(lock_base * (2 ** over), lock_max)
+            lock_until = now_ts + duration
+            retry_after = duration
+        _ATTEMPTS[key] = (count, first, lock_until)
+        return retry_after
+
+
+def _reset_attempt(key):
+    with _ATTEMPTS_LOCK:
+        _ATTEMPTS.pop(key, None)
+
+
+def _fake_hash():
+    global _FAKE_HASH
+    if _FAKE_HASH is None:
+        from core.auth.password import hash_password
+        _FAKE_HASH = hash_password("bangkah-invalid-password-timing-parity")
+    return _FAKE_HASH
+
+
+def _audit(event_type, actor, detail):
+    try:
+        STORE.add_event(event_type, actor or "system", str(detail)[:1000], None)
+    except Exception:
+        pass
+
+
+class LoginThrottled(Exception):
+    def __init__(self, retry_after: int):
+        self.retry_after = max(1, int(retry_after))
+        super().__init__("Too many failed login attempts.")
 
 
 def create_user(username, password, role="employee", employee_id=None, department_id=None, enabled=True):
@@ -114,18 +215,59 @@ def set_user_role(username, role):
         db.execute("UPDATE auth_users SET role=? WHERE username=?", (role, username))
 
 
-def verify_user(username, password):
+def verify_user(username, password, client_ip=None, clock=None):
+    from core.auth.password import verify_password as _verify
+    username = str(username or "").strip()
+    password = "" if password is None else str(password)
+    ip = _ip(client_ip)
+    now_ts = _now_ts(clock)
+    pair_key = _key("pair", username, ip)
+    user_key = _key("user", username)
+
+    for key, window, max_failures in (
+        (pair_key, WINDOW_SECONDS, MAX_FAILURES),
+        (user_key, GLOBAL_WINDOW_SECONDS, GLOBAL_MAX_FAILURES),
+    ):
+        _, retry_after = _attempt_state(key, now_ts, window)
+        if retry_after > 0:
+            _audit("auth_login_locked", username or "unknown", f"ip={ip} retry_after={int(retry_after)}")
+            raise LoginThrottled(retry_after)
+
     with LOCK, _db() as db:
         row = db.execute(
             """SELECT password_hash,role,enabled,employee_id,department_id
                FROM auth_users WHERE username=?""",
             (username,),
         ).fetchone()
+
     if not row or not row["enabled"]:
+        _verify(password, _fake_hash())
+        ra1 = _record_failure(pair_key, now_ts, WINDOW_SECONDS, MAX_FAILURES, LOCK_BASE_SECONDS, LOCK_MAX_SECONDS)
+        ra2 = _record_failure(user_key, now_ts, GLOBAL_WINDOW_SECONDS, GLOBAL_MAX_FAILURES, GLOBAL_LOCK_SECONDS, GLOBAL_LOCK_SECONDS)
+        retry_after = max(ra1, ra2)
+        detail = f"ip={ip} reason={'disabled' if row else 'missing'}"
+        if retry_after:
+            detail += f" locked retry_after={int(retry_after)}"
+        _audit("auth_login_failed", username or "unknown", detail)
+        if retry_after:
+            raise LoginThrottled(retry_after)
         return None
-    from core.auth.password import verify_password
-    if not verify_password(password, row["password_hash"]):
+
+    if not _verify(password, row["password_hash"]):
+        ra1 = _record_failure(pair_key, now_ts, WINDOW_SECONDS, MAX_FAILURES, LOCK_BASE_SECONDS, LOCK_MAX_SECONDS)
+        ra2 = _record_failure(user_key, now_ts, GLOBAL_WINDOW_SECONDS, GLOBAL_MAX_FAILURES, GLOBAL_LOCK_SECONDS, GLOBAL_LOCK_SECONDS)
+        retry_after = max(ra1, ra2)
+        detail = f"ip={ip} reason=bad_password"
+        if retry_after:
+            detail += f" locked retry_after={int(retry_after)}"
+        _audit("auth_login_failed", username, detail)
+        if retry_after:
+            raise LoginThrottled(retry_after)
         return None
+
+    _reset_attempt(pair_key)
+    _reset_attempt(user_key)
+    _audit("auth_login_success", username, f"ip={ip}")
     return {"username": username, "role": row["role"],
             "employee_id": row["employee_id"], "department_id": row["department_id"]}
 

@@ -23,15 +23,20 @@ def _expire(token):
 
 
 class AuthSessionTests(unittest.TestCase):
+    def _clear_throttle(self):
+        sessions.clear_login_throttle()
+
     USER = "unit.owner"
     PASSWORD = "correct-horse-battery"
 
     def setUp(self):
+        self._clear_throttle()
         _delete_user(self.USER)
         sessions.create_user(self.USER, self.PASSWORD, "owner", department_id="executive")
 
     def tearDown(self):
         _delete_user(self.USER)
+        self._clear_throttle()
 
     def test_login_rejects_wrong_password(self):
         self.assertIsNone(A.login(self.USER, "wrong-password"))
@@ -121,3 +126,65 @@ class AuthSessionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_login_throttles_per_username_and_ip_with_injectable_clock(self):
+        # 5 failures/10min -> lock 15min (exponential backoff on continued failures), 429+Retry-After at HTTP layer tested separately.
+        t = {"now": 1_000_000.0}
+        clock = lambda: t["now"]
+        ip = "10.0.0.55"
+        for _ in range(5):
+            self.assertIsNone(A.login(self.USER, "wrong-password", client_ip=ip, clock=clock))
+        with self.assertRaises(A.LoginThrottled) as ctx:
+            A.login(self.USER, "wrong-password", client_ip=ip, clock=clock)
+        self.assertGreaterEqual(ctx.exception.retry_after, 15 * 60)
+        # different IP for same user hits looser global limit only after many failures, so this pair is still isolated by its own lock;
+        # advance past lock window for the locked pair
+        t["now"] += 15 * 60 + 1
+        self.assertIsNone(A.login(self.USER, "wrong-password", client_ip=ip, clock=clock))  # counter restarted, not auto-success
+        # success resets pair/user counters
+        self._clear_throttle()
+        for _ in range(4):
+            self.assertIsNone(A.login(self.USER, "wrong-password", client_ip=ip, clock=clock))
+        self.assertIsNotNone(A.login(self.USER, self.PASSWORD, client_ip=ip, clock=clock))
+        for _ in range(4):
+            self.assertIsNone(A.login(self.USER, "wrong-password", client_ip=ip, clock=clock))
+        self.assertIsNotNone(A.login(self.USER, self.PASSWORD, client_ip=ip, clock=clock))
+
+    def test_nonexistent_user_same_generic_failure_and_is_throttled(self):
+        t = {"now": 2_000_000.0}
+        clock = lambda: t["now"]
+        ip = "10.0.0.77"
+        for _ in range(5):
+            self.assertIsNone(A.login("nobody.here." + self.USER, "wrong-password", client_ip=ip, clock=clock))
+        with self.assertRaises(A.LoginThrottled):
+            A.login("nobody.here." + self.USER, "wrong-password", client_ip=ip, clock=clock)
+
+    def test_global_per_username_limit_slows_distributed_guessing(self):
+        t = {"now": 3_000_000.0}
+        clock = lambda: t["now"]
+        # spread failures across many IPs to avoid per-pair lock dominating first
+        for i in range(sessions.GLOBAL_MAX_FAILURES):
+            ip = f"10.9.{i // 250}.{i % 250}"
+            try:
+                A.login(self.USER, "wrong-password", client_ip=ip, clock=clock)
+            except A.LoginThrottled:
+                pass
+        with self.assertRaises(A.LoginThrottled):
+            A.login(self.USER, self.PASSWORD, client_ip="10.9.200.1", clock=clock)
+
+    def test_login_failures_and_lockouts_are_audited(self):
+        t = {"now": 4_000_000.0}
+        clock = lambda: t["now"]
+        ip = "10.0.0.88"
+        with LOCK, _db() as db:
+            before = db.execute("SELECT COUNT(*) n FROM events WHERE event_type LIKE 'auth_login_%' AND actor=?", (self.USER,)).fetchone()["n"]
+        for _ in range(5):
+            A.login(self.USER, "wrong-password", client_ip=ip, clock=clock)
+        try:
+            A.login(self.USER, "wrong-password", client_ip=ip, clock=clock)
+        except A.LoginThrottled:
+            pass
+        with LOCK, _db() as db:
+            after = db.execute("SELECT COUNT(*) n FROM events WHERE event_type IN ('auth_login_failed','auth_login_locked') AND actor=?", (self.USER,)).fetchone()["n"]
+        self.assertGreater(after, before)

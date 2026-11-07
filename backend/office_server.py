@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 import hmac
+import ipaddress
 import os
 
 from config import make_llm, model_for
@@ -169,6 +170,33 @@ def llm_usage(llm):
         return getter()
     except Exception:
         return None
+
+
+
+def _peer_ip(client_address):
+    try:
+        return ipaddress.ip_address(client_address[0])
+    except Exception:
+        return None
+
+
+def trusted_client_ip(handler):
+    """Return the real client IP for throttling/authz context.
+
+    X-Forwarded-For is trusted only when the direct peer is loopback (the local
+    TLS/LAN gateway). The gateway overwrites that header with the real client IP.
+    A non-loopback peer can spoof headers, so it is never trusted.
+    """
+    peer = _peer_ip(getattr(handler, "client_address", ("", 0)))
+    if peer is not None and peer.is_loopback:
+        forwarded = str(handler.headers.get("X-Forwarded-For", "") or "").split(",")[0].strip()
+        if forwarded:
+            try:
+                return str(ipaddress.ip_address(forwarded))
+            except ValueError:
+                pass
+        return str(peer)
+    return str(peer) if peer is not None else ""
 
 
 class OfficeHandler(BaseHTTPRequestHandler):
@@ -655,7 +683,18 @@ class OfficeHandler(BaseHTTPRequestHandler):
         if route == "/api/auth/login":
             u = str(body.get("username","")).strip()
             pw = str(body.get("password",""))
-            res = AUTH.login(u, pw)
+            try:
+                res = AUTH.login(u, pw, client_ip=trusted_client_ip(self))
+            except AUTH.LoginThrottled as error:
+                self.send_response(429)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Retry-After", str(int(error.retry_after)))
+                self.send_header("Cache-Control", "no-store")
+                payload = json.dumps({"success": False, "error": {"code": "TOO_MANY_ATTEMPTS", "message": "Login failed"}}).encode("utf-8")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
             if not res:
                 self.send_json({"success": False, "error": {"code":"INVALID_CREDENTIALS","message":"Login failed"}}, 401)
                 return
