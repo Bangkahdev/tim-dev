@@ -704,6 +704,13 @@ class DesktopOperations:
         result["command"] = raw
         return result
 
+    def _event_with_new_db(self, kind: str, actor: str, entity_id: str | None, detail: str):
+        try:
+            with LOCK, self._db() as db:
+                self._event(db, kind, actor, entity_id, detail)
+        except Exception:
+            pass
+
     def _audit_command(self, account_id: str, workstation_id: str, command: str, outcome: str):
         try:
             with LOCK, self._db() as db:
@@ -734,7 +741,7 @@ class DesktopOperations:
             pass
         run_args = [binary, *args]
         try:
-            from core.sandbox_exec import enforce_sandbox, sandbox_status
+            from core.sandbox_exec import enforce_sandbox, ensure_sandbox_canaries, sandbox_status
             status = sandbox_status()
             if status.get("error") and not status.get("required"):
                 print(f"[WORKSTATION SANDBOX WARNING] {status['error']}", flush=True)
@@ -746,6 +753,9 @@ class DesktopOperations:
                 except Exception:
                     pass
                 return {"exit_code": 126, "stdout": "", "stderr": f"sandbox required but not configured/misconfigured: {status.get('error')}"}
+            canary = ensure_sandbox_canaries(workdir, audit=lambda t, a, d, e: self._event_with_new_db(t, a, e, d))
+            if status.get("required") and not canary.get("ok"):
+                return {"exit_code": 126, "stdout": "", "stderr": f"sandbox canary failed (NFR-SEC-09/10 not evidenced): {str(canary.get('details', ''))[:500]}"}
             run_args = enforce_sandbox(run_args, workdir)
         except RuntimeError as exc:
             print(f"[WORKSTATION SANDBOX BLOCKED] {exc}", flush=True)
