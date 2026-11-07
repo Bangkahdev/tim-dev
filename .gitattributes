@@ -1,0 +1,17 @@
+# Consistent line endings across Windows/Linux checkouts.
+* text=auto
+
+*.py   text eol=lf
+*.md   text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.gd   text eol=lf
+*.tscn text eol=lf
+*.tres text eol=lf
+*.sh   text eol=lf
+*.txt  text eol=lf
+
+# Keep test fixtures/inputs stable; normalize it/ noise noted in review.
+it/**  text eol=lf
