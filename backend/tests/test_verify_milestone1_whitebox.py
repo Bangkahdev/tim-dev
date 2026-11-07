@@ -144,8 +144,21 @@ class VerifierSelfTest(unittest.TestCase):
         self._assert_fails(self._run(CORE_BYTES, CLI_OK), "utf8")
 
     def test_line_off_by_one_fails(self):
-        cases = self._run(CORE_LINE, CLI_OK)
-        self.assertTrue(any(not c["pass"] and c["name"] in ("hidden.normal_file", "hidden.stdin") for c in cases), cases)
+        # Hidden cases use trailing-newline text, so an impl that always
+        # undercounts by 1 when lines>0 must fail them.
+        bad = r'''
+def count_text(text):
+    lines = text.count("\n") + (1 if text and not text.endswith("\n") else 0)
+    if lines:
+        lines -= 1
+    words = len(text.split())
+    return {"lines": lines, "words": words, "characters": len(text)}
+'''
+        cases = self._run(bad, CLI_OK)
+        self.assertTrue(
+            any(not c["pass"] and c["name"] in ("hidden.normal_file", "hidden.stdin", "hidden.utf8_multibyte_chars") for c in cases),
+            cases,
+        )
 
     def test_missing_file_exit0_fails(self):
         self._assert_fails(self._run(CORE_OK, CLI_EXIT0), "missing_file")

@@ -141,7 +141,16 @@ def safe_project_path(root, relative_path):
 
 
 def run_sandboxed(project_dir, args, timeout=120):
-    """Run *args* inside *project_dir* without a shell and with an allowlist."""
+    """Run *args* inside *project_dir* without a shell and with an allowlist.
+
+    Uses a minimal allowlisted environment (safe_subprocess_env) so backend
+    secrets (API keys, SMTP/deploy tokens) are not inherited by agent commands.
+    Optional operator-configured isolation wrapper: if BANGKAH_SANDBOX_CMD is
+    set (core.sandbox_exec), the argv is wrapped (e.g. container with
+    --network none and only the project dir mounted). Isolation is only real if
+    that wrapper actually confines FS/network; NFR-SEC-09/10 remains NOT MET
+    without evidenced OS/container/VM isolation.
+    """
     project_dir = Path(project_dir).resolve()
     if not args:
         raise ValueError("Empty command.")
@@ -153,11 +162,22 @@ def run_sandboxed(project_dir, args, timeout=120):
     for arg in args[1:]:
         if ".." in Path(arg).parts:
             raise ValueError("Path traversal rejected.")
-    import os
+    try:
+        from core.safe_env import safe_subprocess_env
+        env = safe_subprocess_env({"PYTHONUNBUFFERED": "1"})
+    except Exception:
+        import os
+        env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    run_args = list(args)
+    try:
+        from core.sandbox_exec import wrap_argv
+        run_args = wrap_argv(run_args, project_dir)
+    except Exception:
+        pass
 
     completed = subprocess.run(
-        args, cwd=project_dir, capture_output=True, text=True, timeout=timeout,
-        shell=False, env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        run_args, cwd=project_dir, capture_output=True, text=True, timeout=timeout,
+        shell=False, env=env,
     )
     return completed.returncode, (completed.stdout or "") + (completed.stderr or "")
 
@@ -267,7 +287,7 @@ class BusinessCycle:
         self._complete_task(tasks[1], project_dir, "document", "ARCHITECTURE.md")
         self._complete_task(tasks[2], project_dir, "source", "wordcount/core.py, wordcount/cli.py, wordcount/__init__.py")
         self._complete_task(tasks[3], project_dir, "test", test_result["command"],
-                            note=f"Exit code {test_result['exit_code']}; output artifact: {test_result['artifact']}")
+                            note=f"exit_code={test_result['exit_code']} output_sha256={test_result.get('output_sha256','')} artifact={test_result['artifact']}")
         review = self._write_review(project_dir, test_result, qa_report)
         self._complete_task(tasks[4], project_dir, "review", "MANAGER-REVIEW.md", note=review)
 
@@ -370,8 +390,11 @@ characters, with automated tests and a README. No external services.
         command = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"]
         display = "python -m unittest discover -s tests -v"
         code, output = self.runner(project_dir, command)
-        artifact = self._write(project_dir, "artifacts/test-output.txt", output)
+        output_hash = hashlib.sha256((output or "").encode("utf-8", errors="replace")).hexdigest()
+        artifact_body = f"command: {display}\nexit_code: {code}\nsha256: {output_hash}\n\n{output or ''}"
+        artifact = self._write(project_dir, "artifacts/test-output.txt", artifact_body)
         return {"command": display, "exit_code": code, "output": output,
+                "output_sha256": output_hash,
                 "artifact": str(artifact.relative_to(project_dir))}
 
     def _write_qa(self, project_dir: Path, test_result: dict) -> str:
