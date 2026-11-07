@@ -15,10 +15,7 @@ BACKEND_DIR="$ROOT/backend"
 BACKEND_PORT="${BANGKAH_PORT:-8765}"
 GATEWAY_PORT="${GATEWAY_PORT:-8081}"
 
-BACKEND_TOKEN=""
-if [[ -f "$BACKEND_DIR/.env" ]]; then
-  BACKEND_TOKEN="$(grep -E '^BANGKAH_API_TOKEN=' "$BACKEND_DIR/.env" | cut -d= -f2- || true)"
-fi
+# Gateway is pass-through: it forwards Authorization as-is and never injects tokens.
 
 PIDS=()
 
@@ -68,8 +65,7 @@ python3 "$LAN_DIR/portal_server.py" --listen "0.0.0.0:8080"
 start "Gateway LAN  ->  http://0.0.0.0:${GATEWAY_PORT}"
 python3 "$LAN_DIR/lan_gateway.py" \
   --listen "0.0.0.0:${GATEWAY_PORT}" \
-  --upstream "127.0.0.1:${BACKEND_PORT}" \
-  --token "$BACKEND_TOKEN"
+  --upstream "127.0.0.1:${BACKEND_PORT}"
 
 # ---------- 4. FTPS ----------
 if curl -fsS -m 2 "ftps://" >/dev/null 2>&1 || true; then
