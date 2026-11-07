@@ -2,6 +2,8 @@
 
 This is the implementation and acceptance playbook for the v1.3 milestone. **Pilot chosen: `wordcount` CLI** (machine-checkable exit codes/output; a static landing page is too subjective for evidence).
 
+**Honesty boundary:** A deterministic in-process run (`core.business_cycle.BusinessCycle`) that writes fixed pilot files and executes the verifier is a **backend integration test**, not a real Milestone 1 pass. Milestone 1 is satisfied only when a real `AgentWorker` (CrewAI/cloud model or an explicitly documented equivalent) receives the behavior spec, writes `wordcount` from `docs/specs/wordcount-behavior.md` without seeing hidden tests, tests run in an enforced external sandbox, the independent Owner verifier passes, and the cycle succeeds **3 consecutive times** with clean workspace/DB, logs, and a restart-after-Paper case.
+
 ## Goal
 
 Complete one small real software project from Owner instruction to reviewable deliverable, with **no manual intervention except required Owner approval**. Repeat successfully **three consecutive times** (see definition below).
@@ -61,7 +63,7 @@ Use the agent-facing spec as the single source of truth: **[`docs/specs/wordcoun
 - Same Task cannot reach `COMPLETED` without validated evidence (backend gate: non-empty evidence; **independent verifier** re-checks by running hidden tests).
 - Invalid state transitions are rejected.
 - Employee tool calls outside permissions are rejected by backend.
-- **Sandbox (HONEST STATUS â€” NOT YET MET for NFR-SEC-09/10):** current controls are env filtering, executable allowlist, `shell=False`, timeout, and working-directory scoping. **Filesystem confinement and network egress restriction are NOT implemented.** Do **NOT** mark this criterion passed until OS/container/VM-level filesystem + network isolation is enforced and evidenced. Options: run the pilot inside a disposable VM/container and record that system sandbox is external, **or** implement minimal FS/network sandbox first. Automated checks may only report path/executable-process-level guards as *partial*.
+- **Sandbox (HONEST STATUS — NOT YET MET for NFR-SEC-09/10):** `core.sandbox_exec` can wrap subprocess argv via `BANGKAH_SANDBOX_CMD` (token `{project_dir}`) and fail-closed via `BANGKAH_SANDBOX_REQUIRED=1` in wired execution paths (`main.run_project_command`, workstation external commands, `business_cycle.run_sandboxed`). However, wrapping argv is **not** isolation by itself. **Filesystem confinement and network egress restriction are NOT implemented/claimed** until the configured wrapper is a real container/VM with `--network none` (or equivalent) and only the project dir mounted, and that is evidenced (image, command, isolation checks). Automated checks may only report path/executable-process-level guards and wrapper configuration as *partial* unless external sandbox evidence is provided.
 - Owner approval is immutable, single-use and hash-bound.
 - Paper cannot appear/disappear in the 3D tray without backend record/event.
 - Duplicate events do not create duplicate animations or duplicate decisions.
