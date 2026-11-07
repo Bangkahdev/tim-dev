@@ -324,10 +324,23 @@ def create_project_tools(project_dir, logger):
 
             run_args = list(args)
             try:
-                from core.sandbox_exec import wrap_argv
-                run_args = wrap_argv(run_args, project_dir)
-            except Exception:
-                pass
+                from core.sandbox_exec import enforce_sandbox, sandbox_status
+                status = sandbox_status()
+                if status.get("error") and not status.get("required"):
+                    logger.warning("[SANDBOX] %s", status["error"])
+                if status.get("required") and not status.get("active"):
+                    logger.warning("[SANDBOX] blocking command: %s", status.get("error"))
+                    try:
+                        OPS.store.add_event("sandbox_blocked", "system", status.get("error", "sandbox required"), str(project_dir))
+                    except Exception:
+                        pass
+                run_args = enforce_sandbox(run_args, project_dir)
+            except RuntimeError as exc:
+                try:
+                    OPS.store.add_event("sandbox_blocked", "system", str(exc), str(project_dir))
+                except Exception:
+                    pass
+                return f"ERROR: sandbox required but not configured/misconfigured: {exc}"
 
             result = subprocess.run(
                 run_args,

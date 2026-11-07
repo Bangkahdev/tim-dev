@@ -8,9 +8,11 @@ This module drives the complete internal workflow for a small pilot project:
     -> task evidence/state -> final report Paper -> PrintJob -> delivery event
     -> owner review decision -> audit trail.
 
-The worker is deterministic (no LLM/network) so the cycle can be verified in a
-hermetic environment. ``AgentWorker`` is the swap-in boundary for the real
-AICodingFactory agents.
+``AgentWorker`` is the swap-in boundary. ``DeterministicWorker`` writes fixed
+pilot files and is ONLY for backend integration testing — it is not a real
+Milestone 1 pass. ``CrewAIAgentWorker`` is the boundary for a real cloud/LLM
+agent run; it requires a configured CrewAI/model environment and must not see
+hidden verifier cases.
 """
 from __future__ import annotations
 
@@ -147,9 +149,10 @@ def run_sandboxed(project_dir, args, timeout=120):
     secrets (API keys, SMTP/deploy tokens) are not inherited by agent commands.
     Optional operator-configured isolation wrapper: if BANGKAH_SANDBOX_CMD is
     set (core.sandbox_exec), the argv is wrapped (e.g. container with
-    --network none and only the project dir mounted). Isolation is only real if
-    that wrapper actually confines FS/network; NFR-SEC-09/10 remains NOT MET
-    without evidenced OS/container/VM isolation.
+    --network none and only the project dir mounted). If BANGKAH_SANDBOX_REQUIRED=1,
+    missing/misconfigured wrapper fails closed and emits an audit event.
+    Isolation is only real if that wrapper actually confines FS/network;
+    NFR-SEC-09/10 remains NOT MET without evidenced OS/container/VM isolation.
     """
     project_dir = Path(project_dir).resolve()
     if not args:
@@ -170,10 +173,20 @@ def run_sandboxed(project_dir, args, timeout=120):
         env = {**os.environ, "PYTHONUNBUFFERED": "1"}
     run_args = list(args)
     try:
-        from core.sandbox_exec import wrap_argv
-        run_args = wrap_argv(run_args, project_dir)
-    except Exception:
-        pass
+        from core.sandbox_exec import enforce_sandbox, sandbox_status
+        status = sandbox_status()
+        if status.get("required") and not status.get("active"):
+            try:
+                STORE.add_event("sandbox_blocked", "system", status.get("error", "sandbox required"), str(project_dir))
+            except Exception:
+                pass
+        run_args = enforce_sandbox(run_args, project_dir)
+    except RuntimeError:
+        try:
+            STORE.add_event("sandbox_blocked", "system", "sandbox required but missing/misconfigured", str(project_dir))
+        except Exception:
+            pass
+        raise
 
     completed = subprocess.run(
         run_args, cwd=project_dir, capture_output=True, text=True, timeout=timeout,
@@ -182,12 +195,88 @@ def run_sandboxed(project_dir, args, timeout=120):
     return completed.returncode, (completed.stdout or "") + (completed.stderr or "")
 
 
+class AgentWorker:
+    """Boundary for Milestone 1 implementation work.
+
+    A real Milestone 1 pass requires a worker that uses the coding pipeline
+    (CrewAI/cloud model) to produce ``wordcount`` from ``docs/specs/wordcount-behavior.md``
+    without access to hidden verifier cases. ``DeterministicWorker`` is an
+    integration-test fixture only and MUST NOT be reported as a real Milestone 1 pass.
+    """
+
+    mode = "base"
+
+    def produce(self, project_dir: Path, owner_command: str, spec_path: Path) -> dict:
+        raise NotImplementedError
+
+
+class DeterministicWorker(AgentWorker):
+    """Writes fixed pilot files. Backend integration fixture, not real Milestone 1."""
+
+    mode = "deterministic_integration"
+
+    def produce(self, project_dir: Path, owner_command: str, spec_path: Path) -> dict:
+        for relative, content in PILOT_FILES.items():
+            target = safe_project_path(project_dir, relative)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+        return {"mode": self.mode, "honest": "integration_fixture_not_real_milestone1"}
+
+
+class CrewAIAgentWorker(AgentWorker):
+    """Runs a real CrewAI/cloud-model agent to implement wordcount from the spec.
+
+    Requires ``crewai`` and a configured model/provider in the environment used by
+    ``AICodingFactory``. Never injects hidden verifier content. Fails loudly when
+    dependencies/config are unavailable so callers cannot mistake it for success.
+    """
+
+    mode = "crewai_real"
+
+    def __init__(self, callback=None):
+        self.callback = callback or (lambda msg: None)
+
+    def produce(self, project_dir: Path, owner_command: str, spec_path: Path) -> dict:
+        try:
+            import crewai  # noqa: F401
+        except Exception as exc:
+            raise RuntimeError(f"real AgentWorker requires crewai: {exc}") from exc
+        spec_text = spec_path.read_text(encoding="utf-8")
+        try:
+            from main import AICodingFactory
+        except Exception as exc:
+            raise RuntimeError(f"real AgentWorker requires AICodingFactory/main: {exc}") from exc
+
+        factory = AICodingFactory(self.callback)
+        # Use the factory's toolset/build path in the target project dir. The factory
+        # API is project-oriented; we constrain the instruction to wordcount + spec.
+        # This is the integration boundary; if the factory cannot target an existing
+        # clean dir deterministically, the run must fail and be fixed rather than faked.
+        constrained = (
+            f"{owner_command}\n\n"
+            "Implement ONLY the Milestone 1 `wordcount` pilot in this project directory. "
+            "Follow this behavior spec exactly; do not look for hidden tests or verifiers.\n\n"
+            f"SPEC ({spec_path.name}):\n{spec_text}\n\n"
+            "Deliverables: wordcount package (core.py count_text, cli/__main__), README.md, "
+            "tests/test_wordcount.py (normal, empty, stdin -, missing file/arg exit 2), "
+            "artifacts/test-output.txt from running the tests."
+        )
+        # AICodingFactory.execute currently creates/names its own project path; callers
+        # should prefer tools/run_milestone1_real_agent.py (to be added) for a controlled
+        # invocation. Keep explicit failure here if execute signature/behavior doesn't fit.
+        if not hasattr(factory, "execute"):
+            raise RuntimeError("AICodingFactory.execute not available for real AgentWorker")
+        result = factory.execute(constrained, project_name_hint=project_dir.name)
+        return {"mode": self.mode, "honest": "real_crewai_attempt", "result": str(result)[:4000]}
+
+
 class BusinessCycle:
-    def __init__(self, ops: CompanyOperations = OPS, workspace_root=None, runner=None):
+    def __init__(self, ops: CompanyOperations = OPS, workspace_root=None, runner=None, worker=None):
         self.ops = ops
         self.store = ops.store
         self.workspace_root = Path(workspace_root or (BASE_DIR / "workspace" / "projects")).resolve()
         self.runner = runner or run_sandboxed
+        self.worker = worker or DeterministicWorker()
 
     # -- helpers -----------------------------------------------------------
     @staticmethod
@@ -225,6 +314,7 @@ class BusinessCycle:
         project_key = self._slug(project_key)
         if not owner_command:
             raise ValueError("Owner instruction is required.")
+        self._owner_command = owner_command
 
         project_dir = (self.workspace_root / project_key).resolve()
         if self.workspace_root not in project_dir.parents and project_dir != self.workspace_root:
@@ -380,11 +470,14 @@ characters, with automated tests and a README. No external services.
         }.get(label, "Deliverable is present and verified.")
 
     def _work(self, project_dir: Path):
-        for relative, content in PILOT_FILES.items():
-            self._write(project_dir, relative, content)
-        rule = self.store.set_employee_status("backend", "working",
-                                              "Writing sandboxed project files.", actor="workflow")
-        self._event("agent_output", "backend", "Pilot source, tests and README written.", rule["employee_id"])
+        spec_path = (BASE_DIR.parent / "docs" / "specs" / "wordcount-behavior.md").resolve()
+        meta = self.worker.produce(project_dir, getattr(self, "_owner_command", ""), spec_path)
+        mode = getattr(self.worker, "mode", "unknown")
+        detail = f"Worker produced pilot files (mode={mode})."
+        if mode.startswith("deterministic"):
+            detail += " BACKEND INTEGRATION FIXTURE — not a real Milestone 1 agent run."
+        rule = self.store.set_employee_status("backend", "working", detail[:240], actor="workflow")
+        self._event("agent_output", "backend", json.dumps(meta, ensure_ascii=False, default=str)[:1000], rule["employee_id"])
 
     def _run_tests(self, project_dir: Path) -> dict:
         command = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"]
@@ -527,6 +620,10 @@ QA: {'PASS' if test_result['exit_code'] == 0 else 'FAIL'} · Manager review: {'P
         try:
             run_sandboxed(project_dir, ["bash", "-c", "echo hi"])
         except ValueError:
+            executable_blocked = True
+        except Exception:
+            # With BANGKAH_SANDBOX_REQUIRED=1 and no wrapper, execution fails closed
+            # before executable policy is the deciding factor; that's still a block.
             executable_blocked = True
         # HONEST: path/executable guards only. NFR-SEC-09/10 (filesystem confinement
         # and network egress restriction) are NOT implemented. Do not mark met until

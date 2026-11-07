@@ -734,10 +734,27 @@ class DesktopOperations:
             pass
         run_args = [binary, *args]
         try:
-            from core.sandbox_exec import wrap_argv
-            run_args = wrap_argv(run_args, workdir)
-        except Exception:
-            pass
+            from core.sandbox_exec import enforce_sandbox, sandbox_status
+            status = sandbox_status()
+            if status.get("error") and not status.get("required"):
+                print(f"[WORKSTATION SANDBOX WARNING] {status['error']}", flush=True)
+            if status.get("required") and not status.get("active"):
+                print(f"[WORKSTATION SANDBOX BLOCKED] {status.get('error')}", flush=True)
+                try:
+                    with LOCK, self._db() as db:
+                        self._event(db, "sandbox_blocked", "system", str(workdir), status.get("error", "sandbox required"))
+                except Exception:
+                    pass
+                return {"exit_code": 126, "stdout": "", "stderr": f"sandbox required but not configured/misconfigured: {status.get('error')}"}
+            run_args = enforce_sandbox(run_args, workdir)
+        except RuntimeError as exc:
+            print(f"[WORKSTATION SANDBOX BLOCKED] {exc}", flush=True)
+            try:
+                with LOCK, self._db() as db:
+                    self._event(db, "sandbox_blocked", "system", str(workdir), str(exc))
+            except Exception:
+                pass
+            return {"exit_code": 126, "stdout": "", "stderr": f"sandbox required but not configured/misconfigured: {exc}"}
         try:
             completed = subprocess.run(
                 run_args, cwd=str(workdir), env=env, shell=False,

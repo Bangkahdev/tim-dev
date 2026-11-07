@@ -27,7 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core.business_cycle import BusinessCycle, check_rbac_and_approval  # noqa: E402
+from core.business_cycle import BusinessCycle, CrewAIAgentWorker, DeterministicWorker, check_rbac_and_approval  # noqa: E402
 from core.company_operations import CompanyOperations  # noqa: E402
 from core.office_store import BASE_DIR, OfficeStore  # noqa: E402
 from tools.verify_milestone1 import verify as owner_verify  # noqa: E402
@@ -40,6 +40,7 @@ def main(argv=None) -> int:
     parser.add_argument("--workspace", help="workspace root for pilot projects (each run gets a fresh subdir)")
     parser.add_argument("--isolated-db", action="store_true", help="fresh DB per run (recommended for clean data)")
     parser.add_argument("--external-sandbox", default="", help="note/evidence that pilot ran in disposable VM/container providing FS+network isolation")
+    parser.add_argument("--worker", choices=["deterministic", "real"], default="deterministic", help="deterministic=backend integration fixture (NOT real Milestone 1). real=CrewAI/cloud AgentWorker (requires deps+model+external sandbox).")
     parser.add_argument("--max-attempts", type=int, default=20, help="safety cap on total attempts")
     args = parser.parse_args(argv)
 
@@ -53,10 +54,12 @@ def main(argv=None) -> int:
     consecutive = 0
     attempt = 0
     all_attempts = []
-    print(f"Milestone 1 (wordcount) â€” require {required} CONSECUTIVE passes")
+    worker_mode = "deterministic_integration" if args.worker == "deterministic" else "crewai_real"
+    print(f"Milestone 1 (wordcount) — require {required} CONSECUTIVE passes")
+    print(f"Worker        : {worker_mode}{'  [BACKEND INTEGRATION FIXTURE, NOT REAL MILESTONE 1]' if args.worker == 'deterministic' else ''}")
     print(f"Workspace root: {workspace}")
     print(f"Logs          : {log_dir}")
-    print(f"External sandbox note: {args.external_sandbox or '(none â€” FS/network isolation NOT evidenced)'}")
+    print(f"External sandbox note: {args.external_sandbox or '(none — FS/network isolation NOT evidenced)'}")
     print("-" * 72)
 
     while consecutive < required and attempt < args.max_attempts:
@@ -72,11 +75,17 @@ def main(argv=None) -> int:
         )
         print(f"[attempt {attempt}] target consecutive {run_n}/{required} key={project_key}")
         attempt_log = {"attempt": attempt, "consecutive_target": run_n, "project_key": project_key,
-                       "db": str(db_path), "workspace": str(run_ws), "checks": {}, "failures": []}
+                       "worker": worker_mode, "db": str(db_path), "workspace": str(run_ws), "checks": {}, "failures": []}
         try:
-            result = BusinessCycle(ops, workspace_root=workspace).run(command, project_key)
+            worker = DeterministicWorker() if args.worker == "deterministic" else CrewAIAgentWorker()
+            result = BusinessCycle(ops, workspace_root=workspace, worker=worker).run(command, project_key)
             attempt_log["result"] = {k: v for k, v in result.items() if k != "checks"}
             attempt_log["checks"].update(result.get("checks", {}))
+            if args.worker == "deterministic":
+                attempt_log["checks"]["milestone1.real_agent_worker"] = False
+                attempt_log["failures"].append("deterministic worker is a backend integration fixture, not a real Milestone 1 agent run")
+            else:
+                attempt_log["checks"]["milestone1.real_agent_worker"] = True
 
             # Owner independent verifier (hidden tests, DB/artifacts). Agents never judge themselves.
             v = owner_verify(db_path, project_key, result["project_dir"])
@@ -116,14 +125,18 @@ def main(argv=None) -> int:
                 hard_fail.append(k)
         hard_fail.extend(attempt_log["failures"])
         passed = len(hard_fail) == 0 and attempt_log["checks"].get("verify.OVERALL_VERIFIABLE") is True
+        real_pass = passed and args.worker == "real" and bool(args.external_sandbox)
 
         attempt_log["passed_verifiable"] = passed
+        attempt_log["passed_real_milestone1"] = real_pass
         (log_dir / f"{project_key}.json").write_text(json.dumps(attempt_log, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
         for name, val in sorted(attempt_log["checks"].items()):
             tag = "PASS" if val is True else ("MANUAL" if val == "MANUAL_REQUIRED" else "FAIL")
             print(f"  [{tag}] {name}")
+        if args.worker == "deterministic":
+            print("  [NOTE] deterministic worker used — backend integration fixture only; does NOT satisfy real Milestone 1.")
         if passed and not args.external_sandbox:
-            print("  [NOTE] verifiable checks passed but sandbox FS/network isolation NOT evidenced â€” do not claim SRS sandbox met.")
+            print("  [NOTE] verifiable checks passed but sandbox FS/network isolation NOT evidenced — do not claim SRS sandbox met.")
         if passed and args.external_sandbox:
             print(f"  [NOTE] external sandbox recorded: {args.external_sandbox}")
 
@@ -148,16 +161,18 @@ def main(argv=None) -> int:
         pass
 
     summary = {"required_consecutive": required, "achieved_consecutive": consecutive,
-               "attempts": attempt, "passed": consecutive >= required and static_ok and bool(args.external_sandbox),
-               "passed_verifiable_only": consecutive >= required and static_ok and not bool(args.external_sandbox),
+               "attempts": attempt,
+               "passed": consecutive >= required and static_ok and real_pass,
+               "passed_verifiable_only": consecutive >= required and static_ok and not real_pass,
+               "worker": worker_mode, "real_agent_worker": args.worker == "real",
                "external_sandbox": args.external_sandbox, "logs": str(log_dir), "static": static}
     (log_dir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     print("-" * 72)
     if summary["passed"]:
-        print("MILESTONE 1: PASS (consecutive + verifiable + external sandbox evidenced)")
+        print("MILESTONE 1: PASS (consecutive + real agent + verifiable + external sandbox evidenced)")
         return 0
     if summary["passed_verifiable_only"]:
-        print("MILESTONE 1: INCOMPLETE â€” verifiable checks passed consecutively, but sandbox FS/network isolation (NFR-SEC-09/10) NOT evidenced. Run in disposable VM/container and pass --external-sandbox.")
+        print("MILESTONE 1: INCOMPLETE — not a real pass. Deterministic/integration run or missing external sandbox evidence.")
         return 2
     print("MILESTONE 1: FAIL")
     return 1
