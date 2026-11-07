@@ -25,52 +25,81 @@ static func material(color: Color, roughness: float = 0.86, metallic: float = 0.
 	result.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
 	return result
 
+# Procedural weave normal map, generated once and shared by every fabric material.
+static var _weave_normal_cache: ImageTexture
+
+static func weave_normal_texture() -> ImageTexture:
+	if _weave_normal_cache != null:
+		return _weave_normal_cache
+	var size := 128
+	var image := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var freq := TAU * 16.0 / float(size)  # 16 repeats across the tile → seamless
+	var strength := 0.42
+	for y in range(size):
+		var hy := 0.5 * sin(float(y) * freq)
+		var dy := 0.5 * cos(float(y) * freq) * freq
+		for x in range(size):
+			var hx := 0.5 * sin(float(x) * freq)
+			var dx := 0.5 * cos(float(x) * freq) * freq
+			# Warp + weft height combine; cross threads read as a woven cloth.
+			var normal := Vector3(-(dx + hx * 0.15) * strength, -(dy + hy * 0.15) * strength, 1.0).normalized()
+			image.set_pixel(x, y, Color(normal.x * 0.5 + 0.5, normal.y * 0.5 + 0.5, normal.z * 0.5 + 0.5, 1.0))
+	_weave_normal_cache = ImageTexture.create_from_image(image)
+	return _weave_normal_cache
+
 static func skin_material(base: Color) -> StandardMaterial3D:
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = base
-	mat.roughness = 0.55
+	mat.roughness = 0.52
 	mat.metallic = 0.0
 	mat.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
-	# Subsurface scattering approximation — warm inner glow for realistic skin.
-	mat.emission_enabled = true
-	mat.emission = base.lightened(0.18)
-	mat.emission_energy_multiplier = 0.06
-	# Rim lighting for depth and separation from background.
+	# True subsurface scattering — warm light bleed through skin edges.
+	mat.subsurf_scatter_enabled = true
+	mat.subsurf_scatter_strength = 0.075
+	mat.subsurf_scatter_skin_mode = true
+	# Soft rim only for silhouette separation; no fake self-illumination.
 	mat.rim_enabled = true
-	mat.rim = 0.35
-	mat.rim_tint = 0.45
-	# Subtle specular for skin oiliness.
-	mat.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
+	mat.rim = 0.16
+	mat.rim_tint = 0.32
 	return mat
 
-static func fabric_material(color: Color, roughness: float = 0.88) -> StandardMaterial3D:
+static func fabric_material(color: Color, roughness: float = 0.90) -> StandardMaterial3D:
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = color
 	mat.roughness = roughness
 	mat.metallic = 0.0
 	mat.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
+	# Procedural weave normal map gives office fabric a subtle tactile grain.
+	mat.normal_enabled = true
+	mat.normal_texture = weave_normal_texture()
+	mat.normal_scale = 0.55
+	mat.uv1_scale = Vector3(7.0, 7.0, 1.0)
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	mat.rim_enabled = true
-	mat.rim = 0.12
-	mat.rim_tint = 0.25
+	mat.rim = 0.10
+	mat.rim_tint = 0.20
 	return mat
 
 static func leather_material(color: Color) -> StandardMaterial3D:
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = color
-	mat.roughness = 0.30
-	mat.metallic = 0.05
+	mat.roughness = 0.24
+	mat.metallic = 0.06
 	mat.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
+	mat.clearcoat_enabled = true
+	mat.clearcoat = 0.35
+	mat.clearcoat_roughness = 0.30
 	return mat
 
 static func hair_material(color: Color) -> StandardMaterial3D:
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = color
-	mat.roughness = 0.75
+	mat.roughness = 0.62
 	mat.metallic = 0.02
 	mat.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
 	mat.rim_enabled = true
-	mat.rim = 0.20
-	mat.rim_tint = 0.5
+	mat.rim = 0.24
+	mat.rim_tint = 0.55
 	return mat
 
 static func metallic_material(color: Color, roughness: float = 0.25, metallic: float = 0.7) -> StandardMaterial3D:
@@ -217,6 +246,10 @@ static func build(parent: Node3D, shirt: Color, hair: Color, label_text: String,
 	# -- Procedural detailed humanoid with enhanced proportions --
 	var body := Node3D.new()
 	body.name = "HumanoidVisual"
+	# Whole-body scale brings the procedural figure to ~1.9 m with feet planted;
+	# the head pivot is scaled separately below to hit 7–7.5 head proportions.
+	body.scale = Vector3(0.80, 0.80, 0.80)
+	body.position.y = 0.18
 	parent.add_child(body)
 
 	var is_female := gender.to_lower() == "female"
@@ -299,36 +332,36 @@ static func build(parent: Node3D, shirt: Color, hair: Color, label_text: String,
 	var female_waist_narrow := 0.85 if is_female else 1.0
 
 	# ---- TORSO — anatomically tapered, attractive silhouette ----
-	var shoulder_w := 0.64 * bt_shoulder_w * male_shoulder_boost
+	var shoulder_w := 0.60 * bt_shoulder_w * male_shoulder_boost
 	var waist_w := (0.44 if is_female else 0.47) * bt_waist_w
 	waist_w *= (female_waist_narrow if is_female else male_waist_narrow)
-	var hip_w := (0.50 if is_female else 0.46) * bt_shoulder_w * female_hip_boost
 
 	# Upper chest — broad shoulders with natural taper (more pronounced for men).
 	var chest := _mesh(body, _tapered_torso(shoulder_w, waist_w * 1.08, 0.42, 0.55), fabric_mat, Vector3(0, 1.45, 0))
-	chest.scale = Vector3(1.08 * bt_shoulder_w * male_shoulder_boost, 1.0, 0.82)
+	chest.scale = Vector3(1.02 * bt_shoulder_w * male_shoulder_boost, 1.0, 0.82)
 	# Upper back.
-	_mesh(body, _capsule_mesh(0.245, 0.36, 30, 14), shirt_dark, Vector3(0, 1.52, -0.05)).scale = Vector3(1.0, 0.85, 0.75)
+	_mesh(body, _capsule_mesh(0.215, 0.36, 30, 14), shirt_dark, Vector3(0, 1.52, -0.05)).scale = Vector3(1.0, 0.85, 0.75)
 	# Mid torso — waist narrows naturally (hourglass for women, V-taper for men).
 	var waist := _mesh(body, _tapered_torso(waist_w, waist_w * 0.90, 0.38, 0.38), shirt_dark, Vector3(0, 1.10, 0))
 	waist.scale = Vector3(0.94 if is_female else 0.98, 1.0, 0.80 if is_female else 0.82)
 	# Hips / pelvis — wider than waist (more pronounced for women).
 	var pelvis := _mesh(body, _capsule_mesh(0.26, 0.34, 26, 8), pants_mat, Vector3(0, 0.80, 0))
-	pelvis.scale = Vector3(1.12 * bt_shoulder_w * female_hip_boost, 1.0, 0.85 if is_female else 0.82)
+	var pelvis_w := 1.10 if is_female else 1.04
+	pelvis.scale = Vector3(pelvis_w * bt_shoulder_w * female_hip_boost, 1.0, 0.85 if is_female else 0.82)
 	# Glutes for seated posture.
 	_mesh(body, _sphere_mesh(0.090, 22, 11), pants_mat, Vector3(-0.095, 0.72, -0.13)).scale = Vector3(1.15, 0.72, 0.88)
 	_mesh(body, _sphere_mesh(0.090, 22, 11), pants_mat, Vector3(0.095, 0.72, -0.13)).scale = Vector3(1.15, 0.72, 0.88)
 
-	# Neck — tapered cylinder with natural slope.
-	_mesh(body, _cylinder_mesh(0.064, 0.085, 0.16, 16), skin_mat, Vector3(0, 1.76, 0))
+	# Neck — tapered cylinder with natural slope (tall enough to read under the jaw).
+	_mesh(body, _cylinder_mesh(0.062, 0.082, 0.22, 16), skin_mat, Vector3(0, 1.78, 0))
 	# Adam's apple hint (male only, more defined).
 	if not is_female:
 		_mesh(body, _sphere_mesh(0.024, 14, 8), skin_mat, Vector3(0, 1.75, -0.075)).scale = Vector3(0.85, 1.3, 0.65)
 
-	# Shoulder caps — defined deltoids.
-	for sx in [-0.31, 0.31]:
-		var deltoid := _mesh(body, _sphere_mesh(0.088, 26, 14), fabric_mat, Vector3(sx * bt_shoulder_w * male_shoulder_boost, 1.65, -0.01))
-		deltoid.scale = Vector3(1.0, 0.85, 0.92)
+	# Shoulder caps — defined deltoids, tucked into the chest silhouette.
+	for sx in [-0.292, 0.292]:
+		var deltoid := _mesh(body, _sphere_mesh(0.078, 26, 14), fabric_mat, Vector3(sx * bt_shoulder_w * male_shoulder_boost, 1.64, -0.01))
+		deltoid.scale = Vector3(1.0, 0.80, 0.92)
 
 	# Shirt collar — crisp V-neck.
 	var collar := _mesh(body, _box_mesh(Vector3(0.28, 0.065, 0.15)), shirt_light, Vector3(0, 1.70, -0.12))
@@ -363,6 +396,8 @@ static func build(parent: Node3D, shirt: Color, hair: Color, label_text: String,
 	var head_pivot := Node3D.new()
 	head_pivot.name = "HeadPivot"
 	head_pivot.position = Vector3(0, 1.85, 0)
+	# Head unit scaled relative to the body → roughly 7.2 head-heights tall.
+	head_pivot.scale = Vector3(0.68, 0.68, 0.68)
 	body.add_child(head_pivot)
 
 	# Head — attractive oval shape, wider at cheekbones, narrower at jaw.
@@ -592,12 +627,12 @@ static func build(parent: Node3D, shirt: Color, hair: Color, label_text: String,
 	for side in [-1.0, 1.0]:
 		var shoulder := Node3D.new()
 		shoulder.name = "ArmPivot_%s" % ("L" if side < 0 else "R")
-		shoulder.position = Vector3(side * 0.310 * bt_shoulder_w * male_shoulder_boost, 1.62, 0)
+		shoulder.position = Vector3(side * 0.292 * bt_shoulder_w * male_shoulder_boost, 1.62, 0)
 		body.add_child(shoulder)
 		# Upper arm — sleeve.
 		_mesh(shoulder, _capsule_mesh(0.086, 0.35, 24, 10), fabric_mat, Vector3(0, -0.175, 0))
 		# Deltoid bulge.
-		_mesh(shoulder, _sphere_mesh(0.092, 20, 12), shirt_light, Vector3(0, -0.02, 0)).scale = Vector3(1.08, 0.72, 1.02)
+		_mesh(shoulder, _sphere_mesh(0.080, 20, 12), shirt_light, Vector3(0, -0.02, 0)).scale = Vector3(1.02, 0.70, 1.02)
 		# Elbow joint.
 		_mesh(shoulder, _sphere_mesh(0.070, 20, 12), dark_skin_mat, Vector3(0, -0.35, 0))
 		# Forearm — skin.

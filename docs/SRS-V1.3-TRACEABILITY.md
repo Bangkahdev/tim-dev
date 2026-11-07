@@ -25,14 +25,14 @@ This matrix records the delivered implementation, not an assertion that the enti
 | PRJ-10–13 | Task create, transition validation, acceptance criteria and evidence requirement for completion | Implemented basic backend workflow |
 | APR-01–11 | Approval payload hash / immutability, review, outbox, SMTP / HTTPS webhook adapters, unknown result boundary | Implemented basic local workflow; no complete remote reconciliation |
 | CCC | Company overview, tasks, team, Paper inbox, meetings, approvals and archive panels | Implemented in client source; runtime unverified |
-| SYN-01–09 | Status polling and cursor-based HTTP event retrieval | Partial; no WebSocket replay/ack protocol |
-| NFR-SEC | .env secrets, loopback bind, optional bearer token on all API paths, approval gates | Partial; no short-lived Owner session or process sandbox |
+| SYN-01–09 | Status polling and cursor-based HTTP event retrieval (`/api/audit|/api/events` accept `after_id`/`limit`, return `events` + `next_after_id`/cursor echo, robust cursor parsing) | Partial; no WebSocket replay/ack protocol |
+| NFR-SEC | .env secrets, loopback-only server, session-based auth required for all `/api/*` except login (bcrypt passwords, server-side random tokens, `BANGKAH_SESSION_HOURS` expiry, revoke on logout/disable), RBAC + department scope, actor from session only, deny-by-default unknown API routes, approval gates, legacy shared token only when `BANGKAH_LEGACY_TOKEN_ROLE` is explicitly set | Partial; no user-management HTTP API, no short-lived signed/JWT rotation beyond session expiry, no process/container sandbox or egress proxy |
 | NFR-PRF-01 | Project uses GL Compatibility, frame cap 120 and basic NPC workload | Unverified; no hardware benchmark |
 
 ## Acceptance boundaries
 
-- 56 backend unit tests pass. HTTP smoke tests exercise the local API without invoking a live LLM provider.
-- Godot GDScript parsing/runtime, rendering, physics, camera clipping, GLB animation and FPS have not been run in the build environment.
+- 57 backend unit tests pass in this environment (`test_auth_security`, `test_workstations`, `test_company_operations`, `test_office_store`; run from a Linux env with `backend/requirements.txt`). The broader auth/security slice was reported as 125 passed in CHANGELOG; `backend/tests/conftest.py` isolates DB state. HTTP integration tests that import the server require the full server dependency set (LLM/dotenv stack) and a proper env.
+- Godot headless boot (`godot --headless --path godot --quit`) passed with Godot 4.7.2 in the build environment; rendering, physics, camera clipping, GLB animation and FPS remain not measured.
 - No licensed / third-party rigged GLB assets are bundled. Procedural character fallbacks remain.
 - NPC navigation uses authored waypoints plus local steering, not NavigationAgent3D / NavigationMesh.
 - Local visual meeting animation is not the persisted meeting record. The company UI/API writes the actual record.
