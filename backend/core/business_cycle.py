@@ -279,11 +279,17 @@ class BusinessCycle:
             and self._audit_has("paper_delivered", report_paper["id"])
         )
 
+        # Explicit restart step (playbook item 4/12): after Paper delivered, simulate backend/store restart
+        # and verify evidence, Paper, PrintJob survive before owner final decision.
+        checks["restart_after_delivery_preserves_state"] = self._check_restart_midcycle(
+            project_key, tasks, report_paper, print_job
+        )
+
         # Step 11: owner reviews evidence and the decision is persisted/audited.
         decision = self._owner_review(report_paper)
         checks["duplicate_delivery_is_idempotent"] = self._check_idempotent_delivery(project_dir, project_key)
 
-        # Persistence and audit checks.
+        # Persistence and audit checks (post-decision restart).
         checks["restart_keeps_evidence_paper_printjob_decision"] = self._check_restart(
             project_key, tasks, report_paper, print_job
         )
@@ -499,7 +505,11 @@ QA: {'PASS' if test_result['exit_code'] == 0 else 'FAIL'} · Manager review: {'P
             run_sandboxed(project_dir, ["bash", "-c", "echo hi"])
         except ValueError:
             executable_blocked = True
-        checks["sandbox_blocks_escape_and_shell"] = traversal_blocked and executable_blocked
+        # HONEST: path/executable guards only. NFR-SEC-09/10 (filesystem confinement
+        # and network egress restriction) are NOT implemented. Do not mark met until
+        # OS/container/VM isolation is enforced and evidenced.
+        checks["sandbox_path_and_exec_guards_only_PARTIAL"] = traversal_blocked and executable_blocked
+        checks["sandbox_fs_network_isolation_NFR_SEC_09_10"] = False
 
     def _checks_evidence_gate(self, checks, tasks, project_dir, test_result, qa_report):
         qa_task = tasks[3]
@@ -529,6 +539,29 @@ QA: {'PASS' if test_result['exit_code'] == 0 else 'FAIL'} · Manager review: {'P
                 "WHERE tm.project_key=?", (project_key,)
             ).fetchone()
         return bool(rows and rows["n"] >= len(tasks))
+
+    def _check_restart_midcycle(self, project_key, tasks, paper, job):
+        """Explicit mid-run restart check: reopen store/ops and confirm delivered
+        Paper/PrintJob and task evidence survive a process/store restart."""
+        from .office_store import OfficeStore
+        fresh = OfficeStore(self.ops.db_path)
+        fresh_ops = CompanyOperations(fresh)
+        try:
+            reloaded_paper = fresh_ops.get_paper(paper["id"])
+            reloaded_job = fresh_ops.get_print_job(job["id"])
+            with fresh_ops._db() as db:
+                evidence = db.execute(
+                    "SELECT COUNT(*) AS n FROM task_evidence te JOIN task_meta tm "
+                    "ON tm.task_id=te.task_id WHERE tm.project_key=?", (project_key,)
+                ).fetchone()["n"]
+                delivered = db.execute(
+                    "SELECT 1 FROM events WHERE event_type='paper_delivered' AND entity_id=? LIMIT 1",
+                    (paper["id"],),
+                ).fetchone()
+            # delivery is recorded; job may be queued/completed depending on timing - require paper + evidence + delivery event
+            return bool(reloaded_paper and reloaded_job and evidence >= len(tasks) and delivered)
+        finally:
+            fresh_ops.close()
 
     def _check_restart(self, project_key, tasks, paper, job):
         from .office_store import OfficeStore
