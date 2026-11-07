@@ -728,8 +728,19 @@ class DesktopOperations:
             if os.environ.get(key):
                 env[key] = os.environ[key]
         try:
+            from core.safe_env import safe_subprocess_env
+            env = safe_subprocess_env(env)
+        except Exception:
+            pass
+        run_args = [binary, *args]
+        try:
+            from core.sandbox_exec import wrap_argv
+            run_args = wrap_argv(run_args, workdir)
+        except Exception:
+            pass
+        try:
             completed = subprocess.run(
-                [binary, *args], cwd=str(workdir), env=env, shell=False,
+                run_args, cwd=str(workdir), env=env, shell=False,
                 capture_output=True, text=True, timeout=5,
             )
         except subprocess.TimeoutExpired:

@@ -5,7 +5,7 @@ Implement a small Python CLI utility `wordcount`.
 ## Interface
 - Run as: `python -m wordcount <path|->` (module `wordcount`; `wordcount.cli`/`__main__` acceptable).
 - Input: a UTF-8 text file path, or `-` to read from stdin.
-- Output (stdout, success): a single line containing `lines`, `words`, and `characters` counts plus the input name, e.g. `lines=2 words=4 characters=24 <name>` (exact spacing/labels may vary if clearly labeled and parseable).
+- Output (stdout, success): a single line with clearly labeled, parseable counts for `lines`, `words`, and `characters` plus the input name, e.g. `lines=2 words=4 characters=24 <name>`.
 - Exit codes: `0` on success; `2` on missing argument or missing/unreadable file, with a human-readable error on stderr.
 
 ## Counting rules
@@ -21,4 +21,4 @@ Implement a small Python CLI utility `wordcount`.
 
 ## Notes
 - UTF-8. No external services. Keep it small and deterministic.
-- Your tests are necessary but not sufficient; correctness is verified independently by the Owner.
+- Your tests are necessary but not sufficient; correctness is verified independently by the Owner. The verifier uses hidden cases (including no-trailing-newline and whitespace variants) not listed here.

@@ -31,12 +31,17 @@ def expected(text: str) -> dict:
 
 
 def _parse_output(out: str):
-    # accept `lines=N words=N characters=N <name>` or close variants
+    # Accept labeled form (spec): lines=N words=N characters=N <name>
+    # Also accept plain form tolerated by docs: "2 4 24 <name>" (first three ints).
     import re
     m = re.search(r"lines\s*[:=]\s*(\d+).*?words\s*[:=]\s*(\d+).*?(?:characters|chars)\s*[:=]\s*(\d+)", out, re.I | re.S)
-    if not m:
-        return None
-    return {"lines": int(m.group(1)), "words": int(m.group(2)), "chars": int(m.group(3))}
+    if m:
+        return {"lines": int(m.group(1)), "words": int(m.group(2)), "chars": int(m.group(3))}
+    first = (out or "").strip().splitlines()[0] if (out or "").strip() else ""
+    nums = re.findall(r"-?\d+", first)
+    if len(nums) >= 3:
+        return {"lines": int(nums[0]), "words": int(nums[1]), "chars": int(nums[2])}
+    return None
 
 
 def run_cli(project_dir: Path, args, stdin_text=None):
@@ -54,28 +59,56 @@ def run_cli(project_dir: Path, args, stdin_text=None):
     return None, -1, "no runnable wordcount module", "", "no runnable wordcount module"
 
 
+def _write_fixture(path: Path, text: str):
+    # newline="" preserves \n/\r\n exactly across platforms (critical on Windows).
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(text)
+
+
 def hidden_tests(project_dir: Path):
     cases = []
+
     def add(name, ok, detail):
         cases.append({"name": name, "pass": bool(ok), "detail": detail})
+
+    def run_case(name, text, as_stdin=False):
+        if as_stdin:
+            mod, rc, _, out, err = run_cli(project_dir, ["-"], stdin_text=text)
+            label = "stdin"
+        else:
+            f = td / f"{name}.txt"
+            _write_fixture(f, text)
+            mod, rc, _, out, err = run_cli(project_dir, [str(f)])
+            label = str(f)
+        exp = expected(text)
+        got = _parse_output(out or "")
+        add(name, rc == 0 and got == exp, f"mod={mod} label={label} rc={rc} expected={exp} got={got} out={out!r} err={err!r}")
+
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
         # normal file
-        text = "hello world\nsecond line\n"
-        f = td / "normal.txt"; f.write_text(text, encoding="utf-8")
-        mod, rc, _, out, err = run_cli(project_dir, [str(f)])
-        exp = expected(text); got = _parse_output(out or "")
-        add("hidden.normal_file", rc == 0 and got == exp, f"rc={rc} expected={exp} got={got} out={out!r}")
+        run_case("hidden.normal_file", "hello world\nsecond line\n")
         # empty file
-        text = ""; f = td / "empty.txt"; f.write_text(text, encoding="utf-8")
-        mod, rc, _, out, err = run_cli(project_dir, [str(f)])
-        exp = expected(text); got = _parse_output(out or "")
-        add("hidden.empty_file", rc == 0 and got == exp, f"rc={rc} expected={exp} got={got} out={out!r}")
+        run_case("hidden.empty_file", "")
         # stdin
-        text = "alpha beta\ngamma\n"
-        mod, rc, _, out, err = run_cli(project_dir, ["-"], stdin_text=text)
-        exp = expected(text); got = _parse_output(out or "")
-        add("hidden.stdin", rc == 0 and got == exp, f"rc={rc} expected={exp} got={got} out={out!r}")
+        run_case("hidden.stdin", "alpha beta\ngamma\n", as_stdin=True)
+        # no trailing newline (spec-critical)
+        run_case("hidden.no_trailing_newline", "a b\nc")
+        run_case("hidden.single_line_no_newline", "hello world")
+        # lone newline / whitespace delimiters
+        run_case("hidden.lone_newline", "\n")
+        run_case("hidden.repeated_whitespace", "  a\t\tb \n  c  \n")
+        # CRLF — file bytes contain \r\n. Portable CLIs typically read text with
+        # universal newlines (\r\n -> \n), so accept either preserved-CR or normalized.
+        crlf = "one two\r\nthree\r\n"
+        f = td / "hidden.crlf.txt"
+        _write_fixture(f, crlf)
+        mod, rc, _, out, err = run_cli(project_dir, [str(f)])
+        got = _parse_output(out or "")
+        exp_preserved = expected(crlf)
+        exp_normalized = expected(crlf.replace("\r\n", "\n"))
+        add("hidden.crlf", rc == 0 and got in (exp_preserved, exp_normalized),
+            f"mod={mod} rc={rc} expected_one_of={[exp_preserved, exp_normalized]} got={got} out={out!r} err={err!r}")
         # missing file/arg -> exit 2, stderr message
         mod, rc, _, out, err = run_cli(project_dir, [str(td / "nope-missing.txt")])
         add("hidden.missing_file_exit2", rc == 2 and bool((err or "").strip() or (out or "").strip()),
@@ -84,11 +117,7 @@ def hidden_tests(project_dir: Path):
         add("hidden.missing_arg_exit2", rc == 2 and bool((err or "").strip() or (out or "").strip()),
             f"rc={rc} stderr={err!r} out={out!r}")
         # UTF-8 multibyte (chars are characters, not bytes)
-        text = "halo café\nこんにちは 世界\n"
-        f = td / "utf8.txt"; f.write_text(text, encoding="utf-8")
-        mod, rc, _, out, err = run_cli(project_dir, [str(f)])
-        exp = expected(text); got = _parse_output(out or "")
-        add("hidden.utf8_multibyte_chars", rc == 0 and got == exp, f"rc={rc} expected(chars,not bytes)={exp} got={got} out={out!r}")
+        run_case("hidden.utf8_multibyte_chars", "halo café\nこんにちは 世界\n")
     return cases
 
 

@@ -322,8 +322,15 @@ def create_project_tools(project_dir, logger):
                 f"[TERMINAL] $ {command}"
             )
 
+            run_args = list(args)
+            try:
+                from core.sandbox_exec import wrap_argv
+                run_args = wrap_argv(run_args, project_dir)
+            except Exception:
+                pass
+
             result = subprocess.run(
-                args,
+                run_args,
                 cwd=project_dir,
                 capture_output=True,
                 text=True,

@@ -29,9 +29,14 @@ Complete one small real software project from Owner instruction to reviewable de
 
 ## Pilot spec (`wordcount`)
 
-- `python -m wordcount <file|->` (or equivalent documented CLI) prints `lines words chars <name>` (UTF-8; stdin name `-` or `<stdin>`). Exit `0` ok, `2` missing arg/file, message to stderr.
-- `README.md` and `tests/test_wordcount.py` (pytest/unittest as chosen) covering at minimum: normal file, empty file, stdin, missing file/arg.
-- Created in a **dedicated workspace** (e.g. `backend/workspace/projects/milestone1-wordcount-runN/`), **never** a production or personal directory.
+Use the agent-facing spec as the single source of truth: **[`docs/specs/wordcount-behavior.md`](specs/wordcount-behavior.md)**.
+
+- `python -m wordcount <path|->` (module `wordcount`; `wordcount.cli`/`__main__` acceptable). UTF-8. stdin name `-`.
+- Success output (stdout): a single line with clearly labeled parseable counts for `lines`, `words`, `characters` plus the input name, e.g. `lines=2 words=4 characters=24 <name>`.
+- Exit `0` on success; `2` on missing argument or missing/unreadable file, with a human-readable error on stderr.
+- Counting: `characters` = Unicode character count (not bytes); `words` = whitespace-delimited tokens (`str.split()`); `lines` = newline count plus 1 for a non-empty text that does not end with a newline, else 0 for empty text.
+- Deliverables: `wordcount/` package (`core.py` with `count_text(text) -> {lines,words,characters}` plus `cli.py`/`__main__`), `README.md`, `tests/test_wordcount.py` (normal file, empty file, stdin `-`, missing file/arg), `artifacts/test-output.txt`.
+- Created in a **dedicated workspace** (e.g. `backend/workspace/projects/milestone1-wordcount-runN/`), **never** a production or personal directory. The Owner verifier runs hidden cases agents do not see.
 
 ## Required evidence (per run)
 
@@ -47,9 +52,9 @@ Complete one small real software project from Owner instruction to reviewable de
 
 ## Sandbox & hidden-test operational notes (pre-run)
 
-- **VM/network (point 1):** Sekretaris/Lead/QA may need cloud model APIs. A *fully* network-isolated VM kills the cycle. Use a disposable VM/container whose firewall allows **only** the model API hosts (+ DNS) and record that exact allowlist in `--external-sandbox`; **or** isolate only the **agent subprocess** (e.g. run agent command in a container `--network none` with only the project dir mounted) — this requires new subprocess-isolation code (current `run_sandboxed`/worker has no such hook). Never claim NFR-SEC-09/10 without evidence.
-- **Hidden tests (point 2):** without FS sandbox, agents could read the verifier. Run/keep `backend/tools/verify_milestone1.py` (and its hidden case list) **outside the agent-visible project tree** or execute it as a different OS user/path not mounted into the agent workspace; ensure RAG indexing (`docs/`, `reports/`, `workspace/projects/`) does **not** expose `tools/` hidden-case inputs. The `wordcount` spec given to agents must be behavior-only, not the verifier contents.
-- **Verify the verifier (point 3):** keep `backend/tests/test_verify_milestone1_whitebox.py` passing (correct impl PASS; byte-vs-char, off-by-one lines, missing-file-exit-0, no-stdin FAIL) before trusting Milestone 1 results.
+- **VM/network (point 1):** Sekretaris/Lead/QA may need cloud model APIs. A *fully* network-isolated VM kills the cycle. Use a disposable VM/container whose firewall allows **only** the model API hosts (+ DNS) and record that exact allowlist in `--external-sandbox`; **or** isolate only the **agent subprocess** (e.g. run agent command in a container `--network none` with only the project dir mounted). `core.sandbox_exec.wrap_argv` is wired into `run_sandboxed` (backend/core), the CrewAI tool `Run Project Command` (backend/main.py), and the desktop terminal external binary path (backend/core/workstations.py) when `BANGKAH_SANDBOX_CMD` is set. Never claim NFR-SEC-09/10 without evidence.
+- **Hidden tests (point 2):** without FS sandbox, agents could read the verifier. Run/keep `backend/tools/verify_milestone1.py` (and its hidden case list) **outside the agent-visible project tree** or execute it as a different OS user/path not mounted into the agent workspace; ensure RAG indexing (`docs/`, `reports/`, `workspace/projects/`, `core/`, `web/`) does **not** expose `tools/` hidden-case inputs. `core/business_cycle.py` and `docs/MILESTONE-1-PLAYBOOK.md` are excluded from agent RAG seeding. The `wordcount` spec given to agents must be behavior-only, not the verifier contents.
+- **Verify the verifier (point 3):** keep `backend/tests/test_verify_milestone1_whitebox.py` passing (correct impl PASS; byte-vs-char, off-by-one lines, no-trailing-newline/single-line/whitespace/CRLF cases, missing-file-exit-0, no-stdin FAIL) before trusting Milestone 1 results.
 
 ## Acceptance checks
 

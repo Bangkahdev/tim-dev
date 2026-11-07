@@ -257,8 +257,12 @@ class KnowledgeBase:
         root_files = [BASE_DIR / name for name in (
             "README.md", "main.py", "office_server.py", "config.py", ".env.example"
         )]
+        # NOTE: `tests/` is intentionally NOT indexed here. It can contain verifier
+        # fixtures/mutants and reference answers (e.g. Milestone 1). `tools/` and
+        # verifier scripts live outside these roots. Keep agent-facing RAG free of
+        # hidden-test inputs and reference implementations.
         roots = [
-            BASE_DIR / "core", BASE_DIR / "web", BASE_DIR / "tests",
+            BASE_DIR / "core", BASE_DIR / "web",
             BASE_DIR / "reports", BASE_DIR / "workspace" / "projects", BASE_DIR / "docs",
         ]
         allowed_suffixes = {
@@ -266,16 +270,25 @@ class KnowledgeBase:
             ".css", ".json", ".toml", ".ini",
         }
         candidates = [(path, path.name) for path in root_files if path.is_file()]
-        skip_dirs = {".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", "data", "build", "dist"}
+        skip_dirs = {".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", "data", "build", "dist", "tools"}
+        # Files that leak Milestone 1 reference answers or hidden-verifier details to agents.
+        skip_files = {
+            "core/business_cycle.py",
+            "docs/MILESTONE-1-PLAYBOOK.md",
+        }
         for root in roots:
             if not root.exists():
                 continue
             for path in root.rglob("*"):
                 if not path.is_file() or path.suffix.lower() not in allowed_suffixes:
                     continue
+                rel = path.relative_to(BASE_DIR).as_posix()
                 if any(part in skip_dirs or part.startswith(".") for part in path.relative_to(BASE_DIR).parts):
                     continue
-                candidates.append((path, path.relative_to(BASE_DIR).as_posix()))
+                if rel in skip_files or rel.startswith("tools/") or "verify_milestone" in rel or rel.startswith("tests/test_verify_milestone"):
+                    self._remove_source_versions(f"file:{rel}")
+                    continue
+                candidates.append((path, rel))
 
         seen = set()
         for path, label in candidates:
