@@ -47,3 +47,4 @@ Thumbs.db
 backend/.pylibs/
 *.so
 .aider*
+*.zip
