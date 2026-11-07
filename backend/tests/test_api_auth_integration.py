@@ -73,6 +73,9 @@ class ApiAuthIntegrationTests(unittest.TestCase):
             data = {"raw": raw.decode("utf-8", "replace")}
         return response.status, data
 
+    def setUp(self):
+        sessions.clear_login_throttle()
+
     def login(self, role):
         status, data = self.request("POST", "/api/auth/login", {
             "username": self.users[role], "password": self.PASSWORD})
@@ -255,3 +258,37 @@ class ApiAuthIntegrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_login_throttle_returns_429_with_retry_after_and_generic_message(self):
+        sessions.clear_login_throttle()
+        target = self.users["employee"]
+        status = 0
+        data = {}
+        headers = {}
+        for _ in range(6):
+            connection = http.client.HTTPConnection("127.0.0.1", self.PORT, timeout=15)
+            payload = json.dumps({"username": target, "password": "wrong-password"})
+            connection.request("POST", "/api/auth/login", payload, {"Content-Type": "application/json"})
+            response = connection.getresponse()
+            raw = response.read()
+            headers = {k: v for k, v in response.getheaders()}
+            status = response.status
+            try:
+                data = json.loads(raw) if raw else {}
+            except json.JSONDecodeError:
+                data = {}
+            connection.close()
+        self.assertEqual(status, 429, data)
+        self.assertIn("Retry-After", headers)
+        self.assertEqual(data.get("error", {}).get("code"), "TOO_MANY_ATTEMPTS")
+        self.assertEqual(data.get("error", {}).get("message"), "Login failed")
+        sessions.clear_login_throttle()
+
+    def test_nonexistent_user_returns_same_generic_invalid_credentials(self):
+        sessions.clear_login_throttle()
+        status, data = self.request("POST", "/api/auth/login", {
+            "username": "nobody." + self.SUFFIX, "password": "wrong-password"})
+        self.assertEqual(status, 401, data)
+        self.assertEqual(data.get("error", {}).get("code"), "INVALID_CREDENTIALS")
+        self.assertEqual(data.get("error", {}).get("message"), "Login failed")
