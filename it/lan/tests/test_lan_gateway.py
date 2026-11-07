@@ -1,9 +1,16 @@
 ﻿import http.client
 import io
 import json
+import sys
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+# Allow running as `pytest ../it` from backend/ or from repo root.
+_ROOT = Path(__file__).resolve().parents[3]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 from it.lan.lan_gateway import GatewayHandler, HOP_BY_HOP, is_private_client, parse_address
 

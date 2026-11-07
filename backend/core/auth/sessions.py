@@ -1,3 +1,4 @@
+import hashlib
 import os
 import re
 import secrets
@@ -46,6 +47,37 @@ def _ensure_columns(db):
             db.execute(f"ALTER TABLE auth_users ADD COLUMN {name} {definition}")
 
 
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+
+
+def _migrate_auth_sessions(db):
+    cols = {row["name"] for row in db.execute("PRAGMA table_info(auth_sessions)")}
+    if "token_hash" in cols:
+        return
+    db.execute("ALTER TABLE auth_sessions RENAME TO auth_sessions_plaintext_legacy")
+    db.execute("""
+        CREATE TABLE auth_sessions (
+            token_hash TEXT PRIMARY KEY,
+            username TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            revoked INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    rows = db.execute(
+        "SELECT token,username,created_at,expires_at,revoked FROM auth_sessions_plaintext_legacy"
+    ).fetchall()
+    for row in rows:
+        db.execute(
+            "INSERT OR IGNORE INTO auth_sessions(token_hash,username,created_at,expires_at,revoked) VALUES(?,?,?,?,?)",
+            (_token_hash(row["token"]), row["username"], row["created_at"], row["expires_at"], row["revoked"]),
+        )
+    db.execute("DROP TABLE auth_sessions_plaintext_legacy")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(username, revoked)")
+
 def _init():
     with LOCK, _db() as db:
         db.executescript("""
@@ -60,7 +92,7 @@ def _init():
                 created_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS auth_sessions (
-                token TEXT PRIMARY KEY,
+                token_hash TEXT PRIMARY KEY,
                 username TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 expires_at TEXT NOT NULL,
@@ -68,6 +100,7 @@ def _init():
             );
             CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(username, revoked);
         """)
+        _migrate_auth_sessions(db)
         _ensure_columns(db)
 
 
@@ -215,7 +248,7 @@ def set_user_role(username, role):
         db.execute("UPDATE auth_users SET role=? WHERE username=?", (role, username))
 
 
-def verify_user(username, password, client_ip=None, clock=None):
+def verify_user(username, password, client_ip=None, clock=None, xff_present=None):
     from core.auth.password import verify_password as _verify
     username = str(username or "").strip()
     password = "" if password is None else str(password)
@@ -224,14 +257,25 @@ def verify_user(username, password, client_ip=None, clock=None):
     pair_key = _key("pair", username, ip)
     user_key = _key("user", username)
 
-    for key, window, max_failures in (
-        (pair_key, WINDOW_SECONDS, MAX_FAILURES),
-        (user_key, GLOBAL_WINDOW_SECONDS, GLOBAL_MAX_FAILURES),
-    ):
-        _, retry_after = _attempt_state(key, now_ts, window)
+    _, retry_after = _attempt_state(pair_key, now_ts, WINDOW_SECONDS)
+    if retry_after > 0:
+        _audit("auth_login_locked", username or "unknown", f"ip={ip} scope=pair retry_after={int(retry_after)}")
+        raise LoginThrottled(retry_after)
+
+    import ipaddress as _ipaddress
+    _peer = None
+    try:
+        _peer = _ipaddress.ip_address(ip)
+    except ValueError:
+        pass
+    _loopback_direct = _peer is not None and _peer.is_loopback and not xff_present
+    if not _loopback_direct:
+        _, retry_after = _attempt_state(user_key, now_ts, GLOBAL_WINDOW_SECONDS)
         if retry_after > 0:
-            _audit("auth_login_locked", username or "unknown", f"ip={ip} retry_after={int(retry_after)}")
+            _audit("auth_login_global_lock", username or "unknown", f"ip={ip} scope=global retry_after={int(retry_after)}")
             raise LoginThrottled(retry_after)
+    else:
+        _audit("auth_login_throttle_bypass", username or "unknown", f"ip={ip} reason=direct_loopback_no_xff scope=global")
 
     with LOCK, _db() as db:
         row = db.execute(
@@ -243,26 +287,28 @@ def verify_user(username, password, client_ip=None, clock=None):
     if not row or not row["enabled"]:
         _verify(password, _fake_hash())
         ra1 = _record_failure(pair_key, now_ts, WINDOW_SECONDS, MAX_FAILURES, LOCK_BASE_SECONDS, LOCK_MAX_SECONDS)
-        ra2 = _record_failure(user_key, now_ts, GLOBAL_WINDOW_SECONDS, GLOBAL_MAX_FAILURES, GLOBAL_LOCK_SECONDS, GLOBAL_LOCK_SECONDS)
+        ra2 = 0.0
+        if not _loopback_direct:
+            ra2 = _record_failure(user_key, now_ts, GLOBAL_WINDOW_SECONDS, GLOBAL_MAX_FAILURES, GLOBAL_LOCK_SECONDS, GLOBAL_LOCK_SECONDS)
         retry_after = max(ra1, ra2)
-        detail = f"ip={ip} reason={'disabled' if row else 'missing'}"
+        detail = f"ip={ip} reason={'disabled' if row else 'missing'} scope={'pair' if ra1 >= ra2 else 'global'}"
         if retry_after:
             detail += f" locked retry_after={int(retry_after)}"
+            _audit("auth_login_global_lock" if ra2 > ra1 else "auth_login_locked", username or "unknown", detail)
         _audit("auth_login_failed", username or "unknown", detail)
-        if retry_after:
-            raise LoginThrottled(retry_after)
         return None
 
     if not _verify(password, row["password_hash"]):
         ra1 = _record_failure(pair_key, now_ts, WINDOW_SECONDS, MAX_FAILURES, LOCK_BASE_SECONDS, LOCK_MAX_SECONDS)
-        ra2 = _record_failure(user_key, now_ts, GLOBAL_WINDOW_SECONDS, GLOBAL_MAX_FAILURES, GLOBAL_LOCK_SECONDS, GLOBAL_LOCK_SECONDS)
+        ra2 = 0.0
+        if not _loopback_direct:
+            ra2 = _record_failure(user_key, now_ts, GLOBAL_WINDOW_SECONDS, GLOBAL_MAX_FAILURES, GLOBAL_LOCK_SECONDS, GLOBAL_LOCK_SECONDS)
         retry_after = max(ra1, ra2)
-        detail = f"ip={ip} reason=bad_password"
+        detail = f"ip={ip} reason=bad_password scope={'pair' if ra1 >= ra2 else 'global'}"
         if retry_after:
             detail += f" locked retry_after={int(retry_after)}"
+            _audit("auth_login_global_lock" if ra2 > ra1 else "auth_login_locked", username, detail)
         _audit("auth_login_failed", username, detail)
-        if retry_after:
-            raise LoginThrottled(retry_after)
         return None
 
     _reset_attempt(pair_key)
@@ -279,8 +325,8 @@ def create_session(username, ttl_seconds=None):
     expires_iso = datetime.fromtimestamp(time.time() + ttl_seconds, timezone.utc).isoformat()
     with LOCK, _db() as db:
         db.execute(
-            "INSERT INTO auth_sessions(token,username,created_at,expires_at) VALUES(?,?,?,?)",
-            (token, username, now, expires_iso),
+            "INSERT INTO auth_sessions(token_hash,username,created_at,expires_at) VALUES(?,?,?,?)",
+            (_token_hash(token), username, now, expires_iso),
         )
     return token
 
@@ -291,7 +337,7 @@ def get_session(token):
         return None
     with LOCK, _db() as db:
         row = db.execute(
-            "SELECT username,expires_at,revoked FROM auth_sessions WHERE token=?", (token,)
+            "SELECT username,expires_at,revoked FROM auth_sessions WHERE token_hash=?", (_token_hash(token),)
         ).fetchone()
     if not row or row["revoked"]:
         return None
@@ -322,7 +368,7 @@ def revoke_session(token):
     if not token:
         return
     with LOCK, _db() as db:
-        db.execute("UPDATE auth_sessions SET revoked=1 WHERE token=?", (token,))
+        db.execute("UPDATE auth_sessions SET revoked=1 WHERE token_hash=?", (_token_hash(token),))
 
 
 def revoke_all(username):
