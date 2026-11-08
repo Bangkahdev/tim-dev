@@ -83,6 +83,9 @@ func build() -> void:
 	_build_free_seating_l1()
 	_build_information_boards()
 	_build_accent_walls_l1()
+	_build_l1_innovation_gallery()
+	_build_l1_architectural_finishes()
+	_build_l1_master_lighting()
 	_build_floor_cores() # stairs+lift landings all floors
 	# L2: core employees / karyawan inti (LANTAI 2)
 	_floor_y = L2_Y
@@ -188,7 +191,7 @@ func _box(label: String, position: Vector3, size: Vector3, color: Color, collisi
 		root.add_child(shape)
 	return root
 
-func _cylinder(label: String, position: Vector3, radius: float, height: float, color: Color, parent: Node3D = null, collision: bool = false, metallic: float = 0.0) -> Node3D:
+func _cylinder(label: String, position: Vector3, radius: float, height: float, color: Color, parent: Node3D = null, collision: bool = false, metallic: float = 0.0, roughness: float = 0.72, emission: Color = Color.BLACK, transparent: bool = false) -> Node3D:
 	var root: Node3D = StaticBody3D.new() if collision else Node3D.new()
 	root.name = label.replace(" ", "_")
 	root.position = position + (Vector3.ZERO if parent != null else Vector3(0, _floor_y, 0))
@@ -203,7 +206,7 @@ func _cylinder(label: String, position: Vector3, radius: float, height: float, c
 	shape_mesh.height = height
 	shape_mesh.radial_segments = 20
 	mesh.mesh = shape_mesh
-	mesh.material_override = _mat(color, 0.72, metallic)
+	mesh.material_override = _mat(color, roughness, metallic, transparent, emission)
 	root.add_child(mesh)
 	if collision:
 		var collision_node := CollisionShape3D.new()
@@ -1131,13 +1134,49 @@ func _build_room_floors() -> void:
 		["QA carpet L2",Vector3(-6.5,L2_Y+0.018,-7.8),Vector3(25.0,0.035,21.0),Color("#67756b")],
 		["Backend carpet L2",Vector3(24.0,L2_Y+0.018,-7.8),Vector3(30.0,0.035,21.0),Color("#656f6a")]]:
 		_box(d[0],d[1],d[2],d[3],false,null,0.94,0.0,false,Color.BLACK,carpet_material)
-	# L1 public/services (polished lobby stone/terrazzo, SSR-friendly) — Design Bible
-	_box("Meeting carpet L1", Vector3(-29.5, L1_Y + 0.018, 14.5), Vector3(18.0, 0.035, 20.0), Color("#7a7582"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
-	_box("Lobby stone floor L1", Vector3(-0.4, L1_Y + 0.018, 14.5), Vector3(38.0, 0.035, 20.0), Color("#e6e2d8"), false, null, 0.14, 0.03, false, Color.BLACK, stone_material)
-	_box("API lab floor L1", Vector3(29.0, L1_Y + 0.018, 14.5), Vector3(20.0, 0.035, 20.0), Color("#8a9698"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
-	_box("Archive floor L1", Vector3(-29.5, L1_Y + 0.018, 32.0), Vector3(18.0, 0.035, 14.0), Color("#a89c8e"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
-	_box("Staff lounge floor L1", Vector3(9.0, L1_Y + 0.018, 32.0), Vector3(18.5, 0.035, 14.0), Color("#a0ada0"), false, null, 0.92, 0.0, false, Color.BLACK, carpet_material)
-	_box("Pantry tile floor L1", Vector3(30.0, L1_Y + 0.018, 32.0), Vector3(23.5, 0.035, 14.0), Color("#d4d2c8"), false, null, 0.22, 0.06, false, Color.BLACK, tile_material)
+	# L1 public/services (polished Italian Calacatta marble, Nero Marquina borders, royal walnut)
+	# Base polished Calacatta marble across the entire Grand Central Atrium
+	_box("Lobby calacatta floor L1", Vector3(-0.4, L1_Y + 0.018, 22.0), Vector3(38.0, 0.035, 35.0), Color("#f7f5ed"), false, null, 0.12, 0.03, false, Color.BLACK, stone_material)
+	# Nero Marquina processional borders flanking the central walkway from entrance to reception & core
+	_box("Lobby Nero border W", Vector3(-5.2, L1_Y + 0.022, 25.0), Vector3(0.55, 0.038, 29.0), Color("#1a1d1f"), false, null, 0.14, 0.04)
+	_box("Lobby Nero border E", Vector3(5.2, L1_Y + 0.022, 25.0), Vector3(0.55, 0.038, 29.0), Color("#1a1d1f"), false, null, 0.14, 0.04)
+	# Champagne brass decorative inlay stringers
+	_box("Lobby brass inlay W", Vector3(-4.88, L1_Y + 0.025, 25.0), Vector3(0.08, 0.042, 29.0), Color("#d4b878"), false, null, 0.28, 0.72)
+	_box("Lobby brass inlay E", Vector3(4.88, L1_Y + 0.025, 25.0), Vector3(0.08, 0.042, 29.0), Color("#d4b878"), false, null, 0.28, 0.72)
+	# Grand arrival carpet mosaic at the south entrance threshold
+	_box("Entrance Nero border", Vector3(0, L1_Y + 0.022, 38.2), Vector3(14.8, 0.038, 3.2), Color("#1a1d1f"), false, null, 0.14, 0.04)
+	_box("Entrance Calacatta field", Vector3(0, L1_Y + 0.024, 38.2), Vector3(13.6, 0.040, 2.2), Color("#f7f5ed"), false, null, 0.10, 0.03)
+	_box("Entrance brass frame", Vector3(0, L1_Y + 0.026, 38.2), Vector3(14.0, 0.042, 2.5), Color("#d4b878"), false, null, 0.25, 0.75)
+
+	# Executive Boardroom: Deep acoustic charcoal perimeter carpet with royal walnut herringbone center
+	_box("Meeting carpet L1", Vector3(-29.5, L1_Y + 0.018, 14.5), Vector3(18.0, 0.035, 20.0), Color("#242728"), false, null, 0.94, 0.0, false, Color.BLACK, carpet_material)
+	_box("Boardroom walnut parquet L1", Vector3(-29.5, L1_Y + 0.024, 14.3), Vector3(13.2, 0.038, 6.2), Color("#563d28"), false, null, 0.45, 0.02)
+	_box("Boardroom brass trim L1", Vector3(-29.5, L1_Y + 0.026, 14.3), Vector3(13.45, 0.040, 6.45), Color("#d4b878"), false, null, 0.28, 0.72)
+
+	# API & Infrastructure Lab: Tech slate access flooring with luminescent cyan edge channels
+	_box("API lab floor L1", Vector3(29.0, L1_Y + 0.018, 14.5), Vector3(20.0, 0.035, 20.0), Color("#1b2226"), false, null, 0.35, 0.18)
+	_box("API luminescent strip L1", Vector3(24.7, L1_Y + 0.024, 17.5), Vector3(10.6, 0.038, 0.12), Color("#00e5ff"), false, null, 0.2, 0.0, false, Color("#00e5ff"))
+	_box("API perimeter frame L1", Vector3(29.0, L1_Y + 0.020, 14.5), Vector3(19.6, 0.036, 19.6), Color("#2e383e"), false, null, 0.40, 0.20)
+
+	# Company Archive & Print Suite: Warm executive herringbone smoked oak with limestone borders
+	_box("Archive floor L1", Vector3(-29.5, L1_Y + 0.018, 32.0), Vector3(18.0, 0.035, 14.0), Color("#69513b"), false, null, 0.52, 0.02)
+	_box("Archive limestone border L1", Vector3(-29.5, L1_Y + 0.020, 32.0), Vector3(17.6, 0.036, 13.6), Color("#d5cfc4"), false, null, 0.32, 0.04)
+	_box("Archive brass trim L1", Vector3(-29.5, L1_Y + 0.023, 32.0), Vector3(16.5, 0.038, 12.5), Color("#d4b878"), false, null, 0.28, 0.72)
+
+	# Café Bangkah & Executive Social Lounge: Quartz terrazzo bar + moss-sage wool lounge carpet
+	_box("Staff lounge floor L1", Vector3(9.0, L1_Y + 0.018, 32.0), Vector3(18.5, 0.035, 14.0), Color("#4d5c54"), false, null, 0.94, 0.0, false, Color.BLACK, carpet_material)
+	_box("Staff lounge walnut surround L1", Vector3(9.0, L1_Y + 0.020, 32.0), Vector3(18.8, 0.036, 14.3), Color("#664d36"), false, null, 0.48, 0.02)
+	_box("Pantry tile floor L1", Vector3(30.0, L1_Y + 0.018, 32.0), Vector3(23.5, 0.035, 14.0), Color("#ece8de"), false, null, 0.16, 0.06, false, Color.BLACK, tile_material)
+	_box("Pantry brass transition L1", Vector3(18.25, L1_Y + 0.028, 32.0), Vector3(0.10, 0.042, 14.0), Color("#d4b878"), false, null, 0.25, 0.75)
+
+	# Tech Exhibition Gallery & Engineering Heritage Hall (North Wing L1): Calacatta marble, Nero Marquina & Brass inlays
+	_box("Gallery main calacatta floor L1", Vector3(-10.5, L1_Y + 0.018, -18.0), Vector3(58.0, 0.035, 43.0), Color("#f7f5ed"), false, null, 0.12, 0.03, false, Color.BLACK, stone_material)
+	_box("Gallery east calacatta floor L1", Vector3(29.5, L1_Y + 0.018, -29.8), Vector3(22.0, 0.035, 19.5), Color("#f7f5ed"), false, null, 0.12, 0.03, false, Color.BLACK, stone_material)
+	_box("Compute lab slate floor L1", Vector3(29.5, L1_Y + 0.018, -8.0), Vector3(22.0, 0.035, 23.5), Color("#1b2226"), false, null, 0.35, 0.18)
+	_box("Gallery Nero border W", Vector3(-15.8, L1_Y + 0.022, -18.0), Vector3(0.55, 0.038, 41.0), Color("#1a1d1f"), false, null, 0.14, 0.04)
+	_box("Gallery Nero border E", Vector3(-5.2, L1_Y + 0.022, -18.0), Vector3(0.55, 0.038, 41.0), Color("#1a1d1f"), false, null, 0.14, 0.04)
+	_box("Gallery brass inlay W", Vector3(-15.48, L1_Y + 0.025, -18.0), Vector3(0.08, 0.042, 41.0), Color("#d4b878"), false, null, 0.28, 0.72)
+	_box("Gallery brass inlay E", Vector3(-4.88, L1_Y + 0.025, -18.0), Vector3(0.08, 0.042, 41.0), Color("#d4b878"), false, null, 0.28, 0.72)
 	var _fys: Array[float] = [L1_Y, L2_Y, L3_Y]
 	for fy: float in _fys:
 		for z in [-19.75, 4.2, 25.2]:
@@ -1172,16 +1211,64 @@ func _build_ceiling_and_lighting() -> void:
 			light.light_color = Color("#ffeccd"); light.light_energy = 0.52; light.omni_range = 12.0
 			light.shadow_enabled = (i % 4 == 0 and fy == L1_Y)
 			add_child(light)
-	# Lobby ring LED pendants only on L1 (grand)
-	for pendant_z in [15.0, 24.0, 31.5]:
-		for x in [-7.0, 0.0, 7.0]:
-			_cylinder("Pendant stem", Vector3(x, L1_Y + 4.14, pendant_z), 0.035, 2.45, Color("#596b63"))
-			_cylinder("Pendant shade", Vector3(x, L1_Y + 2.90, pendant_z), 0.46, 0.18, Color("#d5c49e"), null, false, 0.2)
-			_box("Pendant glow", Vector3(x, L1_Y + 2.84, pendant_z), Vector3(0.38, 0.06, 0.38), Color("#f5e0b8"), false, null, 0.22, 0.0, false, Color("#f8ecca"))
-			var pendant_light := OmniLight3D.new()
-			pendant_light.position = Vector3(x, L1_Y + 2.76, pendant_z)
-			pendant_light.light_color = Color("#ffe8c8"); pendant_light.light_energy = 0.35; pendant_light.omni_range = 5.5
-			add_child(pendant_light)
+	# Grand Architectural Ring Chandeliers on L1 Atrium (Multi-tier brushed champagne brass + continuous halo glow)
+	var chandelier_coords := [
+		{"pos": Vector3(0.0, L1_Y + 3.80, 24.0), "r1": 2.2, "r2": 1.4, "energy": 0.65},
+		{"pos": Vector3(-7.5, L1_Y + 3.95, 15.0), "r1": 1.5, "r2": 0.9, "energy": 0.45},
+		{"pos": Vector3(0.0, L1_Y + 3.95, 13.5), "r1": 1.8, "r2": 1.1, "energy": 0.55},
+		{"pos": Vector3(0.0, L1_Y + 3.90, 32.5), "r1": 2.0, "r2": 1.2, "energy": 0.55},
+		{"pos": Vector3(-7.5, L1_Y + 3.95, 32.5), "r1": 1.5, "r2": 0.9, "energy": 0.40},
+		{"pos": Vector3(7.5, L1_Y + 3.95, 32.5), "r1": 1.5, "r2": 0.9, "energy": 0.40},
+	]
+	for ch in chandelier_coords:
+		var cp: Vector3 = ch["pos"]
+		var r1: float = ch["r1"]
+		var r2: float = ch["r2"]
+		# Suspension aircraft cables
+		for ca in [0.0, PI * 0.66, PI * 1.33]:
+			_cylinder("Chandelier cable A", Vector3(cp.x + cos(ca) * r1 * 0.9, cp.y + 0.65, cp.z + sin(ca) * r1 * 0.9), 0.015, 1.30, Color("#2c302e"))
+			_cylinder("Chandelier cable B", Vector3(cp.x + cos(ca + PI*0.33) * r2 * 0.9, cp.y + 0.55, cp.z + sin(ca + PI*0.33) * r2 * 0.9), 0.015, 1.10, Color("#2c302e"))
+		# Outer brass ring
+		var outer_ring := MeshInstance3D.new()
+		var torus_outer := TorusMesh.new()
+		torus_outer.inner_radius = r1 - 0.06
+		torus_outer.outer_radius = r1
+		torus_outer.rings = 36
+		torus_outer.ring_segments = 12
+		outer_ring.mesh = torus_outer
+		outer_ring.position = cp
+		outer_ring.material_override = _mat(Color("#d4b878"), 0.28, 0.72)
+		add_child(outer_ring)
+		# Outer halo diffuser with warm glow
+		var outer_glow := MeshInstance3D.new()
+		var torus_glow := TorusMesh.new()
+		torus_glow.inner_radius = r1 - 0.05
+		torus_glow.outer_radius = r1 - 0.01
+		torus_glow.rings = 36
+		torus_glow.ring_segments = 10
+		outer_glow.mesh = torus_glow
+		outer_glow.position = cp - Vector3(0, 0.02, 0)
+		outer_glow.material_override = _mat(Color("#fff4dd"), 0.2, 0.0, false, Color("#ffe2aa"))
+		add_child(outer_glow)
+		# Inner brass ring (tiered slightly lower)
+		var inner_ring := MeshInstance3D.new()
+		var torus_inner := TorusMesh.new()
+		torus_inner.inner_radius = r2 - 0.05
+		torus_inner.outer_radius = r2
+		torus_inner.rings = 30
+		torus_inner.ring_segments = 12
+		inner_ring.mesh = torus_inner
+		inner_ring.position = cp - Vector3(0, 0.18, 0)
+		inner_ring.material_override = _mat(Color("#d4b878"), 0.28, 0.72)
+		add_child(inner_ring)
+		# Light source
+		var ch_light := OmniLight3D.new()
+		ch_light.position = cp - Vector3(0, 0.15, 0)
+		ch_light.light_color = Color("#ffe7c4")
+		ch_light.light_energy = ch["energy"]
+		ch_light.omni_range = 8.5
+		ch_light.shadow_enabled = false
+		add_child(ch_light)
 
 func _add_workstation(position: Vector3, title: String, wood: Color = Color("#9c8062"), dual_monitor: bool = true, rotation_y: float = 0.0) -> void:
 	var p := position + Vector3(0, _floor_y, 0)
@@ -1279,88 +1366,153 @@ func _add_shelf(position: Vector3, width: float, height: float, depth: float, la
 		for item in range(8):
 			var book_color: Color = [Color("#718b7d"), Color("#bf916f"), Color("#7889a8"), Color("#b8ad7b")][item % 4]
 			_box("Archive binder", Vector3(-width * 0.39 + float(item) * width * 0.11, y + 0.22, 0.0), Vector3(0.22, 0.34 + float(item % 3) * 0.05, depth * 0.58), book_color, false, root)
-	_label(label_text, Vector3(0, height + 0.42, 0), 0.005, Color("#f0ede3"), root)
+	if label_text != "":
+		_label(label_text, Vector3(0, height + 0.42, 0), 0.005, Color("#f0ede3"), root)
 
 func _build_reception() -> void:
-	# L1 Zone A (Public Impression): feature wall, floating reception desk, waiting lounge.
-	var slate := Color("#2c302e"); var oak := Color("#8a6a46"); var cyan := Color("#44d8e8")
-	_box("Reception brand wall", Vector3(0, 2.65, 17.4), Vector3(22.0, 4.8, 0.30), slate, true, null, 0.55)
-	# fluted vertical oak/metal accent bands
-	for x in range(-10, 11):
-		var col: Color = oak.darkened(0.08) if absi(x) % 2 == 0 else slate.lightened(0.06)
-		_box("Brand wall slat", Vector3(float(x) * 1.05, 2.65, 17.58), Vector3(0.06, 4.55, 0.05), col, false, null, 0.5)
-	# Backlit 3D logo BANGKAH (cyan glow)
-	_box("Backlit logo panel", Vector3(0, 3.22, 17.62), Vector3(8.4, 1.15, 0.06), Color("#14181b"), false, null, 0.25, 0.5)
-	_box("Logo glow bar", Vector3(0, 2.72, 17.66), Vector3(7.8, 0.05, 0.04), cyan, false, null, 0.2, 0.0, false, cyan)
-	_add_company_logo(Vector3(0, 3.24, 17.70), 0.0, 8.0, null, 1.5)
-	_painted_text("HEADQUARTERS  ·  TECHNOLOGY  ·  ENGINEERING", Vector3(0, 2.45, 17.73), 0.0, 0.0044, Color("#b9d8d8"))
-	# Floating curved reception desk: marble top + fluted oak base + under-desk warm glow
-	_box("Reception base oak", Vector3(0, 0.62, 20.85), Vector3(10.6, 1.05, 0.95), oak, true, null, 0.52)
-	_box("Reception base curve L", Vector3(-5.6, 0.62, 20.5), Vector3(1.3, 1.05, 0.8), oak, true, null, 0.52)
-	_box("Reception base curve R", Vector3(5.6, 0.62, 20.5), Vector3(1.3, 1.05, 0.8), oak, true, null, 0.52)
-	for fx in range(-10, 11):
-		_box("Reception flute", Vector3(float(fx)*0.5, 0.62, 21.34), Vector3(0.06, 0.95, 0.03), oak.darkened(0.14), false, null, 0.58)
-	_box("Reception marble top", Vector3(0, 1.22, 20.78), Vector3(11.8, 0.14, 1.45), Color("#f3efe6"), false, null, 0.14, 0.03)
-	_box("Reception underglow", Vector3(0, 0.12, 20.7), Vector3(10.0, 0.03, 0.9), Color("#f0d8a8"), false, null, 0.2, 0.0, false, Color("#ffd9a0"))
-	_box("Reception brand strip", Vector3(0, 0.72, 21.38), Vector3(6.8, 0.10, 0.03), cyan, false, null, 0.2, 0.0, false, cyan)
-	_painted_text("VISITOR CHECK-IN", Vector3(0, 1.12, 21.46), 0.0, 0.0046, Color("#fff7e6"))
-	_box("Reception monitor bezel", Vector3(0, 1.62, 20.30), Vector3(1.55, 0.88, 0.14), Color("#29383d"), false)
-	_box("Reception monitor screen", Vector3(0, 1.63, 20.21), Vector3(1.34, 0.68, 0.025), Color("#31534b"), false, null, 0.2, 0.0, false, Color("#5e9b7c"))
-	_box("Reception keyboard", Vector3(-1.0, 1.32, 20.75), Vector3(0.85, 0.04, 0.28), Color("#46524e"), false)
-	_box("Visitor sign-in book", Vector3(1.35, 1.32, 20.72), Vector3(0.72, 0.06, 0.48), Color("#d2c5a9"), false)
+	# L1 Grand Entrance & Reception Atrium: High-prestige corporate architectural showcase.
+	var dark_walnut := Color("#2e2116"); var smoked_oak := Color("#3c2c1e")
+	var brass := Color("#d4b878"); var brass_satin := Color("#c5a366")
+	var calacatta := Color("#f8f6f0"); var nero := Color("#191c1e")
+	var emerald_fern := Color("#2f523d"); var gold_glow := Color("#ffe6b8")
 
-	# Zone B: Security turnstiles (flap barrier feel) — centered, clear 3m+ clearance to core
+	# 1. Grand Acoustic Brand Wall (22m wide, 4.8m high)
+	_box("Reception brand backdrop", Vector3(0, 2.65, 17.38), Vector3(22.4, 4.85, 0.32), nero, true, null, 0.45)
+	# Vertical fluted smoked oak slats with alternating satin brass accent fins
+	for x in range(-11, 12):
+		var is_brass: bool = (absi(x) % 3 == 0)
+		var slat_col: Color = brass if is_brass else smoked_oak
+		var slat_w: float = 0.05 if is_brass else 0.08
+		var slat_d: float = 0.06 if is_brass else 0.04
+		_box("Brand wall slat", Vector3(float(x) * 0.95, 2.65, 17.56), Vector3(slat_w, 4.65, slat_d), slat_col, false, null, 0.28 if is_brass else 0.52, 0.72 if is_brass else 0.0)
+	# Symmetrical living green walls (vertical gardens) flanking the feature wall ends
+	for gx in [-9.6, 9.6]:
+		_box("Living green wall panel", Vector3(gx, 2.65, 17.52), Vector3(2.4, 4.4, 0.12), emerald_fern, false, null, 0.88)
+		_box("Green wall brass frame", Vector3(gx, 2.65, 17.56), Vector3(2.55, 4.55, 0.06), brass_satin, false, null, 0.32, 0.65)
+		# Foliage leaf tufts (procedural organic relief)
+		for fy in [1.2, 2.0, 2.8, 3.6, 4.2]:
+			for fz_off in [-0.6, 0.0, 0.6]:
+				_sphere("Living wall foliage", Vector3(gx + fz_off, fy, 17.60), 0.22, Color("#3d694e"), Vector3(1.2, 0.8, 0.6))
+		# Dedicated botanical spotlight
+		var g_spot := SpotLight3D.new()
+		g_spot.position = Vector3(gx, 4.70, 18.5)
+		g_spot.rotation_degrees = Vector3(-70, (15.0 if gx < 0 else -15.0), 0)
+		g_spot.light_color = Color("#fff8e7")
+		g_spot.light_energy = 0.55
+		g_spot.spot_range = 6.0
+		g_spot.spot_angle = 35.0
+		add_child(g_spot)
+
+	# Backlit 3D Company Emblem & Typography in Satin Brass
+	_box("Backlit logo panel", Vector3(0, 3.25, 17.62), Vector3(8.8, 1.25, 0.08), Color("#111518"), false, null, 0.20, 0.3)
+	_box("Logo top halo bar", Vector3(0, 3.88, 17.65), Vector3(8.2, 0.035, 0.04), gold_glow, false, null, 0.15, 0.0, false, gold_glow)
+	_box("Logo bottom halo bar", Vector3(0, 2.62, 17.65), Vector3(8.2, 0.035, 0.04), gold_glow, false, null, 0.15, 0.0, false, gold_glow)
+	_add_company_logo(Vector3(0, 3.25, 17.72), 0.0, 8.2, null, 1.55, brass, Color("#fff4dc"))
+	_painted_text("BANGKAH HEADQUARTERS  ·  ADVANCED AI SYSTEMS & TECHNOLOGY", Vector3(0, 2.38, 17.74), 0.0, 0.0042, Color("#d4b878"), Color(0.04, 0.06, 0.05, 0.95))
+
+	# 2. Monolithic Floating Curved Reception Desk in White Calacatta Marble & Fluted Walnut
+	_box("Reception base walnut", Vector3(0, 0.62, 20.85), Vector3(10.8, 1.05, 1.05), dark_walnut, true, null, 0.45)
+	_box("Reception base curve L", Vector3(-5.8, 0.62, 20.45), Vector3(1.5, 1.05, 0.9), dark_walnut, true, null, 0.45)
+	_box("Reception base curve R", Vector3(5.8, 0.62, 20.45), Vector3(1.5, 1.05, 0.9), dark_walnut, true, null, 0.45)
+	# Fluted wood vertical detail slats
+	for fx in range(-11, 12):
+		_box("Reception front flute", Vector3(float(fx) * 0.48, 0.62, 21.38), Vector3(0.045, 0.96, 0.025), smoked_oak, false, null, 0.52)
+	# Brushed champagne brass horizontal reveal trim
+	_box("Reception brass reveal", Vector3(0, 1.14, 21.41), Vector3(11.2, 0.045, 0.025), brass, false, null, 0.28, 0.72)
+	_box("Reception brass plinth", Vector3(0, 0.06, 21.38), Vector3(10.8, 0.08, 0.04), brass_satin, false, null, 0.32, 0.65)
+	# Calacatta marble waterfall top slab
+	_box("Reception marble top", Vector3(0, 1.23, 20.78), Vector3(12.2, 0.16, 1.55), calacatta, false, null, 0.12, 0.03)
+	_box("Reception waterfall L", Vector3(-6.1, 0.62, 20.65), Vector3(0.16, 1.20, 1.35), calacatta, false, null, 0.12, 0.03)
+	_box("Reception waterfall R", Vector3(6.1, 0.62, 20.65), Vector3(0.16, 1.20, 1.35), calacatta, false, null, 0.12, 0.03)
+	# Warm continuous underglow projecting onto polished floor
+	_box("Reception underglow", Vector3(0, 0.08, 20.75), Vector3(10.4, 0.025, 0.95), gold_glow, false, null, 0.2, 0.0, false, gold_glow)
+	_painted_text("CONCIERGE & VISITOR CHECK-IN", Vector3(0, 1.10, 21.46), 0.0, 0.0044, Color("#f7f2e4"), Color(0.06, 0.08, 0.07, 0.9))
+
+	# Concierge console accessories
+	_box("Reception monitor bezel", Vector3(0, 1.66, 20.25), Vector3(1.65, 0.88, 0.08), Color("#1b2225"), false, null, 0.25, 0.4)
+	_box("Reception monitor screen", Vector3(0, 1.66, 20.20), Vector3(1.55, 0.78, 0.015), Color("#122a28"), false, null, 0.15, 0.0, false, Color("#3d7865"))
+	_box("Reception keyboard", Vector3(-0.9, 1.33, 20.75), Vector3(0.85, 0.035, 0.28), Color("#2e383c"), false)
+	# Gold-embossed leather guest register & brass bell
+	_box("Visitor guest register", Vector3(1.2, 1.33, 20.72), Vector3(0.68, 0.045, 0.48), Color("#3e2718"), false)
+	_box("Register brass corners", Vector3(1.2, 1.35, 20.72), Vector3(0.70, 0.012, 0.50), brass, false, null, 0.25, 0.75)
+	_cylinder("Concierge desk bell", Vector3(1.85, 1.35, 20.70), 0.08, 0.09, brass, null, false, 0.85)
+	_cylinder("Reception desk vase", Vector3(-1.8, 1.48, 20.70), 0.10, 0.32, calacatta, null, false, 0.05)
+	_sphere("Vase orchid flowers", Vector3(-1.8, 1.72, 20.70), 0.14, Color("#fbf8f0"))
+
+	# 3. Security Optical Speed Gates (Turnstiles) & Digital Wayfinding Totem
 	for tx in [-2.6, 0.0, 2.6]:
-		_box("Turnstile housing", Vector3(tx, 0.52, 15.2), Vector3(0.55, 1.02, 0.95), Color("#1f2326"), true, null, 0.3, 0.35)
-		_box("Turnstile glass flap", Vector3(tx, 0.78, 14.78), Vector3(0.05, 0.62, 0.55), Color(0.72,0.84,0.90,0.22), false, null, 0.06, 0.02, true)
-		_box("Turnstile reader", Vector3(tx+0.30, 0.88, 15.0), Vector3(0.08, 0.18, 0.10), Color("#0f1416"), false, null, 0.25, 0.0, false, Color("#52c49a"))
-		_box("Turnstile arrow", Vector3(tx, 1.08, 14.72), Vector3(0.22, 0.08, 0.02), Color("#52c49a"), false, null, 0.2, 0.0, false, Color("#62d4aa"))
-	_box("Turnstile rail", Vector3(0, 0.52, 15.2), Vector3(7.2, 0.06, 0.06), Color("#2a3034"), false, null, 0.35, 0.35)
-	# Digital Directory Totem beside turnstile (relocated off center)
-	_box("Directory totem base", Vector3(5.4, 0.35, 15.2), Vector3(0.65, 0.7, 0.45), Color("#1f2326"), false, null, 0.35, 0.4)
-	_box("Directory totem frame", Vector3(5.4, 1.55, 15.2), Vector3(0.82, 2.0, 0.12), Color("#14181b"), false, null, 0.25, 0.45)
-	_box("Directory totem screen", Vector3(5.4, 1.55, 15.27), Vector3(0.70, 1.78, 0.03), Color("#0d1a20"), false, null, 0.12, 0.0, false, Color("#2aa8c8"))
-	_painted_text("DIRECTORY / PETA", Vector3(5.4, 1.95, 15.30), 0.0, 0.0022, Color("#dff8ff"), Color(0,0,0,0))
-	_painted_text("L1 LAYANAN  L2 TIM  L3 OWNER", Vector3(5.4, 1.45, 15.30), 0.0, 0.0016, Color("#9ad7c2"), Color(0,0,0,0))
+		_box("Turnstile titanium pedestal", Vector3(tx, 0.54, 15.2), Vector3(0.48, 1.05, 1.15), Color("#353b3f"), true, null, 0.25, 0.68)
+		_box("Turnstile top glass", Vector3(tx, 1.07, 15.2), Vector3(0.46, 0.025, 1.12), Color("#1a2226"), false, null, 0.10, 0.2)
+		_box("Turnstile glass flap", Vector3(tx, 0.78, 14.78), Vector3(0.04, 0.65, 0.58), Color(0.75, 0.88, 0.95, 0.25), false, null, 0.05, 0.05, true)
+		_box("Turnstile sapphire reader", Vector3(tx + 0.18, 0.98, 15.0), Vector3(0.12, 0.15, 0.15), Color("#0a151b"), false, null, 0.15, 0.0, false, Color("#00e5ff"))
+		_box("Turnstile status arrow", Vector3(tx, 1.08, 14.70), Vector3(0.24, 0.06, 0.02), Color("#00e676"), false, null, 0.15, 0.0, false, Color("#00e676"))
+	_box("Turnstile brass handrail", Vector3(0, 0.54, 15.2), Vector3(7.4, 0.05, 0.05), brass, false, null, 0.25, 0.75)
 
-	# Zone A: Waiting lounge — cognac/charcoal leather low-profile, wool rug, marble coffee table, textured plants
-	_box("Lobby wool rug", Vector3(0, 0.155, 10.8), Vector3(14.5, 0.04, 5.8), Color("#5a5f63"), false, null, 0.95)
-	_add_lounge_sofa(Vector3(-5.8, 0, 10.8), PI * 0.5, Color("#3a3f43"), 3.0) # charcoal leather
-	_add_lounge_sofa(Vector3(5.8, 0, 10.8), -PI * 0.5, Color("#8a5a3a"), 3.0) # cognac leather
-	_box("Lobby coffee table base", Vector3(0, 0.34, 10.8), Vector3(0.9, 0.32, 0.9), Color("#1f2326"), false, null, 0.3, 0.25)
-	_box("Lobby coffee table top", Vector3(0, 0.52, 10.8), Vector3(2.2, 0.08, 1.35), Color("#2a2f33"), false, null, 0.14, 0.04) # dark marble
-	for x in [-10.5, 10.5]:
-		_box("Planter box tall", Vector3(x, 0.55, 10.8), Vector3(0.85, 1.05, 0.85), Color("#b7bdb6"), false, null, 0.55)
-		_add_plant(Vector3(x, 1.05, 10.8), 1.05) # Monstera/textured feel (procedural)
-	# Centerpiece linear pendant over reception/waiting (replaces scattered feel) + track lights by turnstile
-	_box("Lobby linear pendant", Vector3(0, 4.75, 15.8), Vector3(8.5, 0.06, 0.26), Color("#1f2326"), false, null, 0.3, 0.25)
-	_box("Lobby linear glow", Vector3(0, 4.71, 15.8), Vector3(8.1, 0.03, 0.18), Color("#f4e6c8"), false, null, 0.2, 0.0, false, Color("#ffe6b8"))
-	_box("Track rail", Vector3(0, 5.15, 15.2), Vector3(6.5, 0.04, 0.08), Color("#1f2326"), false, null, 0.35, 0.4)
-	for sx in [-2.4, 0.0, 2.4]:
-		_box("Track spot", Vector3(sx, 5.08, 15.2), Vector3(0.18, 0.12, 0.12), Color("#2a3034"), false, null, 0.3, 0.35)
-		var sl := SpotLight3D.new()
-		sl.position = Vector3(sx, 5.0, 15.2)
-		sl.rotation_degrees = Vector3(-90, 0, 0)
-		sl.light_color = Color("#fff0d8"); sl.light_energy = 0.22; sl.spot_range = 7.0; sl.spot_angle = 38.0
-		sl.shadow_enabled = false
-		add_child(sl)
-	# Perimeter ceiling shadow gap (tali air) L1 lobby
-	_box("Lobby shadow gap", Vector3(0, 5.32, 39.62), Vector3(36.0, 0.03, 0.05), Color("#1a1f1d"), false, null, 0.9)
-	# Tidy arrival zone: entrance mat aligned to the doors, planters flanking the desk.
-	_box("Reception visitor mat", Vector3(0, 0.045, 22.8), Vector3(9.0, 0.02, 1.6), Color("#4d5457"), false, null, 0.9)
-	_box("Reception mat inlay", Vector3(0, 0.058, 22.8), Vector3(8.4, 0.012, 1.2), Color("#6a746c"), false, null, 0.85)
-	for px in [-7.2, 7.2]:
-		_box("Reception planter", Vector3(px, 0.42, 20.9), Vector3(0.78, 0.84, 0.78), Color("#b9bdb4"), false, null, 0.55)
-		_add_plant(Vector3(px, 0.84, 20.9), 0.72)
-	# Warm wash over the reception counter (two symmetric spots, no shadow cost).
-	for sx in [-3.2, 3.2]:
+	# Obsidian & Champagne Digital Directory Totem
+	_box("Directory totem base", Vector3(5.6, 0.15, 15.2), Vector3(0.75, 0.30, 0.55), nero, true, null, 0.25, 0.2)
+	_box("Directory totem frame", Vector3(5.6, 1.62, 15.2), Vector3(0.85, 2.2, 0.14), Color("#1b1f22"), false, null, 0.22, 0.55)
+	_box("Directory totem brass trim", Vector3(5.6, 1.62, 15.2), Vector3(0.89, 2.24, 0.08), brass, false, null, 0.28, 0.72)
+	_box("Directory totem OLED glass", Vector3(5.6, 1.65, 15.28), Vector3(0.74, 1.95, 0.025), Color("#071218"), false, null, 0.08, 0.0, false, Color("#184c58"))
+	_painted_text("BANGKAH HQ DIRECTORY", Vector3(5.6, 2.30, 15.31), 0.0, 0.0024, Color("#dff8ff"), Color(0, 0, 0, 0))
+	_painted_text("L1: RESEPSIONIS · BOARDROOM · NOC LAB · PANTRY", Vector3(5.6, 1.82, 15.31), 0.0, 0.0016, Color("#9ae0cb"), Color(0, 0, 0, 0))
+	_painted_text("L2: MANAJEMEN · ARSITEKTUR · DEV & QA TEAMS", Vector3(5.6, 1.48, 15.31), 0.0, 0.0016, Color("#9ae0cb"), Color(0, 0, 0, 0))
+	_painted_text("L3: EXECUTIVE OWNER SUITE & PRIVATE LOUNGE", Vector3(5.6, 1.14, 15.31), 0.0, 0.0016, Color("#d4b878"), Color(0, 0, 0, 0))
+
+	# 4. VIP Executive Waiting Lounge (Preserves exact seats via _add_lounge_sofa)
+	_box("Lobby plush wool rug", Vector3(0, 0.155, 10.8), Vector3(15.2, 0.04, 6.2), Color("#3d4246"), false, null, 0.94)
+	_box("Lobby rug brass inlay", Vector3(0, 0.175, 10.8), Vector3(14.6, 0.015, 5.6), brass, false, null, 0.28, 0.72)
+	_add_lounge_sofa(Vector3(-5.8, 0, 10.8), PI * 0.5, Color("#2b3033"), 3.2) # Charcoal bouclé sofa
+	_add_lounge_sofa(Vector3(5.8, 0, 10.8), -PI * 0.5, Color("#824d26"), 3.2) # Italian cognac leather sofa
+	# Nested round marble & champagne brass coffee table set
+	_cylinder("Coffee table base 1", Vector3(-0.55, 0.22, 10.8), 0.65, 0.44, nero, null, false, 0.2)
+	_cylinder("Coffee table top 1", Vector3(-0.55, 0.45, 10.8), 0.88, 0.08, calacatta, null, false, 0.08)
+	_cylinder("Coffee table base 2", Vector3(0.55, 0.16, 10.5), 0.45, 0.32, brass_satin, null, false, 0.75)
+	_cylinder("Coffee table top 2", Vector3(0.55, 0.33, 10.5), 0.65, 0.06, Color("#181b1d"), null, false, 0.12)
+	_box("Art monograph book", Vector3(-0.35, 0.51, 10.7), Vector3(0.42, 0.035, 0.32), Color("#a68962"), false)
+	_cylinder("Lounge crystal bowl", Vector3(-0.7, 0.52, 10.9), 0.14, 0.08, Color(0.85, 0.92, 0.95, 0.35), null, false, 0.1)
+
+	# Fluted travertine architectural planters with tall Ficus trees
+	for x in [-10.8, 10.8]:
+		_cylinder("Planter urn travertine", Vector3(x, 0.65, 10.8), 0.62, 1.25, calacatta, null, false, 0.1)
+		_box("Planter brass collar", Vector3(x, 1.28, 10.8), Vector3(1.28, 0.06, 1.28), brass, false, null, 0.25, 0.75)
+		_add_plant(Vector3(x, 1.28, 10.8), 1.25)
+		# Uplight onto trees
+		var tree_light := OmniLight3D.new()
+		tree_light.position = Vector3(x, 1.35, 10.8)
+		tree_light.light_color = Color("#fff0d4")
+		tree_light.light_energy = 0.35
+		tree_light.omni_range = 4.0
+		add_child(tree_light)
+
+	# Designer brass arc floor lamps beside the sofas
+	for lx in [-8.2, 8.2]:
+		_cylinder("Arc lamp base", Vector3(lx, 0.04, 12.8), 0.35, 0.06, brass, null, false, 0.75)
+		_cylinder("Arc lamp stem", Vector3(lx, 1.45, 12.8), 0.025, 2.85, brass, null, false, 0.75)
+		_cylinder("Arc lamp dome", Vector3(lx + (0.5 if lx < 0 else -0.5), 2.75, 12.2), 0.26, 0.16, brass, null, false, 0.75)
+		_room_light(Vector3(lx + (0.5 if lx < 0 else -0.5), 2.65, 12.2), Color("#ffe4b8"), 0.38, 4.5)
+
+	# Arrival Zone: Symmetrical Italian marble carpet & planters flanking entrance
+	_box("Arrival marble inlay", Vector3(0, 0.048, 23.2), Vector3(9.6, 0.016, 2.0), calacatta, false, null, 0.14)
+	_box("Arrival Nero border", Vector3(0, 0.045, 23.2), Vector3(10.2, 0.012, 2.4), nero, false, null, 0.18)
+	_box("Arrival brass line", Vector3(0, 0.052, 23.2), Vector3(9.8, 0.018, 2.1), brass, false, null, 0.28, 0.72)
+	for px in [-7.6, 7.6]:
+		_box("Entrance fluted planter", Vector3(px, 0.55, 21.2), Vector3(0.95, 1.05, 0.95), calacatta, false, null, 0.35)
+		_box("Entrance planter trim", Vector3(px, 1.08, 21.2), Vector3(0.99, 0.05, 0.99), brass, false, null, 0.28, 0.72)
+		_add_plant(Vector3(px, 1.08, 21.2), 0.95)
+
+	# Ceiling cove shadow gap and architectural warm downlights
+	_box("Lobby ceiling shadow gap", Vector3(0, 5.32, 39.62), Vector3(36.0, 0.035, 0.06), Color("#1a1f1d"), false, null, 0.9)
+	for sx in [-3.5, 0.0, 3.5]:
 		var wash := SpotLight3D.new()
-		wash.position = Vector3(sx, 4.42, 19.4)
-		wash.rotation_degrees = Vector3(-90, 0, 0)
-		wash.light_color = Color("#ffe9c6"); wash.light_energy = 0.45; wash.spot_range = 8.0; wash.spot_angle = 42.0
+		wash.position = Vector3(sx, 4.80, 19.6)
+		wash.rotation_degrees = Vector3(-85, 0, 0)
+		wash.light_color = Color("#ffe9c6")
+		wash.light_energy = 0.52
+		wash.spot_range = 9.0
+		wash.spot_angle = 40.0
 		wash.shadow_enabled = false
 		add_child(wash)
-	_room_light(Vector3(0, 4.10, 20.6), Color("#ffe7c2"), 0.30, 12.0)
+	_room_light(Vector3(0, 4.30, 20.6), Color("#ffe7c2"), 0.45, 14.0)
 
 func _add_lounge_sofa(position: Vector3, rotation_y: float, color: Color, width: float = 2.8) -> void:
 	var p := position + Vector3(0, _floor_y, 0)
@@ -1407,10 +1559,9 @@ func _build_owner_suite() -> void:
 	_box("Monitor array panel", Vector3(-29.5, 2.35, -38.72), Vector3(11.2, 2.5, 0.10), matte, false)
 	for mi in range(6):
 		var mx := -33.8 + float(mi) * 1.72
-		var ec: Color = [Color("#00FFFF"),Color("#55d6b0"),Color("#6aa8ff"),Color("#00FFFF"),Color("#55d6b0"),Color("#6aa8ff")][mi]
+		var ec: Color = [Color("#1d5f68"),Color("#1f6b5e"),Color("#26527a"),Color("#1d5f68"),Color("#1f6b5e"),Color("#26527a")][mi]
 		_box("Wall monitor shell", Vector3(mx, 2.35, -38.65), Vector3(1.62, 1.95, 0.025), Color("#0a0f12"), false, null, 0.18)
 		_box("Wall monitor", Vector3(mx, 2.35, -38.63), Vector3(1.56, 1.88, 0.012), Color("#0f171a"), false, null, 0.14, 0.0, false, ec)
-	_label("COMMAND CENTER · AI / SERVER / OMNISERVE", Vector3(-29.5, 3.72, -38.58), 0.0042, Color("#00FFFF"))
 	_box("Chair premium headrest", Vector3(-29.3, 1.55, -29.9), Vector3(0.62, 0.22, 0.10), leather, false, null, 0.7)
 	# B) PRIVATE LOUNGE & ENTERTAINMENT (keep existing sofa seat registration)
 	_add_lounge_sofa(Vector3(-29.5, 0, -22.5), 0.0, Color("#7a5230"), 3.8) # cognac leather, PRESERVES 2 sofa seats
@@ -1467,6 +1618,8 @@ func _build_owner_suite() -> void:
 	_box("Owner in tray right", Vector3(-26.74, 1.24, -31.25), Vector3(0.07, 0.34, 0.82), Color("#c0c7bc"), false)
 	for i in range(4): _box("Paper stack in tray", Vector3(-27.2, 1.16 + float(i) * 0.035, -31.25), Vector3(0.70, 0.025, 0.61), Color("#f0eee3"), false)
 	_label("INBOX TRAY", Vector3(-27.2, 1.72, -31.25), 0.0038, Color("#e8efe7"))
+	_room_light(Vector3(-29.5, 4.30, -32.0), Color("#ffe7c2"), 0.50, 14.0)
+	_room_light(Vector3(-29.5, 4.30, -23.0), Color("#ffe7c2"), 0.36, 9.0)
 
 func _build_secretary_office() -> void:
 	_label("EXECUTIVE SECRETARY", Vector3(-10.5, 4.02, -38.1), 0.006)
@@ -1487,6 +1640,11 @@ func _build_secretary_office() -> void:
 	_box("Agenda stand board", Vector3(-1.2, 1.55, -21.52), Vector3(1.5, 1.0, 0.06), Color("#1f2326"), false, null, 0.28, 0.4)
 	_box("Agenda stand screen", Vector3(-1.2, 1.55, -21.48), Vector3(1.34, 0.84, 0.03), Color("#142028"), false, null, 0.15, 0.0, false, Color("#4aa8a0"))
 	_painted_text("AGENDA PERUSAHAAN", Vector3(-1.2, 1.82, -21.45), PI, 0.0024, Color("#eaf6f2"), Color(0,0,0,0))
+	_box("Secretary rug", Vector3(-10.8, 0.152, -32.8), Vector3(11.0, 0.02, 5.6), Color("#6f7770"), false, null, 0.95)
+	_box("Secretary rug inset", Vector3(-10.8, 0.166, -32.8), Vector3(10.2, 0.015, 4.8), Color("#7d867f"), false, null, 0.95)
+	_add_plant(Vector3(-18.4, 0, -38.3), 0.95)
+	_add_plant(Vector3(-2.9, 0, -37.6), 0.80)
+	_room_light(Vector3(-10.8, 4.15, -32.6), Color("#ffe8c6"), 0.46, 11.0)
 
 func _build_management_offices() -> void:
 	_label("LANTAI 2  /  CORE LEADERSHIP", Vector3(8.0, 4.02, -38.1), 0.006)
@@ -1506,6 +1664,18 @@ func _build_management_offices() -> void:
 	for x in [26.0, 28.0, 30.0, 32.0]:
 		_box("Diagram node", Vector3(x, 2.2 + (1.0 if int(x) % 2 == 0 else -0.1), -38.61), Vector3(0.58, 0.34, 0.025), Color("#8fc0a1"), false)
 	_add_plant(Vector3(20.7, 0, -22.4), 0.9)
+	# Shared leadership floor finishes: rugs, planter divider, plants, warm task light.
+	_box("Management rug", Vector3(8.0, 0.152, -32.4), Vector3(13.6, 0.02, 5.2), Color("#6c7168"), false, null, 0.95)
+	_box("Management rug inset", Vector3(8.0, 0.166, -32.4), Vector3(12.8, 0.015, 4.4), Color("#7a8077"), false, null, 0.95)
+	_box("Management divider planter", Vector3(9.5, 0.48, -32.6), Vector3(1.0, 0.95, 1.0), Color("#56675f"), true, null, 0.8)
+	_add_plant(Vector3(9.5, 0.95, -32.6), 0.95)
+	_add_plant(Vector3(17.4, 0, -38.3), 1.0)
+	_box("Architect rug", Vector3(29.0, 0.152, -32.4), Vector3(13.8, 0.02, 5.2), Color("#5f6a6d"), false, null, 0.95)
+	_box("Architect rug inset", Vector3(29.0, 0.166, -32.4), Vector3(13.0, 0.015, 4.4), Color("#6d787b"), false, null, 0.95)
+	_box("Architect model plinth", Vector3(33.8, 0.55, -24.6), Vector3(1.8, 1.1, 1.8), Color("#3d4a4d"), false, null, 0.4)
+	_add_plant(Vector3(20.9, 0, -38.3), 0.85)
+	_room_light(Vector3(8.0, 4.15, -32.4), Color("#ffe8c6"), 0.46, 12.0)
+	_room_light(Vector3(29.0, 4.15, -32.4), Color("#e8f4f0"), 0.46, 12.0)
 
 func _build_engineering_floor() -> void:
 	# Frontend design studio.
@@ -1520,10 +1690,10 @@ func _build_engineering_floor() -> void:
 	_label("QUALITY ASSURANCE  /  TEST LAB", Vector3(-6.5, 4.02, -18.9), 0.0057)
 	_add_workstation(Vector3(-5.0, 0, -8.9), "TIKA  /  QA ENGINEER", Color("#748d7e"), true)
 	_add_workstation(Vector3(1.4, 0, -8.9), "AUTOMATED TEST STATION", Color("#8a9384"), true)
-	_box("QA test bench", Vector3(-6.8, 0.86, -14.8), Vector3(7.8, 1.65, 1.15), Color("#7a8983"), true)
+	_box("QA test bench", Vector3(-6.8, 0.86, -18.4), Vector3(7.0, 1.65, 1.0), Color("#7a8983"), true)
 	for x in [-9.4, -6.8, -4.2]:
-		_box("QA device", Vector3(x, 1.78, -14.7), Vector3(1.15, 0.72, 0.16), Color("#293940"), false)
-		_box("QA device screen", Vector3(x, 1.79, -14.605), Vector3(0.98, 0.53, 0.025), Color("#30544c"), false, null, 0.2, 0.0, false, Color("#5b9b7e"))
+		_box("QA device", Vector3(x, 1.78, -18.3), Vector3(1.15, 0.72, 0.16), Color("#293940"), false)
+		_box("QA device screen", Vector3(x, 1.79, -18.205), Vector3(0.98, 0.53, 0.025), Color("#30544c"), false, null, 0.2, 0.0, false, Color("#5b9b7e"))
 	# Backend pod with collaborative engineering table.
 	_label("BACKEND ENGINEERING", Vector3(24.0, 4.02, -18.9), 0.0057)
 	_add_workstation(Vector3(27.0, 0, -8.9), "BIMA  /  BACKEND", Color("#6d8490"), true)
@@ -1543,52 +1713,99 @@ func _build_engineering_floor() -> void:
 		_box("Laptop screen", Vector3(x, 1.22, -1.20), Vector3(0.66, 0.55, 0.06), Color("#243a41"), false)
 	_add_plant(Vector3(-18.2, 0, -2.0), 0.85)
 	_add_plant(Vector3(10.0, 0, -2.2), 0.85)
+	# Floor finishes, material library and status display make the engineering wing read tidy.
+	_box("Frontend rug", Vector3(-29.5, 0.152, -9.2), Vector3(15.6, 0.02, 5.4), Color("#6d6a63"), false, null, 0.95)
+	_box("Frontend rug inset", Vector3(-29.5, 0.166, -9.2), Vector3(14.8, 0.015, 4.6), Color("#7b786f"), false, null, 0.95)
+	_box("Material library cabinet", Vector3(-38.8, 0.62, -13.2), Vector3(1.5, 1.24, 3.4), Color("#7b6a56"), true)
+	for i in range(6):
+		_box("Material sample", Vector3(-38.35, 1.34, -14.4 + float(i) * 0.48), Vector3(0.30, 0.14, 0.34), [Color("#c9b89a"), Color("#8fa39a"), Color("#b7c2bd"), Color("#a4836a"), Color("#5d6b66"), Color("#d8cfbb")][i], false, null, 0.85)
+	_box("QA rug", Vector3(-6.5, 0.152, -11.4), Vector3(13.2, 0.02, 5.0), Color("#63706a"), false, null, 0.95)
+	_box("QA rug inset", Vector3(-6.5, 0.166, -11.4), Vector3(12.4, 0.015, 4.2), Color("#71807a"), false, null, 0.95)
+	_box("Backend rug", Vector3(29.0, 0.152, -12.2), Vector3(16.2, 0.02, 5.4), Color("#5f6a6d"), false, null, 0.95)
+	_box("Backend rug inset", Vector3(29.0, 0.166, -12.2), Vector3(15.4, 0.015, 4.6), Color("#6d787b"), false, null, 0.95)
+	_box("Backend status frame", Vector3(41.42, 2.30, -12.4), Vector3(0.10, 1.8, 4.6), Color("#1f2326"), false)
+	_box("Backend status screen", Vector3(41.35, 2.30, -12.4), Vector3(0.04, 1.58, 4.3), Color("#0e1a1e"), false, null, 0.18, 0.0, false, Color("#3f8f86"))
+	_room_light(Vector3(-29.5, 4.15, -9.2), Color("#ffe8c6"), 0.44, 12.0)
+	_room_light(Vector3(-6.5, 4.15, -11.4), Color("#e6f6f2"), 0.42, 12.0)
+	_room_light(Vector3(29.0, 4.15, -12.2), Color("#dff2ee"), 0.44, 12.0)
 
 func _build_meeting_room() -> void:
-	_label("LANTAI 1  /  MAIN BOARDROOM", Vector3(-35.4, 4.12, 4.55), 0.0050)
+	# L1 Executive Boardroom: 10-seat royal conference suite with high-level acoustic privacy & presentation tech.
+	_label("LANTAI 1  /  EXECUTIVE BOARDROOM", Vector3(-35.4, 4.15, 4.55), 0.0052, Color("#d4b878"))
 	var table_center := Vector3(-29.5, 0, 14.3)
-	# Oval-feel boardroom table (layered) + leather chairs (registry preserved: 10 seats)
-	_box("Boardroom table top", table_center + Vector3(0, 0.82, 0), Vector3(10.2, 0.16, 3.0), Color("#6f563f"), true, null, 0.38)
-	_box("Boardroom table cap L", table_center + Vector3(-5.1, 0.82, 0), Vector3(1.1, 0.16, 2.4), Color("#6f563f"), false, null, 0.38)
-	_box("Boardroom table cap R", table_center + Vector3(5.1, 0.82, 0), Vector3(1.1, 0.16, 2.4), Color("#6f563f"), false, null, 0.38)
+	var walnut := Color("#4a3320"); var walnut_dark := Color("#352315")
+	var brass := Color("#d4b878"); var brass_satin := Color("#c5a366")
+	var calacatta := Color("#f8f6f0"); var charcoal_leather := Color("#1f2224")
+
+	# 1. Royal Walnut Executive Conference Table (10.6m live-edge feel, brass media trough)
+	_box("Boardroom table top", table_center + Vector3(0, 0.82, 0), Vector3(10.6, 0.16, 3.2), walnut, true, null, 0.34)
+	_box("Boardroom table cap L", table_center + Vector3(-5.3, 0.82, 0), Vector3(1.2, 0.16, 2.6), walnut, false, null, 0.34)
+	_box("Boardroom table cap R", table_center + Vector3(5.3, 0.82, 0), Vector3(1.2, 0.16, 2.6), walnut, false, null, 0.34)
+	# Centerpiece brushed brass power & multimedia connectivity channel
+	_box("Boardroom brass trough", table_center + Vector3(0, 0.905, 0), Vector3(8.4, 0.015, 0.48), brass, false, null, 0.28, 0.72)
+	_box("Boardroom media popups", table_center + Vector3(-2.8, 0.915, 0), Vector3(0.55, 0.02, 0.32), Color("#1b1f22"), false)
+	_box("Boardroom media popups R", table_center + Vector3(2.8, 0.915, 0), Vector3(0.55, 0.02, 0.32), Color("#1b1f22"), false)
+	# Sculpted monolithic table pedestals with brushed brass collars
 	for x in [-4.2, 4.2]:
-		_box("Boardroom table pedestal", table_center + Vector3(x, 0.4, 0), Vector3(0.32, 0.78, 1.2), Color("#2f3538"), false, null, 0.35, 0.25)
-	# 10 chairs (same count/positions/yaws as before)
+		_box("Table pedestal core", table_center + Vector3(x, 0.40, 0), Vector3(0.48, 0.78, 1.4), walnut_dark, false, null, 0.45)
+		_box("Table pedestal brass collar", table_center + Vector3(x, 0.12, 0), Vector3(0.52, 0.08, 1.45), brass_satin, false, null, 0.32, 0.65)
+
+	# 2. Exactly 10 Executive Chairs (Positions & Yaws strictly PRESERVED)
 	for x in [-4.2, -2.1, 0.0, 2.1, 4.2]:
 		_add_meeting_chair(table_center + Vector3(x, 0, -2.55), PI)
 		_add_meeting_chair(table_center + Vector3(x, 0, 2.55), 0.0)
-	# Reeded-glass partition feel overlay on boardroom front (privacy, light passes)
-	_box("Boardroom reeded glass", Vector3(-29.5, 2.1, 4.28), Vector3(14.5, 3.6, 0.05), Color(0.78,0.84,0.82,0.22), false, null, 0.18, 0.0, true)
+
+	# 3. Glass Enclosure with Fluted Reeded Glass & Bronze Mullions
+	_box("Boardroom reeded glass", Vector3(-29.5, 2.15, 4.28), Vector3(14.6, 3.65, 0.05), Color(0.72, 0.82, 0.80, 0.24), false, null, 0.16, 0.05, true)
 	for rx in range(-7, 8):
-		_box("Reed", Vector3(-29.5 + float(rx)*0.95, 2.1, 4.31), Vector3(0.06, 3.5, 0.02), Color(0.88,0.92,0.90,0.28), false, null, 0.14, 0.0, true)
-	_box("Boardroom display frame", Vector3(-29.5, 2.2, 5.05), Vector3(6.6, 2.35, 0.18), Color("#1f2326"), false, null, 0.3, 0.35)
-	_box("Boardroom display screen", Vector3(-29.5, 2.2, 4.93), Vector3(6.2, 2.0, 0.03), Color("#142028"), false, null, 0.16, 0.0, false, Color("#3a7a8a"))
-	# Linear pendant above table
-	_box("Boardroom linear pendant", Vector3(-29.5, 3.25, 14.3), Vector3(7.5, 0.06, 0.22), Color("#1f2326"), false, null, 0.3, 0.25)
-	_box("Boardroom linear glow", Vector3(-29.5, 3.21, 14.3), Vector3(7.2, 0.03, 0.16), Color("#f4e6c8"), false, null, 0.2, 0.0, false, Color("#ffe6b8"))
-	_box("Boardroom whiteboard frame", Vector3(-38.7, 1.9, 15.0), Vector3(0.13, 2.2, 6.5), Color("#6e7b74"), false)
-	_box("Boardroom whiteboard", Vector3(-38.61, 1.9, 15.0), Vector3(0.03, 1.92, 6.2), Color("#e6e9e1"), false)
-	_box("Boardroom credenza", Vector3(-29.5, 0.7, 23.2), Vector3(8.0, 1.35, 0.72), Color("#7b6856"), true)
-	for x in [-32.0, -29.5, -27.0]:
-		_cylinder("Meeting water bottle", Vector3(x, 1.49, 23.2), 0.10, 0.42, Color("#91b2af"), null, false, 0.1)
-	# --- Tidy dressing: rug, place settings, acoustic wall, clock, plants, warm light ---
-	_box("Boardroom wool rug", Vector3(-29.5, 0.145, 14.3), Vector3(13.4, 0.03, 6.4), Color("#6c6a60"), false, null, 0.95)
-	_box("Boardroom rug inset", Vector3(-29.5, 0.165, 14.3), Vector3(12.6, 0.02, 5.6), Color("#7b7a6d"), false, null, 0.95)
+		_box("Reeded glass flute", Vector3(-29.5 + float(rx) * 0.98, 2.15, 4.31), Vector3(0.05, 3.6, 0.025), Color(0.85, 0.92, 0.90, 0.32), false, null, 0.12, 0.0, true)
+	_box("Boardroom bronze header", Vector3(-29.5, 4.02, 4.28), Vector3(14.8, 0.12, 0.10), Color("#282420"), false, null, 0.35, 0.45)
+
+	# 4. Ultra-wide 180-inch Video Wall Recessed into Fluted Acoustic Walnut Wall
+	_box("Presentation feature wall", Vector3(-29.5, 2.25, 4.96), Vector3(10.2, 3.8, 0.12), walnut_dark, false, null, 0.55)
+	# Ambient halo LED glow behind screen
+	_box("Video wall halo glow", Vector3(-29.5, 2.25, 4.98), Vector3(7.4, 2.65, 0.02), Color("#ffe9c4"), false, null, 0.2, 0.0, false, Color("#ffd899"))
+	_box("Video wall bezel", Vector3(-29.5, 2.25, 5.04), Vector3(7.2, 2.45, 0.06), Color("#14181a"), false, null, 0.22, 0.5)
+	_box("Video wall display screen", Vector3(-29.5, 2.25, 5.08), Vector3(7.0, 2.30, 0.02), Color("#0a161e"), false, null, 0.12, 0.0, false, Color("#1f5264"))
+	_box("Video wall soundbar", Vector3(-29.5, 0.95, 5.04), Vector3(4.8, 0.14, 0.08), Color("#1b2022"), false, null, 0.4)
+
+	# 5. Sculptural Architectural Linear Brass Chandelier
+	_box("Boardroom chandelier spine", table_center + Vector3(0, 3.45, 0), Vector3(8.6, 0.08, 0.28), brass, false, null, 0.28, 0.72)
+	_box("Boardroom chandelier glow", table_center + Vector3(0, 3.39, 0), Vector3(8.2, 0.04, 0.20), Color("#fff4dc"), false, null, 0.18, 0.0, false, Color("#ffe4b8"))
+	for cx in [-3.6, -1.2, 1.2, 3.6]:
+		_cylinder("Chandelier drop wire", table_center + Vector3(cx, 4.40, 0), 0.015, 1.9, Color("#2c302e"))
+	var bl := OmniLight3D.new()
+	bl.position = table_center + Vector3(0, 3.20, 0)
+	bl.light_color = Color("#ffe7c6")
+	bl.light_energy = 0.65
+	bl.omni_range = 10.0
+	bl.shadow_enabled = false
+	add_child(bl)
+
+	# 6. Executive Credenza, Crystal Hospitality & Art
+	_box("Boardroom credenza walnut", Vector3(-29.5, 0.72, 23.2), Vector3(8.4, 1.38, 0.82), walnut, true, null, 0.42)
+	_box("Boardroom credenza marble top", Vector3(-29.5, 1.45, 23.2), Vector3(8.6, 0.12, 0.92), calacatta, false, null, 0.14, 0.04)
+	_box("Boardroom credenza brass trim", Vector3(-29.5, 0.12, 23.2), Vector3(8.4, 0.08, 0.85), brass_satin, false, null, 0.32, 0.65)
+	for x in [-32.2, -29.5, -26.8]:
+		_cylinder("Crystal decanter", Vector3(x, 1.62, 23.2), 0.11, 0.32, Color(0.85, 0.92, 0.95, 0.45), null, false, 0.1)
+		_box("Executive espresso cup", Vector3(x + 0.35, 1.55, 23.2), Vector3(0.12, 0.12, 0.12), calacatta, false)
+
+	# Place settings on the conference table
 	for x in [-4.2, -2.1, 0.0, 2.1, 4.2]:
-		for z in [-1.06, 1.06]:
-			_box("Boardroom placemat", table_center + Vector3(x, 0.905, z), Vector3(0.92, 0.016, 0.52), Color("#d9d2c2"), false)
-			_box("Boardroom name card", table_center + Vector3(x, 0.94, z * 1.12), Vector3(0.46, 0.07, 0.16), Color("#e8e2d2"), false)
-	for z in [-0.5, 0.5]:
-		_cylinder("Boardroom carafe", table_center + Vector3(-1.9, 0.98, z), 0.12, 0.30, Color("#9fbcb6"), null, false, 0.1)
-	# Acoustic felt panels on the solid west wall (echo control, warm texture).
+		for z in [-1.15, 1.15]:
+			_box("Boardroom leather blotter", table_center + Vector3(x, 0.908, z), Vector3(0.96, 0.016, 0.58), Color("#26292b"), false)
+			_box("Boardroom brass nameplate", table_center + Vector3(x, 0.935, z * 1.18), Vector3(0.48, 0.05, 0.14), brass, false, null, 0.28, 0.72)
+			_cylinder("Water tumbler", table_center + Vector3(x + 0.40, 0.97, z * 0.92), 0.065, 0.14, Color(0.85, 0.92, 0.95, 0.4), null, false, 0.05)
+
+	# Symmetrical Acoustic Felt Panels on Solid West Wall with Brass Trims
 	for az in [7.6, 10.6, 13.6, 16.6, 19.6]:
-		_box("Boardroom acoustic panel", Vector3(-41.77, 2.25, az), Vector3(0.10, 2.45, 1.9), Color("#63736a"), false, null, 0.95)
-	_add_wall_clock(Vector3(-41.70, 3.05, 25.0))
-	_add_plant(Vector3(-38.6, 0, 22.9), 1.0)
-	_add_plant(Vector3(-20.7, 0, 22.9), 0.9)
-	_add_plant(Vector3(-38.6, 0, 6.3), 0.9)
-	_room_light(Vector3(-29.5, 4.35, 14.3), Color("#ffe8c4"), 0.55, 12.0)
-	_room_light(Vector3(-29.5, 4.35, 19.6), Color("#ffe8c4"), 0.32, 8.0)
+		_box("Acoustic emerald panel", Vector3(-41.76, 2.35, az), Vector3(0.10, 2.65, 2.1), Color("#253b30"), false, null, 0.95)
+		_box("Acoustic panel brass rib", Vector3(-41.71, 2.35, az), Vector3(0.04, 2.70, 0.06), brass, false, null, 0.28, 0.72)
+	_add_wall_clock(Vector3(-41.70, 3.25, 24.8))
+	_add_plant(Vector3(-38.8, 0, 23.0), 1.15)
+	_add_plant(Vector3(-20.5, 0, 23.0), 1.05)
+	_add_plant(Vector3(-38.8, 0, 6.2), 1.05)
+	_room_light(Vector3(-29.5, 4.35, 14.3), Color("#ffe8c4"), 0.50, 14.0)
 
 func _add_meeting_chair(position: Vector3, rotation_y: float) -> void:
 	var p := position + Vector3(0, _floor_y, 0)
@@ -1596,97 +1813,166 @@ func _add_meeting_chair(position: Vector3, rotation_y: float) -> void:
 	root.position = p
 	root.rotation.y = rotation_y
 	add_child(root)
-	# Kursi rapat dengan pivot swivel supaya bisa ikut berputar saat pemain
-	# duduk dan meng-interasi mouse. Sandar di sisi +z (belakang pemain yang
-	# menghadap -z/varian yaw), sehingga tampilan menghadap meja betul.
+	# Executive ergonomic leather swivel chair with 5-star aluminum base & padded armrests
 	var swivel := Node3D.new()
 	swivel.name = "ChairSwivel"
 	root.add_child(swivel)
-	_box("Meeting chair seat", Vector3(0, 0.58, 0), Vector3(0.92, 0.16, 0.82), Color("#5e766d"), false, swivel)
-	_box("Meeting chair back", Vector3(0, 1.02, 0.34), Vector3(0.92, 0.88, 0.14), Color("#50675f"), false, swivel)
-	for x in [-0.35, 0.35]:
-		for z in [-0.28, 0.28]:
-			_box("Meeting chair leg", Vector3(x, 0.27, z), Vector3(0.08, 0.55, 0.08), Color("#596a63"), false, root, 0.35, 0.5)
-	seats.append({"position": Vector3(p.x, p.y, p.z), "yaw": rotation_y, "kind": "meeting", "pivot": swivel, "label": "Kursi Rapat"})
+	# Aluminum 5-star base & gas lift
+	_cylinder("Chair gas cylinder", Vector3(0, 0.22, 0), 0.045, 0.24, Color("#7b8684"), root, false, 0.65)
+	_cylinder("Chair base hub", Vector3(0, 0.24, 0), 0.12, 0.18, Color("#424b48"), root, false, 0.72)
+	for angle in [0.0, PI * 0.4, PI * 0.8, PI * 1.2, PI * 1.6]:
+		var leg := _box("Chair star leg", Vector3(cos(angle) * 0.28, 0.12, sin(angle) * 0.28), Vector3(0.58, 0.055, 0.075), Color("#8e9c98"), false, root, 0.25, 0.78)
+		leg.rotation.y = angle
+		_cylinder("Chair caster wheel", Vector3(cos(angle) * 0.52, 0.07, sin(angle) * 0.52), 0.065, 0.09, Color("#1f2425"), root)
+	# Contoured leather seat cushion & supportive backrest
+	_box("Meeting chair seat", Vector3(0, 0.58, 0), Vector3(0.94, 0.17, 0.86), Color("#202426"), false, swivel, 0.55)
+	_box("Meeting chair back", Vector3(0, 1.05, 0.36), Vector3(0.92, 0.94, 0.16), Color("#1b1e20"), false, swivel, 0.55)
+	_box("Meeting chair headrest", Vector3(0, 1.56, 0.36), Vector3(0.65, 0.24, 0.14), Color("#262a2d"), false, swivel, 0.52)
+	# Chrome & leather armrests
+	for x in [-0.52, 0.52]:
+		_box("Armrest stem", Vector3(x, 0.78, 0.02), Vector3(0.065, 0.38, 0.08), Color("#8e9c98"), false, swivel, 0.25, 0.78)
+		_box("Armrest leather pad", Vector3(x, 0.98, 0.06), Vector3(0.14, 0.06, 0.52), Color("#1b1e20"), false, swivel, 0.55)
+	seats.append({"position": Vector3(p.x, p.y, p.z), "yaw": rotation_y, "kind": "meeting", "pivot": swivel, "label": "Kursi Rapat Eksekutif"})
 
 func _build_api_lab() -> void:
-	_label("API  /  INFRASTRUCTURE LAB", Vector3(33.2, 4.14, 4.55), 0.0050)
-	_add_workstation(Vector3(29.0, 0, 12.65), "NAYA  /  API SPECIALIST", Color("#987f5b"), true)
-	# Server racks, glowing LEDs (cyan/tech), diagnostics — visual; workstation/seat preserved.
-	var rack := Color("#344247"); var ledc := Color("#00FFFF")
+	# L1 High-Tech API & Infrastructure Showcase Lab (Executive Mission Control & Glass Box NOC)
+	_label("API & INFRASTRUCTURE  /  MISSION CONTROL NOC", Vector3(33.2, 4.15, 4.55), 0.0050, Color("#00e5ff"))
+	# Workstation anchor & Naya's seat strictly PRESERVED
+	_add_workstation(Vector3(29.0, 0, 12.65), "NAYA  /  API SPECIALIST", Color("#45362a"), true)
+
+	var rack_dark := Color("#14191c"); var cyan_led := Color("#00e5ff"); var mint_led := Color("#00e676")
+	var brass := Color("#d4b878")
+
+	# 1. Enterprise Glass-Door Server Suite (4 primary server towers with active telemetry illumination)
 	for x in [20.8, 23.4, 26.0, 28.6]:
-		_box("Infrastructure rack", Vector3(x, 1.35, 22.0), Vector3(1.8, 2.65, 0.95), rack, true, null, 0.45, 0.2)
-		for level in range(6):
-			var y := 0.42 + float(level) * 0.38
-			_box("Rack equipment", Vector3(x, y, 21.49), Vector3(1.52, 0.28, 0.06), Color("#202f35"), false)
-			for led in range(5):
-				var lc: Color = ledc if (level+led)%3!=0 else Color("#52ff9a")
-				_sphere("Rack LED", Vector3(x - 0.58 + float(led) * 0.145, y, 21.44), 0.028, lc, Vector3.ONE)
-	# Neat overhead cable tray above the rack row, with drops to each cabinet.
-	_box("Rack cable tray", Vector3(24.7, 3.42, 22.0), Vector3(10.6, 0.08, 0.34), Color("#2a3034"), false, null, 0.4, 0.35)
+		_box("Enterprise rack frame", Vector3(x, 1.40, 22.0), Vector3(1.85, 2.75, 1.05), rack_dark, true, null, 0.25, 0.75)
+		_box("Rack smoked glass door", Vector3(x, 1.40, 21.46), Vector3(1.75, 2.65, 0.04), Color(0.2, 0.4, 0.45, 0.28), false, null, 0.08, 0.1, true)
+		_box("Rack brass door trim", Vector3(x, 1.40, 21.44), Vector3(1.78, 2.68, 0.02), brass, false, null, 0.28, 0.72)
+		for level in range(7):
+			var y := 0.38 + float(level) * 0.36
+			_box("Rack blade server", Vector3(x, y, 21.65), Vector3(1.65, 0.26, 0.55), Color("#1b2226"), false)
+			_box("Rack handle", Vector3(x, y, 21.48), Vector3(1.50, 0.03, 0.03), Color("#6d787d"), false)
+			for led in range(6):
+				var lc: Color = cyan_led if (level + led) % 3 != 0 else mint_led
+				_sphere("Blade LED", Vector3(x - 0.62 + float(led) * 0.14, y, 21.47), 0.024, lc, Vector3.ONE)
+
+	# 2. Heavy-duty Perforated Overhead Cable Raceways
+	_box("Overhead cable ladder", Vector3(24.7, 3.52, 22.0), Vector3(11.2, 0.10, 0.45), Color("#22292d"), false, null, 0.35, 0.4)
 	for x in [20.8, 23.4, 26.0, 28.6]:
-		_box("Rack cable drop", Vector3(x, 3.10, 22.0), Vector3(0.10, 0.55, 0.10), Color("#20272a"), false)
-	_box("API topology board frame", Vector3(24.7, 3.98, 24.65), Vector3(9.2, 1.15, 0.14), Color("#1f2326"), false, null, 0.3, 0.4)
-	_box("API topology board", Vector3(24.7, 3.98, 24.56), Vector3(8.9, 0.94, 0.04), Color("#0f1820"), false, null, 0.2, 0.0, false, Color("#1e5060"))
-	for x in [21.4, 23.6, 25.8, 28.0]:
-		_box("API topology node", Vector3(x, 3.98, 24.52), Vector3(1.15, 0.54, 0.03), Color("#7fd4d8"), false, null, 0.2, 0.0, false, Color("#3aa8b0"))
-	# Operations bench (visual) aligned to the room's west side, clear of the walk line.
-	_box("NOC bench", Vector3(22.7, 0.82, 12.3), Vector3(5.4, 0.12, 1.3), Color("#59655f"), false, null, 0.45, 0.15)
-	for bx in [20.6, 24.8]:
-		_box("NOC bench leg", Vector3(bx, 0.41, 12.3), Vector3(0.14, 0.82, 1.0), Color("#3a4645"), false)
+		_box("Cable conduit drop", Vector3(x, 3.15, 22.0), Vector3(0.12, 0.65, 0.12), Color("#1a2024"), false)
+		# Server rack spotlight
+		var rack_spot := SpotLight3D.new()
+		rack_spot.position = Vector3(x, 4.40, 20.8)
+		rack_spot.rotation_degrees = Vector3(-65, 0, 0)
+		rack_spot.light_color = Color("#d8f8ff")
+		rack_spot.light_energy = 0.35
+		rack_spot.spot_range = 5.5
+		rack_spot.spot_angle = 32.0
+		add_child(rack_spot)
+
+	# 3. NOC Real-time Infrastructure Topology Video Wall
+	_box("API topology frame", Vector3(24.7, 4.02, 24.68), Vector3(9.6, 1.25, 0.14), Color("#121619"), false, null, 0.25, 0.5)
+	_box("API topology screen", Vector3(24.7, 4.02, 24.58), Vector3(9.2, 1.05, 0.04), Color("#061219"), false, null, 0.12, 0.0, false, Color("#003847"))
+	for x in [21.0, 23.2, 25.4, 27.6]:
+		_box("Topology active cluster", Vector3(x, 4.02, 24.54), Vector3(1.25, 0.62, 0.02), Color("#00e5ff"), false, null, 0.2, 0.0, false, Color("#00a5ba"))
+	# Glowing data bus lines
+	_box("Data bus line A", Vector3(24.7, 4.02, 24.55), Vector3(7.8, 0.03, 0.015), mint_led, false, null, 0.2, 0.0, false, mint_led)
+
+	# 4. Operations Telemetry Desk & Diagnostics Console
+	_box("NOC operations desk", Vector3(22.7, 0.84, 12.3), Vector3(5.6, 0.14, 1.4), Color("#242c30"), false, null, 0.35, 0.3)
+	_box("NOC desk brass trim", Vector3(22.7, 0.82, 12.3), Vector3(5.68, 0.04, 1.48), brass, false, null, 0.28, 0.72)
+	for bx in [20.4, 25.0]:
+		_box("NOC desk pylon", Vector3(bx, 0.42, 12.3), Vector3(0.18, 0.84, 1.1), Color("#1b2024"), false)
 	for mx in [21.0, 22.7, 24.4]:
-		_box("NOC monitor", Vector3(mx, 1.30, 12.05), Vector3(1.25, 0.72, 0.06), Color("#0f171a"), false, null, 0.2, 0.0, false, Color("#2aa8b0"))
-	for sx in [21.0, 22.7, 24.4]:
-		_cylinder("NOC stool", Vector3(sx, 0.52, 10.7), 0.28, 0.10, Color("#4a5654"), null, false, 0.4)
-		_cylinder("NOC stool stem", Vector3(sx, 0.26, 10.7), 0.06, 0.52, Color("#6a7674"), null, false, 0.5)
-	# Monitoring status wall on the east side (reads from the workstation).
-	_box("NOC status frame", Vector3(41.45, 2.35, 13.6), Vector3(0.10, 2.0, 6.0), Color("#1f2326"), false)
-	_box("NOC status screen", Vector3(41.38, 2.35, 13.6), Vector3(0.04, 1.76, 5.6), Color("#0d1a20"), false, null, 0.18, 0.0, false, Color("#2aa8b0"))
+		_box("NOC diagnostic monitor", Vector3(mx, 1.35, 12.05), Vector3(1.35, 0.78, 0.06), Color("#0d1417"), false, null, 0.2, 0.0, false, Color("#00b8d4"))
+		_cylinder("NOC stool base", Vector3(mx, 0.05, 10.7), 0.22, 0.06, Color("#3a444a"), null, false, 0.5)
+		_cylinder("NOC stool stem", Vector3(mx, 0.28, 10.7), 0.05, 0.50, brass, null, false, 0.7)
+		_cylinder("NOC leather seat", Vector3(mx, 0.54, 10.7), 0.32, 0.12, Color("#1f2427"))
+
+	# 5. Wall-mounted Real-time Service Monitor Array
+	_box("NOC telemetry matrix frame", Vector3(41.46, 2.35, 13.6), Vector3(0.12, 2.2, 6.4), Color("#121618"), false)
+	_box("NOC telemetry matrix screen", Vector3(41.38, 2.35, 13.6), Vector3(0.04, 1.95, 6.0), Color("#07141b"), false, null, 0.15, 0.0, false, Color("#004d5c"))
 	for sz in [11.6, 13.6, 15.6]:
-		_box("NOC status card", Vector3(41.34, 2.35, sz), Vector3(0.02, 1.1, 1.5), Color("#7fd4d8"), false, null, 0.2, 0.0, false, Color("#3aa8b0"))
-	_add_plant(Vector3(39.4, 0, 6.4), 1.0)
-	_cylinder("API fire extinguisher", Vector3(19.4, 0.62, 24.2), 0.16, 0.95, Color("#a5322d"), null, false, 0.35)
-	_room_light(Vector3(26.0, 4.20, 17.5), Color("#d8f6ff"), 0.30, 12.0)
-	_room_light(Vector3(22.0, 4.20, 9.5), Color("#ffe9c8"), 0.26, 9.0)
+		_box("Telemetry metric tile", Vector3(41.33, 2.35, sz), Vector3(0.02, 1.25, 1.6), Color("#00e5ff"), false, null, 0.2, 0.0, false, Color("#008a9c"))
+
+	# Indoor Architectural Zen Bamboo Planter
+	_box("NOC zen planter box", Vector3(39.2, 0.45, 6.4), Vector3(1.4, 0.90, 1.4), Color("#1f262a"), false, null, 0.4)
+	_box("NOC planter brass rim", Vector3(39.2, 0.91, 6.4), Vector3(1.45, 0.04, 1.45), brass, false, null, 0.28, 0.72)
+	_add_plant(Vector3(39.2, 0.92, 6.4), 1.15)
+	_cylinder("API emergency safety", Vector3(19.4, 0.65, 24.2), 0.16, 0.95, Color("#b72b26"), null, false, 0.4)
+	_room_light(Vector3(26.0, 4.25, 17.5), Color("#c8f2ff"), 0.45, 13.0)
+	_room_light(Vector3(22.0, 4.25, 9.5), Color("#ffe9c8"), 0.35, 10.0)
 
 func _build_archive_and_print() -> void:
-	_label("COMPANY ARCHIVE  /  PRINT ROOM", Vector3(-35.4, 4.14, 25.8), 0.0050)
-	for z in [28.5, 33.0, 37.0]:
-		_add_shelf(Vector3(-37.0, 0.16, z), 3.5, 2.65, 0.9, "ARCHIVE")
-		_add_shelf(Vector3(-31.8, 0.16, z), 3.5, 2.65, 0.9, "REPORTS")
-	# Print station with paper drawers and output tray.
-	_box("Printer cabinet", Vector3(-23.2, 0.72, 31.5), Vector3(3.0, 1.4, 1.75), Color("#8b9690"), true)
-	_box("Printer body", Vector3(-23.2, 1.62, 31.5), Vector3(2.5, 0.55, 1.55), Color("#e5e8e2"), false)
-	_box("Printer scanner lid", Vector3(-23.2, 1.94, 31.48), Vector3(2.25, 0.10, 1.35), Color("#aab5ae"), false)
-	_box("Printer touch screen frame", Vector3(-24.0, 1.69, 30.68), Vector3(0.58, 0.40, 0.08), Color("#39494b"), false)
-	_box("Printer touch screen", Vector3(-24.0, 1.70, 30.625), Vector3(0.46, 0.28, 0.025), Color("#759d8e"), false, null, 0.2, 0.0, false, Color("#5b9b7f"))
-	_box("Printer output slot", Vector3(-22.3, 1.49, 30.69), Vector3(1.10, 0.07, 0.12), Color("#59655f"), false)
+	# L1 Corporate Knowledge Archive & Executive Print Suite
+	_label("COMPANY ARCHIVE  /  EXECUTIVE PRINT SUITE", Vector3(-35.4, 4.15, 25.8), 0.0050, Color("#d4b878"))
+	var oak := Color("#4a3622"); var oak_dark := Color("#352415")
+	var brass := Color("#d4b878"); var calacatta := Color("#f8f6f0")
+
+	# 1. Floor-to-ceiling Curated Knowledge Shelving with LED Illumination
+	for zi in range(3):
+		var z: float = [28.5, 33.0, 37.0][zi]
+		var legal_tag := "LEGAL & ARCHIVE" if zi == 0 else ""
+		var research_tag := "RESEARCH & CHRONICLES" if zi == 0 else ""
+		_add_shelf(Vector3(-37.0, 0.16, z), 3.6, 2.85, 0.95, legal_tag)
+		_add_shelf(Vector3(-31.8, 0.16, z), 3.6, 2.85, 0.95, research_tag)
+
+	# 2. Executive Built-in Production Print Center (Printer position strictly PRESERVED)
+	_box("Printer flush cabinet", Vector3(-23.2, 0.72, 31.5), Vector3(3.2, 1.44, 1.85), oak, true, null, 0.42)
+	_box("Printer cabinet brass trim", Vector3(-23.2, 0.12, 31.5), Vector3(3.25, 0.08, 1.90), brass, false, null, 0.28, 0.72)
+	_box("Printer body", Vector3(-23.2, 1.62, 31.5), Vector3(2.55, 0.55, 1.55), Color("#ecefe9"), false, null, 0.28)
+	_box("Printer scanner lid", Vector3(-23.2, 1.95, 31.48), Vector3(2.30, 0.10, 1.35), Color("#323a38"), false)
+	_box("Printer touch screen frame", Vector3(-24.0, 1.70, 30.68), Vector3(0.60, 0.42, 0.08), Color("#1b2224"), false)
+	_box("Printer touch screen", Vector3(-24.0, 1.71, 30.62), Vector3(0.50, 0.32, 0.02), Color("#0d1e1c"), false, null, 0.18, 0.0, false, Color("#368c74"))
+	_box("Printer output slot", Vector3(-22.3, 1.50, 30.69), Vector3(1.15, 0.08, 0.12), Color("#353e3a"), false)
 	for i in range(5):
-		_box("Printer paper stack", Vector3(-22.1, 1.58 + float(i) * 0.025, 31.1), Vector3(0.78, 0.022, 0.56), Color("#f1efe7"), false)
-	_box("Archive checkout counter", Vector3(-27.4, 0.75, 29.5), Vector3(5.1, 1.42, 0.90), Color("#82694f"), true)
-	_box("Archive counter top", Vector3(-27.4, 1.50, 29.5), Vector3(5.3, 0.14, 1.05), Color("#c4a984"), false)
-	_add_plant(Vector3(-21.5, 0, 37.3), 0.8)
-	# --- Tidy archive: clear aisle, reading table, trolley, bins, warm light ---
-	_box("Archive aisle stripe", Vector3(-34.4, 0.155, 32.6), Vector3(0.18, 0.02, 12.6), Color("#d8cfb9"), false, null, 0.85)
-	_box("Archive reading table", Vector3(-25.2, 0.76, 36.4), Vector3(3.2, 0.12, 1.2), Color("#8a6a46"), false, null, 0.4)
-	for tx in [-26.5, -23.9]:
-		_box("Archive reading leg", Vector3(tx, 0.38, 36.4), Vector3(0.12, 0.76, 1.0), Color("#5d6b63"), false)
-	for cz in [35.3, 37.5]:
-		_box("Archive reading chair", Vector3(-25.2, 0.62, cz), Vector3(0.9, 0.14, 0.86), Color("#4f675f"), false, null, 0.85)
-		_box("Archive chair back", Vector3(-25.2, 1.02, cz + (0.36 if cz > 36.4 else -0.36)), Vector3(0.9, 0.78, 0.14), Color("#445b53"), false)
-	_box("Archive book trolley", Vector3(-25.0, 0.52, 27.8), Vector3(1.4, 0.9, 0.7), Color("#6c7a72"), false, null, 0.6, 0.2)
-	for bx in [-25.5, -24.5]:
-		for bz in [27.6, 28.0]:
-			_cylinder("Archive trolley wheel", Vector3(bx, 0.10, bz), 0.10, 0.08, Color("#2c3230"), null, false, 0.3)
-	_cylinder("Archive bin", Vector3(-21.0, 0.42, 28.0), 0.28, 0.84, Color("#58655f"), null, false, 0.3)
-	_cylinder("Archive recycle bin", Vector3(-21.0, 0.42, 29.2), 0.28, 0.84, Color("#6f8a7a"), null, false, 0.3)
-	_add_wall_clock(Vector3(-41.70, 3.05, 30.0))
-	_room_light(Vector3(-30.5, 4.15, 32.0), Color("#ffe5bc"), 0.50, 12.0)
-	_room_light(Vector3(-24.5, 4.15, 36.2), Color("#ffe5bc"), 0.28, 7.0)
+		_box("Printer bond paper stack", Vector3(-22.1, 1.58 + float(i) * 0.025, 31.1), Vector3(0.80, 0.022, 0.58), Color("#fcfbfa"), false)
+
+	# 3. Document Certification & Checkout Counter
+	_box("Archive checkout counter", Vector3(-27.4, 0.75, 29.5), Vector3(5.2, 1.45, 0.95), oak_dark, true, null, 0.45)
+	_box("Archive counter marble top", Vector3(-27.4, 1.52, 29.5), Vector3(5.4, 0.14, 1.10), calacatta, false, null, 0.12, 0.03)
+	_box("Archive counter brass reveal", Vector3(-27.4, 1.44, 29.5), Vector3(5.3, 0.04, 1.02), brass, false, null, 0.28, 0.72)
+
+	# 4. Travertine Stone Reading & Research Table with Leather Reading Chairs
+	_box("Archive reading table", Vector3(-25.2, 0.78, 36.4), Vector3(3.4, 0.14, 1.35), calacatta, false, null, 0.18, 0.04)
+	for tx in [-26.6, -23.8]:
+		_box("Reading table walnut leg", Vector3(tx, 0.39, 36.4), Vector3(0.18, 0.78, 1.15), oak, false, null, 0.45)
+	for cz in [35.2, 37.6]:
+		_box("Reading armchair seat", Vector3(-25.2, 0.62, cz), Vector3(0.95, 0.16, 0.90), Color("#24282b"), false, null, 0.55)
+		_box("Reading armchair back", Vector3(-25.2, 1.05, cz + (0.38 if cz > 36.4 else -0.38)), Vector3(0.95, 0.84, 0.16), Color("#1e2124"), false, null, 0.55)
+	# Brass Banker's Reading Lamp
+	_cylinder("Banker lamp base", Vector3(-25.2, 0.88, 36.4), 0.12, 0.04, brass, null, false, 0.8)
+	_box("Banker lamp shade", Vector3(-25.2, 1.15, 36.4), Vector3(0.36, 0.12, 0.18), Color("#1b4d32"), false, null, 0.22, 0.0, false, Color("#266d48"))
+	var read_light := OmniLight3D.new()
+	read_light.position = Vector3(-25.2, 1.10, 36.4)
+	read_light.light_color = Color("#fff0d4")
+	read_light.light_energy = 0.45
+	read_light.omni_range = 4.5
+	add_child(read_light)
+
+	# Brass Document Trolley (two-tier, mobile)
+	for tx in [-25.62, -24.38]:
+		for tz in [27.45, 28.15]:
+			_cylinder("Trolley caster", Vector3(tx, 0.10, tz), 0.07, 0.20, Color("#1f2425"), null, false, 0.5)
+			_cylinder("Trolley leg", Vector3(tx, 0.46, tz), 0.026, 0.72, brass, null, false, 0.8)
+	_box("Trolley lower shelf", Vector3(-25.0, 0.34, 27.80), Vector3(1.48, 0.05, 0.74), Color("#b89354"), false, null, 0.35, 0.55)
+	_box("Trolley upper shelf", Vector3(-25.0, 0.82, 27.80), Vector3(1.48, 0.05, 0.74), Color("#c9a45f"), false, null, 0.35, 0.55)
+	_box("Trolley rail front", Vector3(-25.0, 0.44, 28.15), Vector3(1.48, 0.18, 0.03), brass, false, null, 0.28, 0.72)
+	_box("Trolley rail back", Vector3(-25.0, 0.44, 27.45), Vector3(1.48, 0.18, 0.03), brass, false, null, 0.28, 0.72)
+	_box("Trolley handle bar", Vector3(-25.0, 1.16, 28.12), Vector3(1.30, 0.05, 0.05), brass, false, null, 0.28, 0.72)
+	for hx in [-25.60, -24.40]:
+		_box("Trolley handle post", Vector3(hx, 0.98, 28.12), Vector3(0.05, 0.36, 0.05), brass, false, null, 0.28, 0.72)
+	for bi in range(4):
+		_box("Trolley binder", Vector3(-25.55 + float(bi) * 0.30, 0.93, 27.80), Vector3(0.22, 0.18, 0.40), [Color("#718b7d"), Color("#bf916f"), Color("#7889a8"), Color("#b8ad7b")][bi], false, null, 0.6)
+
+	_add_wall_clock(Vector3(-41.70, 3.25, 30.0))
+	_add_plant(Vector3(-21.2, 0, 37.5), 0.95)
+	_room_light(Vector3(-30.5, 4.25, 32.0), Color("#ffe8c4"), 0.50, 13.0)
+	_room_light(Vector3(-24.5, 4.25, 36.2), Color("#ffe8c4"), 0.35, 8.5)
 
 func _build_owner_private_lounge() -> void:
 	# L3 — Ruang pribadi Owner
-	_label("LANTAI 3  /  OWNER  /  RUANG PRIBADI", Vector3(-10.0, 3.45, 25.8), 0.0054)
+	_label("LANTAI 3  /  OWNER  /  RUANG PRIBADI", Vector3(-10.0, 4.02, 25.8), 0.0054)
 	_box("Owner lounge accent wall", Vector3(-10.0, 1.95, 39.72), Vector3(18.6, 3.7, 0.10), Color("#6b4a38"), false)
 	_box("Owner lounge accent trim", Vector3(-10.0, 0.42, 39.66), Vector3(18.6, 0.10, 0.05), Color("#c5a366"), false)
 	_box("Owner lounge rug", Vector3(-10.0, 0.16, 32.0), Vector3(15.0, 0.06, 9.0), Color("#7c5f4a"), false)
@@ -1718,52 +2004,122 @@ func _build_owner_private_lounge() -> void:
 	_box("Owner lounge sideboard", Vector3(-2.9, 0.72, 29.5), Vector3(3.2, 1.38, 0.70), Color("#8b735c"), false)
 	_box("Owner lounge sideboard top", Vector3(-2.9, 1.46, 29.5), Vector3(3.4, 0.12, 0.84), Color("#c8aa83"), false)
 	_cylinder("Owner lounge vase", Vector3(-3.6, 1.72, 29.5), 0.16, 0.30, Color("#5e756a"))
+	_room_light(Vector3(-10.0, 4.30, 32.5), Color("#ffe7c2"), 0.50, 13.0)
+	for lp in [Vector3(-13.5, 0, 29.5), Vector3(-6.5, 0, 34.5), Vector3(-10.0, 0, 38.2)]:
+		_box("Owner lounge linear light", Vector3(lp.x, CEIL_Y - 0.30, lp.z), Vector3(3.6, 0.12, 0.55), Color("#f6f2e6"), false, null, 0.22, 0.0, false, Color("#fff0d4"))
+		var ll := OmniLight3D.new()
+		ll.position = Vector3(lp.x, _floor_y + 4.72, lp.z)
+		ll.light_color = Color("#ffeccd")
+		ll.light_energy = 0.60
+		ll.omni_range = 11.0
+		add_child(ll)
 	_box("Owner lounge book pile", Vector3(-2.2, 1.62, 29.5), Vector3(0.5, 0.22, 0.36), Color("#7889a8"), false)
 
 func _build_staff_pantry_lounge() -> void:
-	# L1 — Pantry & staff lounge
-	_label("LANTAI 1  /  PANTRY  /  STAFF LOUNGE", Vector3(11.0, 4.14, 25.9), 0.0054)
-	# Pantry/coffee — keeps `coffee` interactable anchor (22.5,0,34.8 in main.gd) coherent.
-	_box("Pantry island bar", Vector3(27.5, 0.88, 29.0), Vector3(9.0, 1.62, 1.45), Color("#3a3f43"), true, null, 0.4)
-	_box("Pantry island top", Vector3(27.5, 1.73, 29.0), Vector3(9.25, 0.16, 1.65), Color("#d8d2c8"), false, null, 0.2, 0.06)
-	_box("Coffee machine", Vector3(22.5, 2.00, 36.05), Vector3(1.0, 0.92, 0.80), Color("#2C302E"), false, null, 0.35, 0.25)
-	_box("Coffee machine screen", Vector3(22.5, 2.15, 35.62), Vector3(0.58, 0.25, 0.035), Color("#89b7a3"), false, null, 0.18, 0.0, false, Color("#00FFFF"))
-	_box("Pantry sink", Vector3(34.0, 1.58, 36.15), Vector3(1.8, 0.08, 0.75), Color("#7b8c86"), false, null, 0.2, 0.48)
-	_cylinder("Pantry faucet", Vector3(34.0, 1.89, 35.8), 0.045, 0.54, Color("#bcc7c1"), null, false, 0.85)
-	_box("Microwave", Vector3(26.0, 2.0, 36.05), Vector3(1.25, 0.72, 0.78), Color("#77847f"), false)
-	_box("Refrigerator", Vector3(38.5, 1.45, 31.8), Vector3(1.7, 2.75, 1.55), Color("#c4cbc6"), true, null, 0.28, 0.3)
+	# L1 Café Bangkah & Executive Social Lounge (Artisan coffee bar & boutique social hub)
+	_label("CAFÉ BANGKAH  /  EXECUTIVE SOCIAL LOUNGE", Vector3(11.0, 4.15, 25.9), 0.0052, Color("#d4b878"))
+	var walnut := Color("#3c2a1a"); var smoked_oak := Color("#4a3622")
+	var brass := Color("#d4b878"); var brass_satin := Color("#c5a366")
+	var quartz := Color("#f5f2eb"); var nero := Color("#1a1d1f")
+	var calacatta := Color("#f8f6f0")
+
+	# 1. Monolithic Waterfall Quartz Barista Island Bar
+	# (Coffee anchor at Vector3(22.5,0,34.8) and drop position at Vector3(24.5, 1.865, 29.0) strictly PRESERVED)
+	_box("Pantry island base", Vector3(27.5, 0.88, 29.0), Vector3(9.2, 1.62, 1.45), walnut, true, null, 0.42)
+	# Fluted wood fascia slats along the front
+	for bx in range(-9, 10):
+		_box("Pantry island flute", Vector3(27.5 + float(bx) * 0.48, 0.88, 28.24), Vector3(0.045, 1.55, 0.025), smoked_oak, false, null, 0.52)
+	# Brushed champagne brass kickplate and reveal
+	_box("Pantry brass plinth", Vector3(27.5, 0.10, 28.26), Vector3(9.2, 0.14, 0.04), brass_satin, false, null, 0.28, 0.72)
+	_box("Pantry brass reveal", Vector3(27.5, 1.68, 28.26), Vector3(9.2, 0.04, 0.04), brass, false, null, 0.28, 0.72)
+	# Waterfall quartz countertop with beveled edge
+	_box("Pantry quartz top", Vector3(27.5, 1.73, 29.0), Vector3(9.45, 0.16, 1.68), quartz, false, null, 0.14, 0.04)
+	_box("Pantry waterfall W", Vector3(22.8, 0.88, 29.0), Vector3(0.16, 1.62, 1.68), quartz, false, null, 0.14, 0.04)
+	_box("Pantry waterfall E", Vector3(32.2, 0.88, 29.0), Vector3(0.16, 1.62, 1.68), quartz, false, null, 0.14, 0.04)
+	# Warm golden LED under-counter glow
+	_box("Pantry bar underglow", Vector3(27.5, 1.62, 28.20), Vector3(9.0, 0.025, 0.10), Color("#ffe6b8"), false, null, 0.2, 0.0, false, Color("#ffe6b8"))
+
+	# 2. Professional Italian Espresso Machine (Interactable coffee anchor PRESERVED)
+	_box("Coffee machine base", Vector3(22.5, 1.86, 36.05), Vector3(1.10, 0.12, 0.90), Color("#1a1e20"), true, null, 0.3)
+	_box("Coffee machine body", Vector3(22.5, 2.12, 36.05), Vector3(1.05, 0.72, 0.84), Color("#d8dedb"), false, null, 0.15, 0.85)
+	_box("Coffee machine chrome front", Vector3(22.5, 2.12, 35.60), Vector3(0.98, 0.65, 0.04), Color("#eaf0ed"), false, null, 0.08, 0.95)
+	_box("Coffee group head L", Vector3(22.25, 1.95, 35.54), Vector3(0.14, 0.18, 0.16), Color("#1b2224"), false)
+	_box("Coffee group head R", Vector3(22.75, 1.95, 35.54), Vector3(0.14, 0.18, 0.16), Color("#1b2224"), false)
+	_cylinder("Espresso steam wand L", Vector3(22.05, 2.05, 35.52), 0.025, 0.32, Color("#eaf0ed"), null, false, 0.95)
+	_cylinder("Espresso steam wand R", Vector3(22.95, 2.05, 35.52), 0.025, 0.32, Color("#eaf0ed"), null, false, 0.95)
+	_box("Coffee touch screen", Vector3(22.5, 2.24, 35.56), Vector3(0.48, 0.24, 0.02), Color("#0a151b"), false, null, 0.12, 0.0, false, Color("#00e5ff"))
+	_cylinder("Coffee bean hopper L", Vector3(22.25, 2.62, 36.05), 0.16, 0.32, Color(0.85, 0.92, 0.95, 0.45), null, false, 0.1)
+	_cylinder("Coffee bean hopper R", Vector3(22.75, 2.62, 36.05), 0.16, 0.32, Color(0.85, 0.92, 0.95, 0.45), null, false, 0.1)
+
+	# 3. Barista Appliances & Hospitality Station
+	_box("Pantry undermount sink", Vector3(34.0, 1.58, 36.15), Vector3(1.9, 0.08, 0.85), Color("#1b2022"), false, null, 0.2, 0.6)
+	_cylinder("Pantry matte black faucet", Vector3(34.0, 1.96, 35.75), 0.035, 0.62, Color("#14181a"), null, false, 0.4)
+	_box("Builtin microwave oven", Vector3(26.0, 2.02, 36.05), Vector3(1.30, 0.74, 0.80), Color("#242b2e"), false, null, 0.25, 0.65)
+	_box("Stainless steel refrigerator", Vector3(38.5, 1.50, 31.8), Vector3(1.75, 2.85, 1.55), Color("#cbd2ce"), true, null, 0.22, 0.75)
+	_box("Fridge brass bar handle", Vector3(37.58, 1.50, 31.8), Vector3(0.04, 1.65, 0.04), brass, false, null, 0.28, 0.72)
+	# Back barista counter so the espresso machine, sink and microwave sit on a real surface.
+	_box("Pantry back counter base", Vector3(27.5, 0.76, 36.20), Vector3(17.2, 1.52, 0.80), walnut, true, null, 0.5)
+	for cx2 in range(-8, 9):
+		_box("Pantry back cabinet door", Vector3(27.5 + float(cx2) * 0.98, 0.76, 35.78), Vector3(0.90, 1.36, 0.03), smoked_oak, false, null, 0.55)
+		_box("Pantry back cabinet pull", Vector3(27.5 + float(cx2) * 0.98, 1.30, 35.76), Vector3(0.28, 0.03, 0.03), brass_satin, false, null, 0.28, 0.72)
+	_box("Pantry back counter top", Vector3(27.5, 1.56, 36.16), Vector3(17.4, 0.10, 0.92), quartz, false, null, 0.14, 0.04)
+	_box("Pantry back counter underglow", Vector3(27.5, 1.49, 35.72), Vector3(16.8, 0.02, 0.04), Color("#ffe6b8"), false, null, 0.2, 0.0, false, Color("#ffe6b8"))
+	_box("Espresso machine riser", Vector3(22.5, 1.70, 36.05), Vector3(1.22, 0.18, 0.96), Color("#22282b"), false, null, 0.35)
+	_box("Pantry open shelf", Vector3(27.5, 2.62, 36.60), Vector3(16.0, 0.08, 0.34), smoked_oak, false, null, 0.5)
+	for sx2 in [-7.6, 7.6]:
+		_box("Pantry shelf bracket", Vector3(27.5 + sx2, 2.30, 36.60), Vector3(0.08, 0.60, 0.30), brass_satin, false, null, 0.3, 0.6)
+	for cx3 in range(-7, 8, 2):
+		_cylinder("Pantry cup", Vector3(27.5 + float(cx3) * 0.98, 2.74, 36.58), 0.075, 0.16, Color("#e9e2d2"))
+	_cylinder("Pantry jar", Vector3(33.4, 2.80, 36.58), 0.12, 0.30, Color("#cfd8d2"))
+
+	# 4. Luxury Leather Bar Stools with Brass Frames
 	for x in [24.6, 27.5, 30.4]:
-		_cylinder("Bar stool stem", Vector3(x, 0.55, 26.9), 0.075, 0.98, Color("#65736d"), null, false, 0.55)
-		_cylinder("Bar stool seat", Vector3(x, 1.08, 26.9), 0.42, 0.14, Color("#61796e"))
-	# Three warm pendants over the island, evenly spaced with the stools.
+		_cylinder("Bar stool brass base", Vector3(x, 0.05, 26.9), 0.24, 0.06, brass, null, false, 0.75)
+		_cylinder("Bar stool stem", Vector3(x, 0.56, 26.9), 0.05, 1.02, brass, null, false, 0.75)
+		_cylinder("Bar stool footrest", Vector3(x, 0.35, 26.9), 0.22, 0.04, brass_satin, null, false, 0.7)
+		_box("Bar stool leather seat", Vector3(x, 1.08, 26.9), Vector3(0.55, 0.12, 0.52), Color("#22272a"), false, null, 0.55)
+		_box("Bar stool backrest", Vector3(x, 1.34, 26.68), Vector3(0.52, 0.42, 0.10), Color("#22272a"), false, null, 0.55)
+
+	# 5. Triple Brushed Champagne Brass Pendants
 	for px in [24.6, 27.5, 30.4]:
-		_cylinder("Pantry pendant stem", Vector3(px, 4.00, 29.0), 0.028, 1.9, Color("#4c5a55"))
-		_box("Pantry pendant shade", Vector3(px, 3.02, 29.0), Vector3(0.52, 0.16, 0.52), Color("#d5c49e"), false, null, 0.3)
-		_box("Pantry pendant glow", Vector3(px, 2.95, 29.0), Vector3(0.42, 0.04, 0.42), Color("#f5e0b8"), false, null, 0.2, 0.0, false, Color("#ffe6b8"))
-		_room_light(Vector3(px, 2.95, 29.0), Color("#ffe6b8"), 0.24, 5.0)
-	# Staff lounge — sofas use cognac/charcoal palette (seats preserved via _add_lounge_sofa)
-	_box("Lounge rug", Vector3(9.0, 0.16, 32.0), Vector3(16.0, 0.06, 9.5), Color("#87998d"), false)
-	_add_lounge_sofa(Vector3(7.0, 0, 29.2), 0.0, Color("#8B5A2B"), 3.8) # cognac
-	_add_lounge_sofa(Vector3(7.0, 0, 35.0), PI, Color("#3a3f43"), 3.8)  # charcoal
-	_box("Lounge coffee table", Vector3(7.0, 0.48, 32.1), Vector3(3.3, 0.15, 1.35), Color("#2a2f33"), false, null, 0.14, 0.04)
-	_add_plant(Vector3(15.0, 0, 29.0), 1.0); _add_plant(Vector3(15.0, 0, 35.0), 1.0)
-	_box("Lounge wall display", Vector3(9.0, 2.1, 38.75), Vector3(5.6, 2.0, 0.14), Color("#41544b"), false)
-	_box("Lounge display screen", Vector3(9.0, 2.1, 38.65), Vector3(5.25, 1.66, 0.03), Color("#254039"), false, null, 0.18, 0.0, false, Color("#426d57"))
-	# Side tables, lamp, tray return and plants keep the lounge edges tidy.
-	_box("Lounge side table", Vector3(2.2, 0.48, 30.0), Vector3(1.3, 0.10, 1.1), Color("#7b6a56"), false, null, 0.5)
-	_box("Lounge side table base", Vector3(2.2, 0.22, 30.0), Vector3(0.24, 0.44, 0.24), Color("#2a2f33"), false, null, 0.3, 0.3)
-	_cylinder("Lounge floor lamp pole", Vector3(2.2, 0.95, 36.0), 0.045, 1.9, Color("#596b63"))
-	_box("Lounge floor lamp shade", Vector3(2.2, 1.92, 36.0), Vector3(0.46, 0.30, 0.46), Color("#e3d3b2"), false, null, 0.35)
-	_room_light(Vector3(2.2, 1.82, 36.0), Color("#ffe6bc"), 0.36, 6.0)
-	_box("Pantry tray return", Vector3(33.0, 0.55, 26.1), Vector3(1.8, 1.1, 0.8), Color("#4c5a55"), false, null, 0.5, 0.2)
-	_cylinder("Pantry bin", Vector3(39.0, 0.44, 25.8), 0.30, 0.88, Color("#58655f"), null, false, 0.3)
-	_cylinder("Pantry recycle bin", Vector3(38.1, 0.44, 25.8), 0.30, 0.88, Color("#6f8a7a"), null, false, 0.3)
-	_add_framed_poster(Vector3(3.2, 2.15, 38.60), Color("#8B5A2B"), "TEAM", PI * 0.5)
-	_add_framed_poster(Vector3(15.0, 2.15, 38.60), Color("#3a3f43"), "BREW", PI * 0.5)
-	_add_plant(Vector3(17.6, 0, 25.8), 0.9)
-	_add_plant(Vector3(1.8, 0, 27.4), 0.8)
-	_room_light(Vector3(7.0, 4.20, 32.0), Color("#ffe8c6"), 0.50, 12.0)
-	_room_light(Vector3(27.5, 4.20, 31.0), Color("#ffe8c6"), 0.42, 11.0)
+		_cylinder("Pantry pendant cable", Vector3(px, 4.36, 29.0), 0.015, 2.20, Color("#2c302e"))
+		_cylinder("Pantry pendant brass shade", Vector3(px, 3.12, 29.0), 0.32, 0.28, brass, null, false, 0.75)
+		_box("Pantry pendant diffuser", Vector3(px, 2.96, 29.0), Vector3(0.48, 0.04, 0.48), Color("#fff4dc"), false, null, 0.2, 0.0, false, Color("#ffe4b8"))
+		_room_light(Vector3(px, 2.92, 29.0), Color("#ffe6b8"), 0.35, 6.0)
+
+	# 6. Executive Social Lounge (Sofa seats & drop position strictly PRESERVED)
+	_box("Lounge plush rug", Vector3(9.0, 0.16, 32.0), Vector3(16.5, 0.06, 10.2), Color("#3e4b44"), false, null, 0.95)
+	_box("Lounge rug brass border", Vector3(9.0, 0.18, 32.0), Vector3(15.8, 0.02, 9.4), brass, false, null, 0.28, 0.72)
+	# 2 Luxury Sectional Sofas (Positions strictly PRESERVED for seat interaction)
+	_add_lounge_sofa(Vector3(7.0, 0, 29.2), 0.0, Color("#824d26"), 3.9) # Italian cognac leather
+	_add_lounge_sofa(Vector3(7.0, 0, 35.0), PI, Color("#262b2e"), 3.9)  # Charcoal velvet
+	# Travertine & Brass Coffee Table (Drop position Vector3(7.0, 0.61, 32.1) PRESERVED)
+	_box("Lounge travertine table", Vector3(7.0, 0.48, 32.1), Vector3(3.4, 0.16, 1.45), calacatta, false, null, 0.18, 0.04)
+	_box("Lounge table brass plinth", Vector3(7.0, 0.22, 32.1), Vector3(2.8, 0.42, 1.15), brass_satin, false, null, 0.32, 0.65)
+	_box("Lounge coffee book", Vector3(6.5, 0.58, 32.0), Vector3(0.45, 0.04, 0.35), Color("#a68862"), false)
+
+	# 85-inch Ambient Company Showcase Screen on Acoustic Slat Wall
+	_box("Lounge slat feature wall", Vector3(9.0, 2.25, 38.78), Vector3(8.5, 3.6, 0.12), walnut, false, null, 0.55)
+	_box("Lounge screen halo glow", Vector3(9.0, 2.25, 38.74), Vector3(6.2, 2.3, 0.02), Color("#ffe6b8"), false, null, 0.2, 0.0, false, Color("#ffd899"))
+	_box("Lounge display frame", Vector3(9.0, 2.25, 38.68), Vector3(6.0, 2.1, 0.06), Color("#14181a"), false, null, 0.22, 0.5)
+	_box("Lounge display screen", Vector3(9.0, 2.25, 38.62), Vector3(5.8, 1.95, 0.02), Color("#0b1a16"), false, null, 0.15, 0.0, false, Color("#2d5c48"))
+
+	# Side tables, lamp, tray return and lush plants
+	_box("Lounge marble side table", Vector3(2.2, 0.50, 30.0), Vector3(1.2, 0.12, 1.2), calacatta, false, null, 0.14)
+	_cylinder("Side table brass stem", Vector3(2.2, 0.24, 30.0), 0.12, 0.46, brass, null, false, 0.75)
+	_cylinder("Lounge floor lamp pole", Vector3(2.2, 0.95, 36.0), 0.035, 1.9, brass, null, false, 0.75)
+	_cylinder("Lounge floor lamp shade", Vector3(2.2, 1.95, 36.0), 0.32, 0.28, Color("#f5ebd4"), null, false, 0.3)
+	_room_light(Vector3(2.2, 1.85, 36.0), Color("#ffe6bc"), 0.45, 7.0)
+
+	_box("Pantry tray return", Vector3(33.0, 0.58, 26.1), Vector3(1.8, 1.15, 0.8), Color("#323a37"), false, null, 0.5, 0.2)
+	_cylinder("Pantry recycling bin", Vector3(39.0, 0.45, 25.8), 0.28, 0.88, Color("#3f4a45"), null, false, 0.3)
+	_cylinder("Pantry organic bin", Vector3(38.1, 0.45, 25.8), 0.28, 0.88, Color("#4f6d5c"), null, false, 0.3)
+	_add_plant(Vector3(15.0, 0, 29.0), 1.15)
+	_add_plant(Vector3(15.0, 0, 35.0), 1.15)
+	_add_plant(Vector3(17.6, 0, 25.8), 1.05)
+	_add_plant(Vector3(1.8, 0, 27.4), 0.95)
+	_room_light(Vector3(7.0, 4.30, 32.0), Color("#ffe8c6"), 0.55, 13.0)
+	_room_light(Vector3(27.5, 4.30, 31.0), Color("#ffe8c6"), 0.45, 12.0)
 
 ## Kursi bebas yang tidak terikat workstation: klaster lounge di lobby luas
 ## plus kursi geser di QA supaya setiap bengkel/jabatan punya tempat duduk.
@@ -1806,7 +2162,7 @@ func _build_information_boards() -> void:
 		"Jam layanan 08.00-17.00",
 		"Permintaan: tiket #arsip",
 	])
-	_info_board("InfoPantry", Vector3(38.8, 0, 26.4), -PI * 0.5, "PANTRY & LOUNGE", [
+	_info_board("InfoPantry", Vector3(38.8, 0, 26.4), -PI * 0.5, "CAFÉ BANGKAH", [
 		"Kopi, teh, air mineral gratis",
 		"Bersihkan meja setelah pakai",
 		"Mesin kopi: tekan 1x · cangkir",
@@ -1873,18 +2229,337 @@ func _build_information_boards() -> void:
 	])
 
 func _build_accent_walls_l1() -> void:
+	var brass := Color("#d4b878"); var brass_satin := Color("#c5a366")
+	var calacatta := Color("#f8f6f0"); var nero := Color("#1a1d1f")
+
+	# Fluted Calacatta marble pilasters with champagne brass caps along the main gallery
 	for x in [-35.5, -23.5]:
-		_box("Boardroom terracotta accent", Vector3(x, 1.95, 4.86), Vector3(2.4, 2.9, 0.08), Color("#9a6a58"), false)
-		_box("Boardroom accent trim", Vector3(x, 0.48, 4.87), Vector3(2.4, 0.10, 0.09), Color("#c5a366"), false)
-	_box("Boardroom brass line", Vector3(-39.68, 0.75, 15.0), Vector3(0.06, 0.12, 6.0), Color("#c5a366"), false)
-	_box("API graphite accent", Vector3(39.74, 1.95, 14.5), Vector3(0.06, 2.9, 5.0), Color("#3a4a4d"), false)
-	_box("Lobby sand accent", Vector3(12.05, 1.60, 28.2), Vector3(0.08, 3.2, 2.6), Color("#b8a88e"), false)
-	_cylinder("Lobby floor medallion", Vector3(11.8, 0.16, 28.2), 2.1, 0.05, Color("#7c8a7e"), null, false, 0.4)
-	_cylinder("Lobby medallion inner", Vector3(11.8, 0.20, 28.2), 1.35, 0.055, Color("#9aa78f"), null, false, 0.4)
-	_add_framed_poster(Vector3(-19.62, 2.1, 10.0), Color("#9a6a58"), "BANGKAH")
-	_add_framed_poster(Vector3(19.62, 2.1, 10.0), Color("#6f8a7a"), "INTEGRITY")
+		_box("Boardroom marble pilaster", Vector3(x, 1.95, 4.86), Vector3(2.5, 3.2, 0.10), calacatta, false, null, 0.16)
+		_box("Pilaster brass cap", Vector3(x, 3.55, 4.88), Vector3(2.55, 0.10, 0.12), brass, false, null, 0.28, 0.72)
+		_box("Pilaster brass base", Vector3(x, 0.35, 4.88), Vector3(2.55, 0.14, 0.12), brass_satin, false, null, 0.32, 0.65)
+
+	# Brushed brass geometric line running along corridors
+	_box("Boardroom brass line", Vector3(-39.68, 0.82, 15.0), Vector3(0.06, 0.08, 6.2), brass, false, null, 0.28, 0.72)
+	_box("API tech accent", Vector3(39.74, 1.95, 14.5), Vector3(0.06, 3.0, 5.2), Color("#1b252a"), false, null, 0.35, 0.2)
+	_box("API brass trim", Vector3(39.72, 1.95, 14.5), Vector3(0.04, 3.04, 0.08), brass, false, null, 0.28, 0.72)
+
+	# Grand Atrium Compass Medallion in Nero Marquina & Champagne Brass
+	_cylinder("Lobby Nero medallion", Vector3(11.8, 0.16, 28.2), 2.2, 0.05, nero, null, false, 0.2)
+	_cylinder("Lobby Calacatta ring", Vector3(11.8, 0.18, 28.2), 1.9, 0.052, calacatta, null, false, 0.1)
+	_cylinder("Lobby brass compass ring", Vector3(11.8, 0.20, 28.2), 1.45, 0.055, brass, null, false, 0.75)
+	_cylinder("Lobby medallion center", Vector3(11.8, 0.22, 28.2), 0.65, 0.058, nero, null, false, 0.2)
+
+	# Curated Corporate Fine Art Canvases with Dedicated Picture Lights
+	_add_framed_poster(Vector3(-19.62, 2.1, 10.0), Color("#d4b878"), "BANGKAH")
+	_add_framed_poster(Vector3(19.62, 2.1, 10.0), Color("#2f523d"), "EXCELLENCE")
+	for px in [-19.55, 19.55]:
+		var pic_light := SpotLight3D.new()
+		pic_light.position = Vector3(px, 3.25, 10.0)
+		pic_light.rotation_degrees = Vector3(-65, (90.0 if px < 0 else -90.0), 0)
+		pic_light.light_color = Color("#fff5de")
+		pic_light.light_energy = 0.45
+		pic_light.spot_range = 4.0
+		pic_light.spot_angle = 35.0
+		add_child(pic_light)
+
+	# Brushed Champagne Brass Door Threshold Portals
 	for x in [-29.0, 0.0, 29.0]:
-		_box("Door threshold south wing", Vector3(x, 0.17, 25.0), Vector3(2.9, 0.045, 0.5), Color("#9a6a58"), false)
+		_box("Door threshold south wing", Vector3(x, 0.17, 25.0), Vector3(3.1, 0.048, 0.55), brass, false, null, 0.28, 0.72)
+
+func _build_l1_innovation_gallery() -> void:
+	# L1 Tech Exhibition Gallery & Engineering Heritage Hall (North Wing L1)
+	var brass := Color("#d4b878"); var brass_satin := Color("#c5a366")
+	var calacatta := Color("#f8f6f0"); var nero := Color("#1a1d1f")
+	var walnut := Color("#382b22"); var cyan := Color("#00e5ff"); var mint := Color("#00e676")
+	var glass_mat := Color(0.72, 0.84, 0.90, 0.14)
+
+	# 1. Bangkah Engineering Heritage Wall (North Wall z = -39.65)
+	# Continuous fluted smoked oak architectural paneling along entire north wing
+	_box("Heritage wall backing", Vector3(0, L1_Y + 2.7, -39.65), Vector3(78.0, 5.2, 0.14), walnut, false, null, 0.58)
+	_box("Heritage crown reveal", Vector3(0, L1_Y + 5.25, -39.56), Vector3(78.2, 0.12, 0.18), brass, false, null, 0.28, 0.72)
+	_box("Heritage base plinth", Vector3(0, L1_Y + 0.12, -39.56), Vector3(78.2, 0.24, 0.18), brass_satin, false, null, 0.32, 0.65)
+
+	# Illuminated 3D Bangkah Architectural Emblem on Heritage Wall center
+	_cylinder("Heritage emblem backplate", Vector3(0, L1_Y + 3.8, -39.52), 1.6, 0.04, nero, null, false, 0.2)
+	_cylinder("Heritage emblem brass ring", Vector3(0, L1_Y + 3.8, -39.49), 1.65, 0.03, brass, null, false, 0.8)
+	_cylinder("Heritage emblem halo", Vector3(0, L1_Y + 3.8, -39.50), 1.72, 0.02, Color("#fff4dd"), null, false, 0.1, 0.0, Color("#ffe2aa"))
+	_painted_text("BANGKAH HQ", Vector3(0, L1_Y + 3.8, -39.46), 0.0, 0.0075, Color("#f9f5ea"), Color(0,0,0,0))
+	_painted_text("ENGINEERING  HERITAGE  &  INNOVATION", Vector3(0, L1_Y + 3.15, -39.48), 0.0, 0.0032, brass, Color(0,0,0,0))
+
+	# 5 Engineering Milestone Exhibition Stations along the Heritage Wall
+	var milestones := [
+		{"x": -28.0, "yr": "2018", "title": "FOUNDATION & DISTRIBUTED KERNEL", "sub": "Core RPC & consensus protocols"},
+		{"x": -14.0, "yr": "2020", "title": "HYPERSCALE CLOUD FABRIC", "sub": "Multi-region cluster telemetry"},
+		{"x": 0.0, "yr": "2022", "title": "AGENTIC INTELLIGENCE ENGINE", "sub": "Autonomous agent runtime"},
+		{"x": 14.0, "yr": "2024", "title": "BANGKAH CLOUD OS v3", "sub": "Sub-millisecond state replication"},
+		{"x": 28.0, "yr": "2026", "title": "QUANTUM-SECURE NEURAL EXCHANGE", "sub": "Zero-trust distributed ledger"}
+	]
+	for m in milestones:
+		var mx: float = float(m["x"])
+		# Smoked glass plaque backing with brass standoffs
+		_box("Milestone plate", Vector3(mx, L1_Y + 1.95, -39.50), Vector3(5.6, 1.65, 0.05), Color("#151a1d"), false, null, 0.25, 0.6)
+		_box("Milestone brass frame", Vector3(mx, L1_Y + 1.95, -39.48), Vector3(5.72, 1.75, 0.02), brass, false, null, 0.28, 0.72)
+		_box("Milestone warm glow", Vector3(mx, L1_Y + 1.10, -39.46), Vector3(5.2, 0.02, 0.03), Color("#ffe8c4"), false, null, 0.2, 0.0, false, Color("#ffd180"))
+		_painted_text(str(m["yr"]) + "  ·  " + str(m["title"]), Vector3(mx, L1_Y + 2.25, -39.45), 0.0, 0.0030, Color("#fff4dd"), Color(0,0,0,0))
+		_painted_text(str(m["sub"]), Vector3(mx, L1_Y + 1.65, -39.45), 0.0, 0.0024, Color("#c8d6ce"), Color(0,0,0,0))
+		# Downward gallery wall-wash spotlight
+		var m_spot := SpotLight3D.new()
+		m_spot.position = Vector3(mx, L1_Y + 4.8, -38.6)
+		m_spot.rotation_degrees = Vector3(-65, 0, 0)
+		m_spot.light_color = Color("#fff0d4")
+		m_spot.light_energy = 0.52
+		m_spot.spot_range = 5.2
+		m_spot.spot_angle = 38.0
+		add_child(m_spot)
+
+	# 2. 4 Grand Hardware Vitrines / Exhibition Pedestals
+	var vitrines := [
+		{
+			"pos": Vector3(-22.0, 0, -18.0),
+			"title": "BANGKAH QUANTUM CORE ACCELERATOR",
+			"code": "PROTOTYPE QC-900",
+			"core_col": Color("#ffd700"),
+			"glow_col": Color("#ffb300")
+		},
+		{
+			"pos": Vector3(-6.0, 0, -18.0),
+			"title": "ULTRA-LOW LATENCY FIBER ROUTING ENGINE",
+			"code": "OPTICAL SWITCH ENGINE OS-100T",
+			"core_col": cyan,
+			"glow_col": Color("#00b8d4")
+		},
+		{
+			"pos": Vector3(8.0, 0, -18.0),
+			"title": "NEURAL INFERENCE ACCELERATOR v4",
+			"code": "TENSOR NPU CHIP ARCHITECTURE",
+			"core_col": mint,
+			"glow_col": Color("#00c853")
+		},
+		{
+			"pos": Vector3(-14.0, 0, -5.0),
+			"title": "AUTONOMOUS TELEMETRY TRANSCEIVER",
+			"code": "ORBITAL SATELLITE GATEWAY",
+			"core_col": Color("#7c4dff"),
+			"glow_col": Color("#651fff")
+		}
+	]
+	for v in vitrines:
+		var vp: Vector3 = v["pos"]
+		# Nero Marquina marble square plinth base
+		_box("Vitrine nero base", vp + Vector3(0, L1_Y + 0.12, 0), Vector3(1.7, 0.24, 1.7), nero, true, null, 0.14, 0.04)
+		_box("Vitrine brass collar", vp + Vector3(0, L1_Y + 0.25, 0), Vector3(1.74, 0.03, 1.74), brass, false, null, 0.28, 0.72)
+		# Fluted smoked oak pedestal body
+		_box("Vitrine oak shaft", vp + Vector3(0, L1_Y + 0.68, 0), Vector3(1.4, 0.84, 1.4), walnut, true, null, 0.52)
+		# Top presentation tray with brass lip & velvet mat
+		_box("Vitrine tray brass", vp + Vector3(0, L1_Y + 1.12, 0), Vector3(1.48, 0.04, 1.48), brass, false, null, 0.28, 0.72)
+		_box("Vitrine velvet insert", vp + Vector3(0, L1_Y + 1.145, 0), Vector3(1.36, 0.02, 1.36), Color("#121719"), false, null, 0.95)
+		# Museum-grade ultra-clear glass showcase hood
+		_box("Vitrine glass hood", vp + Vector3(0, L1_Y + 1.62, 0), Vector3(1.32, 0.92, 1.32), glass_mat, false, null, 0.06, 0.02, true)
+		# Detailed hardware artifact inside the hood
+		_box("Artifact chassis", vp + Vector3(0, L1_Y + 1.25, 0), Vector3(0.68, 0.14, 0.68), Color("#22282c"), false, null, 0.35, 0.55)
+		_box("Artifact heat sink", vp + Vector3(0, L1_Y + 1.34, 0), Vector3(0.55, 0.06, 0.55), Color("#c5a366"), false, null, 0.25, 0.8)
+		# Glowing quantum/neural chip core
+		var core_col: Color = v["core_col"]
+		var glow_col: Color = v["glow_col"]
+		_cylinder("Artifact core wafer", vp + Vector3(0, L1_Y + 1.39, 0), 0.18, 0.04, core_col, null, false, 0.2, 0.0, glow_col)
+		for ai in range(8):
+			var aa := TAU * float(ai) / 8.0
+			_box("Bus lead", vp + Vector3(cos(aa) * 0.24, L1_Y + 1.33, sin(aa) * 0.24), Vector3(0.06, 0.02, 0.06), brass, false, null, 0.25, 0.75)
+		# Brass descriptive label plaque in front
+		_painted_text(str(v["title"]), vp + Vector3(0, L1_Y + 0.88, 0.72), 0.0, 0.0022, Color("#f9f5ea"), Color(0,0,0,0))
+		_painted_text(str(v["code"]), vp + Vector3(0, L1_Y + 0.76, 0.72), 0.0, 0.0019, brass, Color(0,0,0,0))
+		# Overhead focused gallery pin-spotlight
+		var v_spot := SpotLight3D.new()
+		v_spot.position = vp + Vector3(0, L1_Y + 5.1, 0)
+		v_spot.rotation_degrees = Vector3(-90, 0, 0)
+		v_spot.light_color = Color("#fff8ea")
+		v_spot.light_energy = 0.65
+		v_spot.spot_range = 5.2
+		v_spot.spot_angle = 24.0
+		add_child(v_spot)
+
+	# 3. VIP Gallery Alcove Lounge (West Wall Niche x = -41.4, z = -18.0)
+	_box("Gallery alcove walnut niche", Vector3(-41.45, L1_Y + 2.3, -18.0), Vector3(0.18, 3.8, 8.2), walnut, false, null, 0.55)
+	_box("Gallery alcove halo reveal", Vector3(-41.35, L1_Y + 2.3, -18.0), Vector3(0.04, 3.6, 8.0), Color("#ffe4b4"), false, null, 0.2, 0.0, false, Color("#ffd180"))
+	# Cognac leather banquette bench (architectural built-in)
+	_box("Gallery banquette base", Vector3(-40.5, L1_Y + 0.22, -18.0), Vector3(1.2, 0.44, 7.2), walnut, true, null, 0.45)
+	_box("Gallery banquette seat", Vector3(-40.5, L1_Y + 0.50, -18.0), Vector3(1.15, 0.16, 7.1), Color("#6d472b"), true, null, 0.65)
+	_box("Gallery banquette backrest", Vector3(-41.05, L1_Y + 1.15, -18.0), Vector3(0.24, 1.15, 7.1), Color("#6d472b"), false, null, 0.65)
+	for tbx in [-20.5, -15.5]:
+		# Travertine side drink plinths
+		_cylinder("Gallery drink plinth base", Vector3(-39.5, L1_Y + 0.24, tbx), 0.24, 0.48, calacatta, null, true, 0.25)
+		_cylinder("Gallery drink plinth rim", Vector3(-39.5, L1_Y + 0.49, tbx), 0.26, 0.03, brass, null, false, 0.75)
+
+	# 4. Architectural Transition Louvers / Screen (z = 3.2, x = -8 to 1)
+	# Prestigious vertical champagne brass fins framing the entrance to the gallery
+	for fi in range(12):
+		var fx: float = -8.0 + float(fi) * 0.8
+		_box("Gallery brass louver", Vector3(fx, L1_Y + 2.7, 3.2), Vector3(0.045, 5.2, 0.26), brass, false, null, 0.28, 0.72)
+
+	# 5. High-Performance Compute Annex (East North wing, x: 20 to 40, z: -18 to 2)
+	# Cryogenic Server Simulation Tower
+	_cylinder("Cryo tower base", Vector3(33.0, L1_Y + 0.22, -10.0), 1.05, 0.44, Color("#1a2227"), null, true, 0.35)
+	_cylinder("Cryo tower brass ring", Vector3(33.0, L1_Y + 0.45, -10.0), 1.10, 0.04, brass, null, false, 0.75)
+	_cylinder("Cryo glass chamber", Vector3(33.0, L1_Y + 2.05, -10.0), 0.88, 3.15, glass_mat, null, false, 0.06, 0.02)
+	_cylinder("Cryo cooling coil", Vector3(33.0, L1_Y + 2.05, -10.0), 0.42, 2.95, Color("#00e5ff"), null, false, 0.2, 0.0, Color("#00a5ba"))
+	_cylinder("Cryo tower cap", Vector3(33.0, L1_Y + 3.75, -10.0), 1.05, 0.35, Color("#1a2227"), null, false, 0.35)
+	var cryo_light := OmniLight3D.new()
+	cryo_light.position = Vector3(33.0, L1_Y + 2.2, -10.0)
+	cryo_light.light_color = Color("#00e5ff")
+	cryo_light.light_energy = 0.48
+	cryo_light.omni_range = 6.5
+	add_child(cryo_light)
+
+	# Fiber-optic patch bay display console
+	_box("Fiber patch console desk", Vector3(25.5, L1_Y + 0.82, -12.0), Vector3(4.8, 0.12, 1.2), Color("#242c30"), true, null, 0.35, 0.3)
+	_box("Fiber patch brass trim", Vector3(25.5, L1_Y + 0.80, -12.0), Vector3(4.88, 0.04, 1.28), brass, false, null, 0.28, 0.72)
+	_box("Fiber telemetry matrix", Vector3(25.5, L1_Y + 1.35, -12.35), Vector3(4.2, 0.85, 0.05), Color("#0a151b"), false, null, 0.15, 0.0, false, Color("#005b66"))
+	_painted_text("GLOBAL HIGH-THROUGHPUT FIBER BACKBONE", Vector3(25.5, L1_Y + 1.65, -12.32), 0.0, 0.0024, cyan, Color(0,0,0,0))
+
+func _build_l1_architectural_finishes() -> void:
+	# Comprehensive Floor 1 architectural finishes: Column cladding, continuous skirting, doorway portals & planters
+	var brass := Color("#d4b878"); var brass_satin := Color("#c5a366")
+	var calacatta := Color("#f8f6f0"); var nero := Color("#1a1d1f")
+	var walnut := Color("#382b22"); var bronze := Color("#2e2620")
+
+	# 1. Structural Column Cladding (All 20 structural columns on Floor 1)
+	# Transforms raw concrete columns into luxury fluted smoked oak & Calacatta pilasters with brass capitals
+	for x in [-39, -20, 20, 39]:
+		for z in [-37, -18, 4, 25, 37]:
+			var cp := Vector3(float(x), L1_Y, float(z))
+			# Nero Marquina marble plinth base
+			_box("Col base plinth", cp + Vector3(0, 0.14, 0), Vector3(0.58, 0.28, 0.58), nero, false, null, 0.14, 0.04)
+			_box("Col base brass trim", cp + Vector3(0, 0.29, 0), Vector3(0.60, 0.03, 0.60), brass, false, null, 0.28, 0.72)
+			# Fluted smoked oak & Calacatta shaft cladding
+			_box("Col shaft cladding", cp + Vector3(0, 2.70, 0), Vector3(0.52, 4.80, 0.52), walnut, false, null, 0.55)
+			# Vertical champagne brass corner reveals
+			for ox in [-0.25, 0.25]:
+				for oz in [-0.25, 0.25]:
+					_box("Col brass corner", cp + Vector3(ox, 2.70, oz), Vector3(0.03, 4.80, 0.03), brass, false, null, 0.28, 0.72)
+			# Satin champagne brass capital collar at ceiling junction
+			_box("Col capital collar", cp + Vector3(0, 5.22, 0), Vector3(0.60, 0.20, 0.60), brass, false, null, 0.28, 0.72)
+
+	# 2. Continuous Skirting Boards ("Lis Lantai" / Baseboards) along all perimeter & partition walls
+	# 14cm high smoked walnut skirting with 1.5cm brushed champagne brass top reveal
+	# North exterior wall skirting
+	_box("North wall skirting", Vector3(0, L1_Y + 0.07, -39.75), Vector3(82.0, 0.14, 0.08), walnut, false, null, 0.52)
+	_box("North wall brass reveal", Vector3(0, L1_Y + 0.145, -39.74), Vector3(82.0, 0.015, 0.09), brass, false, null, 0.28, 0.72)
+	# West exterior wall skirting
+	_box("West wall skirting", Vector3(-41.75, L1_Y + 0.07, 0), Vector3(0.08, 0.14, 79.0), walnut, false, null, 0.52)
+	_box("West wall brass reveal", Vector3(-41.74, L1_Y + 0.145, 0), Vector3(0.09, 0.015, 79.0), brass, false, null, 0.28, 0.72)
+	# East exterior wall skirting
+	_box("East wall skirting", Vector3(41.75, L1_Y + 0.07, 0), Vector3(0.08, 0.14, 79.0), walnut, false, null, 0.52)
+	_box("East wall brass reveal", Vector3(41.74, L1_Y + 0.145, 0), Vector3(0.09, 0.015, 79.0), brass, false, null, 0.28, 0.72)
+	# South exterior flanking wall skirting
+	_box("South wall skirting W", Vector3(-23.6, L1_Y + 0.07, 39.75), Vector3(36.8, 0.14, 0.08), walnut, false, null, 0.52)
+	_box("South wall brass reveal W", Vector3(-23.6, L1_Y + 0.145, 39.74), Vector3(36.8, 0.015, 0.09), brass, false, null, 0.28, 0.72)
+	_box("South wall skirting E", Vector3(23.6, L1_Y + 0.07, 39.75), Vector3(36.8, 0.14, 0.08), walnut, false, null, 0.52)
+	_box("South wall brass reveal E", Vector3(23.6, L1_Y + 0.145, 39.74), Vector3(36.8, 0.015, 0.09), brass, false, null, 0.28, 0.72)
+
+	# 3. Luxury Doorway Portals / Architraves for all L1 Doors (#10, #11, #14, #15, #16, #17, #18)
+	var l1_doors := [
+		{"pos": Vector3(18.5, L1_Y, -7.0), "axis_x": false, "label": "Door #10 API Lab"},
+		{"pos": Vector3(-29.5, L1_Y, 4.0), "axis_x": true, "label": "Door #11 Boardroom"},
+		{"pos": Vector3(29.0, L1_Y, 4.0), "axis_x": true, "label": "Door #14 API Lab"},
+		{"pos": Vector3(-19.5, L1_Y, 14.5), "axis_x": false, "label": "Door #15 Boardroom"},
+		{"pos": Vector3(18.5, L1_Y, 14.5), "axis_x": false, "label": "Door #16 API Lab"},
+		{"pos": Vector3(-29.5, L1_Y, 25.0), "axis_x": true, "label": "Door #17 Archive"},
+		{"pos": Vector3(29.0, L1_Y, 25.0), "axis_x": true, "label": "Door #18 Pantry"}
+	]
+	for d in l1_doors:
+		var dp: Vector3 = d["pos"]
+		var is_x: bool = bool(d["axis_x"])
+		var dw: float = DOOR_W * 0.5 + 0.08
+		# Left jamb, right jamb, top header
+		if is_x:
+			_box("Door architrave jamb L", dp + Vector3(-dw, 1.25, 0), Vector3(0.14, 2.50, 0.22), brass, false, null, 0.28, 0.72)
+			_box("Door architrave jamb R", dp + Vector3(dw, 1.25, 0), Vector3(0.14, 2.50, 0.22), brass, false, null, 0.28, 0.72)
+			_box("Door architrave lintel", dp + Vector3(0, 2.52, 0), Vector3(DOOR_W + 0.40, 0.16, 0.24), bronze, false, null, 0.32, 0.55)
+			_box("Door architrave brass trim", dp + Vector3(0, 2.61, 0), Vector3(DOOR_W + 0.44, 0.03, 0.25), brass, false, null, 0.28, 0.72)
+		else:
+			_box("Door architrave jamb L", dp + Vector3(0, 1.25, -dw), Vector3(0.22, 2.50, 0.14), brass, false, null, 0.28, 0.72)
+			_box("Door architrave jamb R", dp + Vector3(0, 1.25, dw), Vector3(0.22, 2.50, 0.14), brass, false, null, 0.28, 0.72)
+			_box("Door architrave lintel", dp + Vector3(0, 2.52, 0), Vector3(0.24, 0.16, DOOR_W + 0.40), bronze, false, null, 0.32, 0.55)
+			_box("Door architrave brass trim", dp + Vector3(0, 2.61, 0), Vector3(0.25, 0.03, DOOR_W + 0.44), brass, false, null, 0.28, 0.72)
+
+	# 4. Corner Architectural Travertine Planters & Fine Art Elements
+	var corner_plants := [
+		Vector3(-38.5, L1_Y, 5.5), Vector3(-38.5, L1_Y, 23.5),
+		Vector3(38.5, L1_Y, 23.5), Vector3(20.0, L1_Y, 5.5),
+		Vector3(-38.5, L1_Y, 26.5), Vector3(-38.5, L1_Y, 38.5),
+		Vector3(38.5, L1_Y, 26.5), Vector3(38.5, L1_Y, 38.5),
+		Vector3(-40.5, L1_Y, -38.5), Vector3(40.5, L1_Y, -38.5)
+	]
+	for cp in corner_plants:
+		_cylinder("Corner urn base", cp + Vector3(0, 0.04, 0), 0.34, 0.08, brass, null, false, 0.75)
+		_cylinder("Corner urn body", cp + Vector3(0, 0.38, 0), 0.30, 0.60, calacatta, null, true, 0.25)
+		_cylinder("Corner urn rim", cp + Vector3(0, 0.69, 0), 0.32, 0.04, brass, null, false, 0.75)
+		_add_plant(cp + Vector3(0, 0.70, 0), 0.95)
+
+func _build_l1_master_lighting() -> void:
+	# Comprehensive Master Architectural Downlight Grid & Wall Sconces for Floor 1
+	var brass := Color("#d4b878"); var warm := Color("#ffe8c8")
+
+	# 1. Recessed Architectural Downlight Grids covering every zone on L1 (Ceiling y = 5.25)
+	var downlight_clusters := [
+		# Ruang Rapat / Boardroom table perimeter downlights
+		Vector3(-32.0, L1_Y + 5.25, 12.0), Vector3(-29.5, L1_Y + 5.25, 12.0), Vector3(-27.0, L1_Y + 5.25, 12.0),
+		Vector3(-32.0, L1_Y + 5.25, 16.5), Vector3(-29.5, L1_Y + 5.25, 16.5), Vector3(-27.0, L1_Y + 5.25, 16.5),
+		# Lab API & Infra technical downlights
+		Vector3(24.0, L1_Y + 5.25, 9.0), Vector3(29.0, L1_Y + 5.25, 9.0), Vector3(34.0, L1_Y + 5.25, 9.0),
+		Vector3(34.0, L1_Y + 5.25, 17.0), Vector3(34.0, L1_Y + 5.25, 21.0),
+		# Arsip & Cetak study table & vitrine downlights
+		Vector3(-34.0, L1_Y + 5.25, 29.0), Vector3(-29.5, L1_Y + 5.25, 29.0), Vector3(-25.0, L1_Y + 5.25, 29.0),
+		Vector3(-34.0, L1_Y + 5.25, 35.0), Vector3(-25.0, L1_Y + 5.25, 35.0),
+		# Café Bangkah island & lounge downlights
+		Vector3(25.0, L1_Y + 5.25, 29.0), Vector3(30.0, L1_Y + 5.25, 29.0), Vector3(35.0, L1_Y + 5.25, 29.0),
+		Vector3(25.0, L1_Y + 5.25, 35.0), Vector3(30.0, L1_Y + 5.25, 35.0), Vector3(35.0, L1_Y + 5.25, 35.0),
+		# North Gallery general architectural downlight grid
+		Vector3(-30.0, L1_Y + 5.25, -28.0), Vector3(-15.0, L1_Y + 5.25, -28.0), Vector3(0.0, L1_Y + 5.25, -28.0), Vector3(15.0, L1_Y + 5.25, -28.0), Vector3(30.0, L1_Y + 5.25, -28.0),
+		Vector3(-30.0, L1_Y + 5.25, -10.0), Vector3(-15.0, L1_Y + 5.25, -10.0), Vector3(0.0, L1_Y + 5.25, -10.0), Vector3(15.0, L1_Y + 5.25, -10.0), Vector3(30.0, L1_Y + 5.25, -10.0),
+		# Central circulation boulevard downlights
+		Vector3(0.0, L1_Y + 5.25, -34.0), Vector3(0.0, L1_Y + 5.25, -22.0), Vector3(0.0, L1_Y + 5.25, -12.0),
+		Vector3(0.0, L1_Y + 5.25, 0.0), Vector3(0.0, L1_Y + 5.25, 8.0)
+	]
+	for dl in downlight_clusters:
+		# Sleek dark architectural bezel with champagne brass internal reflector ring
+		_cylinder("Downlight bezel", dl, 0.18, 0.04, Color("#1f2427"))
+		_cylinder("Downlight reflector", dl - Vector3(0, 0.015, 0), 0.14, 0.02, brass, null, false, 0.75)
+		_cylinder("Downlight lens", dl - Vector3(0, 0.02, 0), 0.11, 0.01, Color("#fff6e6"), null, false, 0.1, 0.0, Color("#ffe2aa"))
+		var d_light := OmniLight3D.new()
+		d_light.position = dl - Vector3(0, 0.18, 0)
+		d_light.light_color = warm
+		d_light.light_energy = 0.38
+		d_light.omni_range = 7.5
+		d_light.shadow_enabled = false
+		add_child(d_light)
+
+	# 2. Bidirectional (Up/Down) Champagne Brass Wall Sconces (Mounted at y = 2.4)
+	var sconces := [
+		{"pos": Vector3(-19.3, L1_Y + 2.4, 8.0), "yaw": 0.0},
+		{"pos": Vector3(-19.3, L1_Y + 2.4, 21.0), "yaw": 0.0},
+		{"pos": Vector3(18.3, L1_Y + 2.4, 8.0), "yaw": PI},
+		{"pos": Vector3(18.3, L1_Y + 2.4, 21.0), "yaw": PI},
+		{"pos": Vector3(-41.65, L1_Y + 2.4, -28.0), "yaw": PI * 0.5},
+		{"pos": Vector3(-41.65, L1_Y + 2.4, -8.0), "yaw": PI * 0.5},
+		{"pos": Vector3(41.65, L1_Y + 2.4, -28.0), "yaw": -PI * 0.5},
+		{"pos": Vector3(41.65, L1_Y + 2.4, -8.0), "yaw": -PI * 0.5},
+		{"pos": Vector3(-6.5, L1_Y + 2.4, 39.6), "yaw": PI},
+		{"pos": Vector3(6.5, L1_Y + 2.4, 39.6), "yaw": PI}
+	]
+	for sc in sconces:
+		var sp: Vector3 = sc["pos"]
+		# Brushed brass cylinder housing with frosted acrylic end diffusers
+		_cylinder("Sconce housing", sp, 0.045, 0.36, brass, null, false, 0.75)
+		_cylinder("Sconce diffuser top", sp + Vector3(0, 0.19, 0), 0.042, 0.03, Color("#fff4dd"), null, false, 0.1, 0.0, Color("#ffd180"))
+		_cylinder("Sconce diffuser bot", sp - Vector3(0, 0.19, 0), 0.042, 0.03, Color("#fff4dd"), null, false, 0.1, 0.0, Color("#ffd180"))
+		var s_light := OmniLight3D.new()
+		s_light.position = sp
+		s_light.light_color = Color("#ffe2b8")
+		s_light.light_energy = 0.28
+		s_light.omni_range = 4.0
+		s_light.shadow_enabled = false
+		add_child(s_light)
 
 func _build_accent_walls_l2() -> void:
 	_box("Management sage accent", Vector3(8.2, 3.15, -38.80), Vector3(6.4, 0.70, 0.06), Color("#6f8a7a"), false)
@@ -1901,12 +2576,18 @@ func _build_accent_walls_l3() -> void:
 	_box("Owner brass trim", Vector3(-29.5, 1.02, -38.89), Vector3(16.5, 0.09, 0.06), Color("#c5a366"), false)
 
 func _build_free_seating_l1() -> void:
-	# L1 lobby cluster (4 office seats) — positioned off main axis (keeps counts stable)
-	_box("Lobby seating rug", Vector3(-9.5, 0.14, 19.8), Vector3(6.2, 0.03, 4.8), Color("#5a5f63"), false, null, 0.95)
-	_box("Lobby coffee table base", Vector3(-9.5, 0.34, 19.8), Vector3(0.75, 0.30, 0.75), Color("#1f2326"), true, null, 0.3, 0.25)
-	_box("Lobby coffee table top", Vector3(-9.5, 0.52, 19.8), Vector3(1.45, 0.08, 1.05), Color("#2a2f33"), false, null, 0.14, 0.04)
+	# L1 Grand Atrium VIP Club Seating Cluster (4 Executive Swivel Club Chairs strictly PRESERVED)
+	var brass := Color("#d4b878"); var calacatta := Color("#f8f6f0")
+	_box("Atrium lounge wool rug", Vector3(-9.5, 0.14, 19.8), Vector3(6.5, 0.035, 5.2), Color("#2b3033"), false, null, 0.95)
+	_box("Atrium rug brass inlay", Vector3(-9.5, 0.16, 19.8), Vector3(6.1, 0.015, 4.8), brass, false, null, 0.28, 0.72)
+	# Circular Calacatta marble table with brushed brass fluted pedestal
+	_cylinder("Atrium coffee table base", Vector3(-9.5, 0.22, 19.8), 0.55, 0.44, brass, null, true, 0.75)
+	_cylinder("Atrium coffee table top", Vector3(-9.5, 0.46, 19.8), 0.95, 0.08, calacatta, null, false, 0.12)
+	_cylinder("Atrium bronze sculpture", Vector3(-9.5, 0.62, 19.8), 0.14, 0.24, Color("#4a3b2c"), null, false, 0.6)
+	_box("Design monograph", Vector3(-9.75, 0.51, 19.65), Vector3(0.35, 0.03, 0.26), Color("#c4a275"), false)
+	# 4 Designer Leather Executive Swivel Club Chairs
 	for chair in [{"pos": Vector3(-11.0, 0, 18.6), "yaw": 0.0},{"pos": Vector3(-8.0, 0, 18.6), "yaw": 0.0},{"pos": Vector3(-11.0, 0, 21.0), "yaw": PI},{"pos": Vector3(-8.0, 0, 21.0), "yaw": PI}]:
-		_add_office_chair(chair["pos"], Color("#3a3f43"), chair["yaw"], "Kursi Tamu Lobby")
+		_add_office_chair(chair["pos"], Color("#1d2224"), chair["yaw"], "Kursi Tamu VIP Atrium")
 
 func _build_free_seating_l2() -> void:
 	# L2 QA collaboration (3 office seats) — moved to LANTAI 2
@@ -1931,11 +2612,19 @@ func _build_floor_cores() -> void:
 		var fy: float = fys[fi]
 		_box("Core landing", Vector3(cx, fy + 0.07, cz), Vector3(10.2, 0.14, 5.0), marble, true, null, 0.42)
 		_box("Core inlay trim", Vector3(cx, fy + 0.155, cz), Vector3(10.3, 0.02, 5.1), Color("#c7a85a"), false, null, 0.3, 0.4)
+		_box("Core landing fascia W", Vector3(cx - 5.12, fy - 0.03, cz), Vector3(0.08, 0.36, 5.0), Color("#cfc9bb"), false, null, 0.5)
+		_box("Core landing fascia S", Vector3(cx, fy - 0.03, cz + 2.52), Vector3(10.24, 0.36, 0.08), Color("#cfc9bb"), false, null, 0.5)
+		_box("Core landing shadow reveal", Vector3(cx - 5.10, fy - 0.20, cz), Vector3(0.03, 0.05, 4.9), Color("#8d8676"), false, null, 0.5, 0.3)
 		_box("Core feature wall", Vector3(cx, fy + 1.65, 15.45), Vector3(10.4, 3.3, 0.18), Color("#d6d9d2"), false)
 		_box("Core shadow gap", Vector3(cx, fy + 0.02, 15.36), Vector3(10.3, 0.03, 0.04), Color("#1a1f1d"), false, null, 0.9)
 		_box("Core header", Vector3(cx, fy + 3.08, 15.32), Vector3(9.2, 0.55, 0.10), matte, false, null, 0.3, 0.0, false, Color("#40524d"))
-		_painted_text(labels[fi] + "  ·  TANGGA  &  LIFT", Vector3(cx, fy + 3.08, 15.38), 0.0, 0.0028, Color("#f3ecd8"), Color(0,0,0,0))
-		_painted_text("TURUN ↓   NAIK ↑      LIFT →", Vector3(cx, fy + 2.15, 8.05), 0.0, 0.0038, Color("#243530"), Color("#f2ecda"))
+		_painted_text(labels[fi] + "  ·  TANGGA  &  LIFT", Vector3(cx, fy + 3.08, 15.25), PI, 0.0028, Color("#f3ecd8"), Color(0,0,0,0))
+		var core_light := OmniLight3D.new()
+		core_light.position = Vector3(cx, fy + 3.60, cz + 2.60)
+		core_light.light_color = Color("#ffe9c8")
+		core_light.light_energy = 0.42
+		core_light.omni_range = 9.5
+		add_child(core_light)
 	# --- Floating open-riser stairs (2 per link) ---
 	for link in [{"fy": L1_Y, "to": "LANTAI 2"}, {"fy": L2_Y, "to": "LANTAI 3"}]:
 		var fy: float = float(link["fy"])
@@ -1954,46 +2643,99 @@ func _build_floor_cores() -> void:
 			# Landing pads at top and bottom
 			_box(str(sc["name"]) + " lower", Vector3(sx, fy + 0.07, z_bot + 0.4), Vector3(2.8, 0.14, 1.4), marble, true, null, 0.42)
 			_box(str(sc["name"]) + " upper", Vector3(sx, fy + flight_h + 0.07, z_top - 0.4), Vector3(2.8, 0.14, 1.4), marble, true, null, 0.42)
+			# Bridge the top tread to the main core landing so the flight never dead-ends over the void.
+			_box(str(sc["name"]) + " top bridge", Vector3(sx, fy + flight_h + 0.07, z_top + 0.6), Vector3(2.8, 0.14, 1.2), marble, true, null, 0.42)
 			# Invisible climbable ramp + step-collision (playability; no solid dark slab visual)
-			var ramp := _box(str(sc["name"]) + " ramp", Vector3(sx, fy + flight_h*0.5 + 0.02, z_mid), Vector3(2.4, 0.16, ramp_len + 0.2), Color(0,0,0,0.001), true)
+			var ramp := _box(str(sc["name"]) + " ramp", Vector3(sx, fy + flight_h*0.5 + 0.02, z_mid), Vector3(2.4, 0.16, ramp_len + 0.2), Color(0,0,0,0.001), true, null, 0.5, 0.0, true)
 			ramp.rotation.x = -slope
 			for si in range(steps_n):
 				var t := (float(si) + 0.5) / float(steps_n)
-				_box("Step col", Vector3(sx, fy + 0.04 + t*flight_h, z_bot - t*run_len), Vector3(2.4, 0.04, step_run*0.85), Color(0,0,0,0), true)
+				_box("Step col", Vector3(sx, fy + 0.04 + t*flight_h, z_bot - t*run_len), Vector3(2.4, 0.04, step_run*0.85), Color(0,0,0,0.001), true, null, 0.5, 0.0, true)
 			# Stringer wall (angled walnut support on outer side of each flight)
 			var str_side := 1.42 if sx > cx else -1.42
 			var str_x := sx + str_side
-			var sw := _box("Stringer", Vector3(str_x, fy + flight_h*0.5 + 0.55, z_mid), Vector3(0.16, 1.2, ramp_len), walnut, false, null, 0.55)
+			var sw := _box("Stringer", Vector3(str_x, fy + flight_h*0.5 + 0.10, z_mid), Vector3(0.16, 0.30, ramp_len - step_run*1.7), walnut, false, null, 0.55)
 			sw.rotation.x = -slope
 			# Newel posts at top and bottom of handrail
 			for nz in [z_bot - 0.4, z_top + 0.4]:
-				var ny := fy + 0.95 if nz > z_mid else fy + flight_h - 0.95
-				_box("Newel post", Vector3(str_x, ny, nz), Vector3(0.22, 1.0, 0.22), walnut, false, null, 0.6)
+				var ny := fy + 0.55 if nz > z_mid else fy + flight_h + 0.55
+				_box("Newel post", Vector3(str_x, ny, nz), Vector3(0.22, 1.1, 0.22), walnut, false, null, 0.6)
 			# Floating walnut treads (open-riser: no riser panels) + warm under-tread LED
 			for si in range(steps_n):
 				var t := (float(si) + 0.5) / float(steps_n)
 				var sy := fy + 0.14 + t*flight_h; var sz := z_bot - t*run_len
 				_box("Tread", Vector3(sx, sy, sz), Vector3(2.5, 0.14, step_run*0.9), walnut, false, null, 0.48)
 				_box("Tread LED", Vector3(sx, sy - 0.08, sz), Vector3(2.3, 0.012, step_run*0.5), warm, false, null, 0.2, 0.0, false, warm)
+				if fy == L1_Y:
+					# L1 Luxury: Calacatta marble bullnose edge + brushed champagne brass nosing
+					_box("Tread bullnose L1", Vector3(sx, sy, sz + step_run*0.42), Vector3(2.52, 0.06, 0.05), Color("#f7f5ed"), false, null, 0.15, 0.02)
+					_box("Tread brass nosing L1", Vector3(sx, sy + 0.068, sz + step_run*0.43), Vector3(2.52, 0.015, 0.03), Color("#d4b878"), false, null, 0.28, 0.72)
+					if si % 2 == 0:
+						for side in [-1.32, 1.32]:
+							_cylinder("Glass standoff stud L1", Vector3(sx + side + (0.02 if side < 0 else -0.02), sy - 0.02, sz), 0.032, 0.045, Color("#d4b878"), null, false, 0.75)
+					if si in [2, 5, 8, 11, 14]:
+						_box("Stair courtesy light", Vector3(str_x + (0.08 if str_side < 0 else -0.08), sy + 0.25, sz), Vector3(0.02, 0.08, 0.08), Color("#ffe6bd"), false, null, 0.2, 0.0, false, Color("#ffd180"))
 			# Frameless glass railing + matte-black handrail
 			for side in [-1.32, 1.32]:
 				var gp := _box("Glass bal", Vector3(sx + side, fy + 0.88 + flight_h*0.5, z_mid), Vector3(0.03, 0.95, ramp_len*0.96), glass, false, null, 0.06, 0.02, true)
 				gp.rotation.x = -slope
 				var hr := _box("Handrail", Vector3(sx + side, fy + 1.35 + flight_h*0.5, z_mid), Vector3(0.08, 0.065, ramp_len+0.12), matte, false, null, 0.35, 0.38)
 				hr.rotation.x = -slope
+				if fy == L1_Y:
+					var hr_cap := _box("Handrail brass cap L1", Vector3(sx + side, fy + 1.385 + flight_h*0.5, z_mid), Vector3(0.085, 0.015, ramp_len+0.14), Color("#d4b878"), false, null, 0.28, 0.72)
+					hr_cap.rotation.x = -slope
 			_painted_text(str(sc["dir"]) + "  KE " + str(link["to"]), Vector3(sx, fy + 1.95, z_bot+0.18), 0.0, 0.0023, Color("#243530"), Color("#f2ecda"))
-	# Under-stair L1: planter box, white pebbles, Snake Plant feel, uplight (open under floating treads)
+	# Grand double-height stairwell chandelier (staggered satin brass tubes + crystal LED tips cascading down void)
+	for ci in range(12):
+		var ca := TAU * float(ci) / 12.0
+		var cr := 0.95 + (0.45 if ci % 2 == 0 else -0.25)
+		var c_len := 1.4 + float(ci % 4) * 0.55
+		var c_pos := Vector3(cx + cos(ca) * cr, L1_Y + 5.2 - c_len * 0.5, 11.2 + sin(ca) * cr)
+		_cylinder("Stair tube chandelier", c_pos, 0.022, c_len, Color("#d4b878"), null, false, 0.75)
+		_cylinder("Stair tube tip", c_pos - Vector3(0, c_len * 0.5 + 0.08, 0), 0.024, 0.16, Color("#fff4dd"), null, false, 0.1, 0.0, Color("#ffe5b4"))
+	var stair_light := OmniLight3D.new()
+	stair_light.position = Vector3(cx, L1_Y + 3.8, 11.2)
+	stair_light.light_color = Color("#ffe7c4")
+	stair_light.light_energy = 0.55
+	stair_light.omni_range = 9.0
+	add_child(stair_light)
+	# Under-stair L1: Luxury Zen Indoor Garden with Calacatta marble curb, white river pebbles & architectural uplights
 	var ug_z := 10.5
-	_box("Under-stair planter", Vector3(cx - 1.1, L1_Y + 0.18, ug_z), Vector3(5.8, 0.34, 5.4), Color("#3a3f3c"), false, null, 0.55)
-	_box("Pebble bed", Vector3(cx - 1.1, L1_Y + 0.36, ug_z), Vector3(5.4, 0.06, 5.0), Color("#f0efe8"), false, null, 0.95)
-	_add_plant(Vector3(cx - 2.6, L1_Y + 0.36, ug_z - 1.4), 0.8)
-	_add_plant(Vector3(cx - 0.8, L1_Y + 0.36, ug_z + 0.6), 0.75)
-	_add_plant(Vector3(cx + 0.8, L1_Y + 0.36, ug_z - 0.8), 0.78)
-	_box("Planter uplight", Vector3(cx - 1.1, L1_Y + 0.42, ug_z), Vector3(0.5, 0.03, 0.2), warm, false, null, 0.2, 0.0, false, warm)
-	# --- Panoramic smoked-glass lift (black steel frame, cyan indicators), full height ---
+	_box("Under-stair curb", Vector3(cx - 1.1, L1_Y + 0.18, ug_z), Vector3(6.0, 0.36, 5.6), Color("#1b2022"), false, null, 0.3)
+	_box("Under-stair brass rim", Vector3(cx - 1.1, L1_Y + 0.36, ug_z), Vector3(6.1, 0.04, 5.7), Color("#d4b878"), false, null, 0.28, 0.72)
+	_box("White pebble bed", Vector3(cx - 1.1, L1_Y + 0.34, ug_z), Vector3(5.7, 0.08, 5.3), Color("#f8f6f0"), false, null, 0.85)
+	# Stepping stone slabs in dark slate
+	for st_z in [8.8, 10.5, 12.2]:
+		_cylinder("Zen stepping stone", Vector3(cx - 1.1, L1_Y + 0.38, st_z), 0.38, 0.04, Color("#2c3437"), null, false, 0.2)
+	_add_plant(Vector3(cx - 2.6, L1_Y + 0.38, ug_z - 1.4), 0.95)
+	_add_plant(Vector3(cx - 0.8, L1_Y + 0.38, ug_z + 0.8), 0.88)
+	_add_plant(Vector3(cx + 1.1, L1_Y + 0.38, ug_z - 0.8), 0.92)
+	_add_plant(Vector3(cx - 2.0, L1_Y + 0.38, ug_z + 1.2), 0.82)
+	# Warm miniature garden uplights
+	for up_x in [cx - 2.2, cx, cx + 0.9]:
+		var upl := OmniLight3D.new()
+		upl.position = Vector3(up_x, L1_Y + 0.55, ug_z)
+		upl.light_color = Color("#ffe9c4")
+		upl.light_energy = 0.35
+		upl.omni_range = 3.5
+		add_child(upl)
+	# --- Panoramic smoked-glass lift (black steel posts + glazing on three sides) ---
 	var shaft_h := FLOOR_H * 3.0 + 2.0
-	_box("Lift shaft frame", Vector3(lx, shaft_h*0.5 - 0.1, cz-0.9), Vector3(2.9, shaft_h, 2.7), matte, true, null, 0.4, 0.3)
-	_box("Lift shaft glass", Vector3(lx, shaft_h*0.5, cz-2.27), Vector3(2.6, shaft_h-0.5, 0.07), Color(0.28,0.30,0.34,0.22), false, null, 0.06, 0.04, true)
+	var shaft_cy := shaft_h * 0.5 - 0.1
+	var shaft_glass := Color(0.30, 0.36, 0.42, 0.20)
+	_box("Lift shaft collider", Vector3(lx, shaft_cy, cz-0.9), Vector3(2.9, shaft_h, 2.7), Color(0, 0, 0, 0.001), true, null, 0.5, 0.0, true)
+	for px in [lx - 1.42, lx + 1.42]:
+		for pz in [cz - 2.22, cz + 0.40]:
+			_box("Lift shaft post", Vector3(px, shaft_cy, pz), Vector3(0.10, shaft_h, 0.10), matte, false, null, 0.35, 0.45)
+	_box("Lift shaft glass N", Vector3(lx, shaft_cy, cz + 0.40), Vector3(2.74, shaft_h - 0.35, 0.06), shaft_glass, false, null, 0.06, 0.05, true)
+	_box("Lift shaft glass W", Vector3(lx - 1.42, shaft_cy, cz - 0.91), Vector3(0.06, shaft_h - 0.35, 2.52), shaft_glass, false, null, 0.06, 0.05, true)
+	_box("Lift shaft glass E", Vector3(lx + 1.42, shaft_cy, cz - 0.91), Vector3(0.06, shaft_h - 0.35, 2.52), shaft_glass, false, null, 0.06, 0.05, true)
+	for fi in range(fys.size()):
+		var mullion_y: float = L1_Y + float(fi) * FLOOR_H
+		for pz2 in [cz - 2.22, cz + 0.40]:
+			_box("Lift shaft mullion", Vector3(lx, mullion_y, pz2), Vector3(2.94, 0.09, 0.09), matte, false, null, 0.35, 0.45)
+		for px2 in [lx - 1.42, lx + 1.42]:
+			_box("Lift shaft mullion side", Vector3(px2, mullion_y, cz - 0.91), Vector3(0.09, 0.09, 2.62), matte, false, null, 0.35, 0.45)
 	for fi in range(fys.size()):
 		var fy: float = fys[fi]
 		_box("Lift landing", Vector3(lx, fy + 0.07, cz+0.35), Vector3(2.7, 0.14, 2.3), marble, true, null, 0.42)
@@ -2002,12 +2744,20 @@ func _build_floor_cores() -> void:
 		_box("Lift door L", Vector3(lx-0.5, fy + 1.35, cz-2.25), Vector3(0.9, 2.4, 0.07), Color(0.36,0.40,0.46,0.26), false, null, 0.08, 0.06, true)
 		_box("Lift door R", Vector3(lx+0.5, fy + 1.35, cz-2.25), Vector3(0.9, 2.4, 0.07), Color(0.36,0.40,0.46,0.26), false, null, 0.08, 0.06, true)
 		_box("Lift indicator", Vector3(lx, fy + 2.78, cz-2.33), Vector3(0.90, 0.34, 0.04), Color("#0c1412"), false, null, 0.2, 0.0, false, cyan)
-		_painted_text(labels[fi] + "  ↑↓", Vector3(lx, fy + 2.78, cz-2.36), 0.0, 0.0024, Color("#eaffff"), Color(0,0,0,0))
+		_painted_text(labels[fi] + "  ↑↓", Vector3(lx, fy + 2.78, cz-2.36), PI, 0.0024, Color("#eaffff"), Color(0,0,0,0))
 		_box("Lift panel", Vector3(lx-1.28, fy + 1.38, cz-2.33), Vector3(0.26, 0.66, 0.05), Color("#1f2326"), false)
 		_box("Lift up", Vector3(lx-1.28, fy + 1.56, cz-2.36), Vector3(0.12, 0.12, 0.03), cyan, false, null, 0.3, 0.0, false, cyan)
 		_box("Lift down", Vector3(lx-1.28, fy + 1.24, cz-2.36), Vector3(0.12, 0.12, 0.03), Color("#5a6662"), false)
-		_painted_text("LIFT", Vector3(lx, fy + 0.45, cz-2.40), 0.0, 0.0026, Color("#243530"), Color("#f2ecda"))
-		_painted_text(labels[fi], Vector3(0, fy + 3.25, 17.55), 0.0, 0.0065, Color("#2f4339"), Color(0,0,0,0))
+		_painted_text("LIFT", Vector3(lx, fy + 0.45, cz-2.40), PI, 0.0026, Color("#243530"), Color("#f2ecda"))
+		if fy == L1_Y:
+			# L1 Monumental Grand Bronze Elevator Surround & Inlaid Threshold
+			_box("L1 Lift portal frame L", Vector3(lx - 1.42, fy + 2.1, cz - 2.20), Vector3(0.24, 4.2, 0.28), Color("#c5a366"), false, null, 0.25, 0.75)
+			_box("L1 Lift portal frame R", Vector3(lx + 1.42, fy + 2.1, cz - 2.20), Vector3(0.24, 4.2, 0.28), Color("#c5a366"), false, null, 0.25, 0.75)
+			_box("L1 Lift portal lintel", Vector3(lx, fy + 4.15, cz - 2.20), Vector3(3.08, 0.25, 0.28), Color("#c5a366"), false, null, 0.25, 0.75)
+			_box("L1 Lift cove L", Vector3(lx - 1.56, fy + 2.1, cz - 2.18), Vector3(0.04, 4.1, 0.04), Color("#ffe4b4"), false, null, 0.2, 0.0, false, Color("#ffd180"))
+			_box("L1 Lift cove R", Vector3(lx + 1.56, fy + 2.1, cz - 2.18), Vector3(0.04, 4.1, 0.04), Color("#ffe4b4"), false, null, 0.2, 0.0, false, Color("#ffd180"))
+			_box("L1 Lift floor apron", Vector3(lx, fy + 0.085, cz - 1.2), Vector3(3.1, 0.035, 1.8), Color("#1a1d1f"), false, null, 0.14, 0.04)
+			_box("L1 Lift floor brass frame", Vector3(lx, fy + 0.095, cz - 1.2), Vector3(3.2, 0.02, 1.9), Color("#d4b878"), false, null, 0.28, 0.72)
 	_box("Lift machine cap", Vector3(lx, L3_Y + FLOOR_H + 1.2, cz-0.9), Vector3(3.0, 1.2, 2.8), Color("#4a5552"), false, null, 0.5, 0.2)
 
 func _add_wall_clock(position: Vector3, yaw: float = 0.0) -> void:
@@ -2050,10 +2800,6 @@ func _add_desk_plant(position: Vector3, scale_value: float = 0.5) -> void:
 		_sphere("Desk plant leaf", position + Vector3(cos(angle) * r, h, sin(angle) * r), 0.15 * scale_value, Color("#6f9275" if i % 2 == 0 else "#7ba380"), Vector3(1.0, 1.3, 0.8))
 	_sphere("Desk plant crown", position + Vector3(0, 0.45 * scale_value, 0), 0.14 * scale_value, Color("#88a886"), Vector3(1.0, 1.3, 1.0))
 
-
-	# Petunjuk arah ruangan (wayfinding) per lantai — visual only
-	_build_wayfinding()
-
 func _build_wayfinding() -> void:
 	# Sleek dark-acrylic directory totems per floor (micro-detail signage).
 	var _fys := [{"y":L1_Y,"f":"L1"},{"y":L2_Y,"f":"L2"},{"y":L3_Y,"f":"L3"}]
@@ -2066,15 +2812,8 @@ func _build_wayfinding() -> void:
 	if true:
 		var fy1 := L1_Y
 		_painted_text("L1  →  LOBI · RESEPSIONIS · BOARDROOM · LAB API · ARSIP · PANTRY", Vector3(0, fy1+1.55, 8.64), 0.0, 0.0025, Color("#f2ecda"), Color(0,0,0,0))
-		_painted_text("← ARSIP & CETAK", Vector3(-10.5, fy1+1.15, 24.85), 0.0, 0.0032, Color("#2f4339"), Color(0,0,0,0))
-		_painted_text("RUANG RAPAT / BOARDROOM →", Vector3(-18.8, fy1+1.15, 14.2), -PI*0.5, 0.0030, Color("#2f4339"), Color(0,0,0,0))
-		_painted_text("PANTRY & LOUNGE →", Vector3(10.5, fy1+1.15, 24.85), 0.0, 0.0032, Color("#2f4339"), Color(0,0,0,0))
-		_painted_text("← LAB API & INFRA", Vector3(18.8, fy1+1.15, 14.2), -PI*0.5, 0.0030, Color("#2f4339"), Color(0,0,0,0))
-		_painted_text("↑ TANGGA & LIFT KE LANTAI 2/3", Vector3(6.5, fy1+1.15, 12.2), 0.0, 0.0032, Color("#2f4339"), Color(0,0,0,0))
 		var fy2 := L2_Y
 		_painted_text("L2  →  SEKRETARIAT · MANAJEMEN · ARSITEKTUR · FRONTEND · QA · BACKEND", Vector3(0, fy2+1.55, 8.64), 0.0, 0.0024, Color("#f2ecda"), Color(0,0,0,0))
-		_painted_text("← SEKRETARIAT / OWNER ACCESS", Vector3(-10.5, fy2+1.15, -19.8), PI, 0.0030, Color("#2f4339"), Color(0,0,0,0))
-		_painted_text("MANAJEMEN & ARSITEKTUR ->", Vector3(10.5, fy2+1.15, -19.8), PI, 0.0030, Color("#2f4339"), Color(0,0,0,0))
 		# Kanban board on L2 corridor (visual)
 		_box("Corridor kanban frame", Vector3(6.2, L2_Y + 1.85, 3.86), Vector3(3.8, 1.6, 0.08), Color("#2a3034"), false, null, 0.35, 0.3)
 		_box("Corridor kanban", Vector3(6.2, L2_Y + 1.85, 3.91), Vector3(3.6, 1.42, 0.03), Color("#e6e2d6"), false, null, 0.7)
@@ -2084,8 +2823,6 @@ func _build_wayfinding() -> void:
 		_painted_text("KANBAN", Vector3(6.2, L2_Y + 2.55, 3.95), PI, 0.0026, Color("#2f4339"), Color(0,0,0,0))
 		var fy3 := L3_Y
 		_painted_text("L3  ->  RUANG OWNER · SUITE OWNER · LOUNGE PRIBADI", Vector3(0, fy3+1.55, 8.64), 0.0, 0.0026, Color("#f2ecda"), Color(0,0,0,0))
-		_painted_text("<- RUANG OWNER", Vector3(-10.5, fy3+1.15, -19.8), PI, 0.0034, Color("#2f4339"), Color(0,0,0,0))
-		_painted_text("LOUNGE PRIBADI ->", Vector3(-1.2, fy3+1.15, 29.5), -PI*0.5, 0.0032, Color("#2f4339"), Color(0,0,0,0))
 
 func _build_landscape() -> void:
 	# Entry landscaping: concrete planter boxes + shrubs/low lights + paving feel (visual).
