@@ -28,6 +28,28 @@ def _now():
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+def _should_index_for_agents(rel: str) -> bool:
+    """Return False for files that would leak hidden Milestone 1 answers.
+
+    Agent-facing RAG may include the behavior spec and normal source/docs, but
+    never the reference implementation, the hidden verifier, or old pilot
+    workspaces that still contain the deterministic reference output.
+    """
+    rel = str(rel or "").replace("\\", "/").lstrip("./")
+    if rel in {"core/business_cycle.py", "docs/MILESTONE-1-PLAYBOOK.md"}:
+        return False
+    if rel.startswith("tools/") or "verify_milestone" in rel:
+        return False
+    if rel.startswith("tests/"):
+        return False
+    if rel.startswith("workspace/projects/"):
+        parts = rel.split("/")
+        # workspace/projects/<project-key>/...
+        if len(parts) >= 3 and parts[2].startswith("milestone1"):
+            return False
+    return True
+
+
 def _chunks(text: str, size=1100, overlap=140):
     text = str(text or "").strip()
     if not text:
@@ -271,11 +293,6 @@ class KnowledgeBase:
         }
         candidates = [(path, path.name) for path in root_files if path.is_file()]
         skip_dirs = {".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", "data", "build", "dist", "tools"}
-        # Files that leak Milestone 1 reference answers or hidden-verifier details to agents.
-        skip_files = {
-            "core/business_cycle.py",
-            "docs/MILESTONE-1-PLAYBOOK.md",
-        }
         for root in roots:
             if not root.exists():
                 continue
@@ -285,7 +302,7 @@ class KnowledgeBase:
                 rel = path.relative_to(BASE_DIR).as_posix()
                 if any(part in skip_dirs or part.startswith(".") for part in path.relative_to(BASE_DIR).parts):
                     continue
-                if rel in skip_files or rel.startswith("tools/") or "verify_milestone" in rel or rel.startswith("tests/test_verify_milestone"):
+                if not _should_index_for_agents(rel):
                     self._remove_source_versions(f"file:{rel}")
                     continue
                 candidates.append((path, rel))

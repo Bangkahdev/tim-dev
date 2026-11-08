@@ -14,7 +14,7 @@ if importlib.util.find_spec("crewai") is None:
     sys.modules["crewai"] = crewai_stub
 
 from core.office_store import OfficeStore
-from core.knowledge_base import KnowledgeBase
+from core.knowledge_base import KnowledgeBase, _should_index_for_agents
 from core.office_tools import OfficeTools
 from core.orchestrator import OfficeOrchestrator
 
@@ -136,6 +136,17 @@ class InteractionAndRagTests(unittest.TestCase):
         self.assertTrue(all(e["room_id"] == "kitchen" for e in snapshot["employees"]))
         assigned = {t["assignee_id"] for t in snapshot["tasks"]}
         self.assertEqual(assigned, {"lead", "coo", "architect", "backend", "api", "frontend", "qa"})
+
+    def test_rag_seed_excludes_hidden_milestone_answers_and_old_pilot_workspaces(self):
+        self.assertFalse(_should_index_for_agents("core/business_cycle.py"))
+        self.assertFalse(_should_index_for_agents("docs/MILESTONE-1-PLAYBOOK.md"))
+        self.assertFalse(_should_index_for_agents("tools/verify_milestone1.py"))
+        self.assertFalse(_should_index_for_agents("tests/test_verify_milestone1_whitebox.py"))
+        self.assertFalse(_should_index_for_agents(
+            "workspace/projects/milestone1-wordcount-a1-r1/wordcount/core.py"
+        ))
+        self.assertTrue(_should_index_for_agents("docs/specs/wordcount-behavior.md"))
+        self.assertTrue(_should_index_for_agents("workspace/projects/portfolio/README.md"))
 
     def test_rag_indexes_and_retrieves_document_without_embeddings(self):
         kb = KnowledgeBase(self.db_path)

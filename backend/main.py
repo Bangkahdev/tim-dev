@@ -288,7 +288,7 @@ def create_project_tools(project_dir, logger):
                 "uv"
             }
 
-            if executable not in allowed:
+            if executable not in allowed and re.fullmatch(r"python\d+(?:\.\d+)*(?:\.exe)?", executable) is None:
                 return (
                     f"Executable tidak diizinkan: {executable}"
                 )
@@ -327,20 +327,20 @@ def create_project_tools(project_dir, logger):
                 from core.sandbox_exec import enforce_sandbox, ensure_sandbox_canaries, sandbox_status
                 status = sandbox_status()
                 if status.get("error") and not status.get("required"):
-                    logger.warning("[SANDBOX] %s", status["error"])
+                    logger.log(f"[SANDBOX] {status['error']}")
                 if status.get("required") and not status.get("active"):
-                    logger.warning("[SANDBOX] blocking command: %s", status.get("error"))
+                    logger.log(f"[SANDBOX] blocking command: {status.get('error')}")
                     try:
-                        OPS.store.add_event("sandbox_blocked", "system", status.get("error", "sandbox required"), str(project_dir))
+                        STORE.add_event("sandbox_blocked", "system", status.get("error", "sandbox required"), str(project_dir))
                     except Exception:
                         pass
-                canary = ensure_sandbox_canaries(project_dir, audit=lambda t, a, d, e: OPS.store.add_event(t, a, d, e))
+                canary = ensure_sandbox_canaries(project_dir, audit=lambda t, a, d, e: STORE.add_event(t, a, d, e))
                 if status.get("required") and not canary.get("ok"):
                     return f"ERROR: sandbox canary failed (NFR-SEC-09/10 not evidenced): {canary.get('details')}"
                 run_args = enforce_sandbox(run_args, project_dir)
             except RuntimeError as exc:
                 try:
-                    OPS.store.add_event("sandbox_blocked", "system", str(exc), str(project_dir))
+                    STORE.add_event("sandbox_blocked", "system", str(exc), str(project_dir))
                 except Exception:
                     pass
                 return f"ERROR: sandbox required but not configured/misconfigured: {exc}"
