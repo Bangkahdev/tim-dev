@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import traceback
 from datetime import datetime
@@ -31,6 +32,30 @@ from core.business_cycle import BusinessCycle, CrewAIAgentWorker, DeterministicW
 from core.company_operations import CompanyOperations  # noqa: E402
 from core.office_store import BASE_DIR, OfficeStore  # noqa: E402
 from tools.verify_milestone1 import verify as owner_verify  # noqa: E402
+
+
+SANDBOX_CHECK_MARKER = "fs_network_isolation_NFR_SEC_09_10"
+MANUAL_CHECK = "manual.godot_status_tray_paper_match_backend"
+
+
+def _hard_failures(checks: dict, failures: list[str]) -> list[str]:
+    """Return checks that must fail the attempt.
+
+    Sandbox isolation is an operator-evidence item: the in-process cycle and the
+    independent verifier cannot inspect the host wrapper. The runner records it
+    from ``--external-sandbox`` plus the mandatory preflight canaries, so those
+    keys never hard-fail by themselves. A missing external note already appends
+    an explicit failure string. The Godot check is manual by design.
+    """
+    hard = [
+        key
+        for key, value in checks.items()
+        if value is False
+        and key != MANUAL_CHECK
+        and SANDBOX_CHECK_MARKER not in key
+    ]
+    hard.extend(failures)
+    return hard
 
 
 def main(argv=None) -> int:
@@ -50,12 +75,30 @@ def main(argv=None) -> int:
         if not sandbox_required():
             print("ERROR: --worker real requires BANGKAH_SANDBOX_REQUIRED=1 (and a validated external sandbox wrapper).", file=sys.stderr)
             return 2
+        if not args.external_sandbox.strip():
+            print("ERROR: --worker real requires --external-sandbox evidence (image/wrapper + isolation proof).", file=sys.stderr)
+            return 2
 
     workspace = Path(args.workspace) if args.workspace else (BASE_DIR / "workspace" / "projects")
     workspace.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     log_dir = workspace / f"milestone1-logs-{stamp}"
     log_dir.mkdir(parents=True, exist_ok=True)
+
+    sandbox_preflight = None
+    if args.worker == "real" and not args.allow_unverified_real:
+        from core.sandbox_exec import ensure_sandbox_canaries
+        preflight_dir = log_dir / "_sandbox_preflight"
+        preflight_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            sandbox_preflight = ensure_sandbox_canaries(preflight_dir, force=True)
+        except Exception as error:
+            print(f"ERROR: sandbox preflight failed: {type(error).__name__}: {error}", file=sys.stderr)
+            return 2
+        if not sandbox_preflight.get("ok"):
+            print(f"ERROR: sandbox canaries did not prove FS+network isolation: {sandbox_preflight}", file=sys.stderr)
+            return 2
+        print(f"Sandbox preflight: FS isolated={sandbox_preflight.get('fs_isolated')} network isolated={sandbox_preflight.get('network_isolated')}")
 
     required = max(1, args.cycles)
     consecutive = 0
@@ -100,6 +143,28 @@ def main(argv=None) -> int:
             for k, val in v["checks"].items():
                 attempt_log["checks"][f"verify.{k}"] = val
 
+            # Fresh-process restart probe: after Paper delivery, reopen the run
+            # DB in a NEW interpreter. This is stronger than the in-process
+            # store reopen inside BusinessCycle and directly matches the
+            # playbook's "restart after Paper" requirement.
+            probe_path = Path(__file__).resolve().parent / "check_persisted_state.py"
+            probe = subprocess.run(
+                [sys.executable, str(probe_path), "--db", str(db_path),
+                 "--project-key", project_key],
+                capture_output=True, text=True, timeout=60,
+            )
+            try:
+                probe_json = json.loads(probe.stdout)
+            except Exception:
+                probe_json = {
+                    "checks": {"all_persisted": False},
+                    "error": (probe.stderr or probe.stdout or "empty probe output")[-1500:],
+                }
+            attempt_log["restart_process_probe"] = probe_json
+            attempt_log["checks"]["restart.fresh_process_persistence"] = bool(
+                probe_json.get("checks", {}).get("all_persisted")
+            )
+
             # honest sandbox status
             if args.external_sandbox:
                 attempt_log["checks"]["sandbox.fs_network_isolation_NFR_SEC_09_10"] = True
@@ -119,20 +184,15 @@ def main(argv=None) -> int:
             except Exception:
                 pass
 
-        # determine pass for verifiable criteria (sandbox honesty + manual excluded from auto-pass)
-        auto_fail_keys = [k for k, val in attempt_log["checks"].items()
-                          if val is False and k not in ("sandbox.fs_network_isolation_NFR_SEC_09_10",)]
-        auto_fail_keys += [k for k, val in attempt_log["checks"].items() if val is False and k.startswith("verify.") is False and k.startswith("sandbox.fs_network_isolation")]
-        # recompute cleanly
-        hard_fail = []
-        for k, val in attempt_log["checks"].items():
-            if k in ("manual.godot_status_tray_paper_match_backend", "sandbox.fs_network_isolation_NFR_SEC_09_10"):
-                continue
-            if val is False:
-                hard_fail.append(k)
-        hard_fail.extend(attempt_log["failures"])
+        hard_fail = _hard_failures(attempt_log["checks"], attempt_log["failures"])
+        attempt_log["hard_failures"] = hard_fail
         passed = len(hard_fail) == 0 and attempt_log["checks"].get("verify.OVERALL_VERIFIABLE") is True
-        real_pass = passed and args.worker == "real" and bool(args.external_sandbox)
+        real_pass = (
+            passed
+            and args.worker == "real"
+            and bool(args.external_sandbox)
+            and bool((sandbox_preflight or {}).get("ok"))
+        )
 
         attempt_log["passed_verifiable"] = passed
         attempt_log["passed_real_milestone1"] = real_pass
@@ -172,7 +232,9 @@ def main(argv=None) -> int:
                "passed": consecutive >= required and static_ok and real_pass,
                "passed_verifiable_only": consecutive >= required and static_ok and not real_pass,
                "worker": worker_mode, "real_agent_worker": args.worker == "real",
-               "external_sandbox": args.external_sandbox, "logs": str(log_dir), "static": static}
+               "external_sandbox": args.external_sandbox,
+               "sandbox_preflight": sandbox_preflight,
+               "logs": str(log_dir), "static": static}
     (log_dir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     print("-" * 72)
     if summary["passed"]:

@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.company_operations import CompanyOperations  # noqa: E402
 from core.office_store import OfficeStore  # noqa: E402
+from core.sandbox_exec import enforce_sandbox  # noqa: E402
 
 
 def expected(text: str) -> dict:
@@ -45,10 +46,14 @@ def _parse_output(out: str):
 
 
 def run_cli(project_dir: Path, args, stdin_text=None):
-    # try `python -m wordcount <file|->` then `python -m wordcount.cli`
+    # try `python -m wordcount <file|->` then `python -m wordcount.cli`.
+    # The verifier executes untrusted agent-produced code, so it honors the same
+    # operator sandbox wrapper as the worker. Fixtures live inside the project
+    # tree (visible at /work) so they remain readable under a project-only bind.
     for mod in ("wordcount", "wordcount.cli"):
         cmd = [sys.executable, "-m", mod] + list(args)
         try:
+            cmd = enforce_sandbox(cmd, project_dir)
             cp = subprocess.run(cmd, cwd=project_dir, input=stdin_text, text=True, capture_output=True, timeout=30)
         except Exception as e:
             return None, -1, str(e), "", str(e)
@@ -78,13 +83,15 @@ def hidden_tests(project_dir: Path):
         else:
             f = td / f"{name}.txt"
             _write_fixture(f, text)
-            mod, rc, _, out, err = run_cli(project_dir, [str(f)])
-            label = str(f)
+            # Relative to the project root so it also resolves inside the
+            # project-only sandbox mount (/work).
+            label = f"{td.name}/{f.name}"
+            mod, rc, _, out, err = run_cli(project_dir, [label])
         exp = expected(text)
         got = _parse_output(out or "")
         add(name, rc == 0 and got == exp, f"mod={mod} label={label} rc={rc} expected={exp} got={got} out={out!r} err={err!r}")
 
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(dir=project_dir, prefix=".owner-verify-") as td:
         td = Path(td)
         # normal file
         run_case("hidden.normal_file", "hello world\nsecond line\n")
@@ -103,14 +110,14 @@ def hidden_tests(project_dir: Path):
         crlf = "one two\r\nthree\r\n"
         f = td / "hidden.crlf.txt"
         _write_fixture(f, crlf)
-        mod, rc, _, out, err = run_cli(project_dir, [str(f)])
+        mod, rc, _, out, err = run_cli(project_dir, [f"{td.name}/{f.name}"])
         got = _parse_output(out or "")
         exp_preserved = expected(crlf)
         exp_normalized = expected(crlf.replace("\r\n", "\n"))
         add("hidden.crlf", rc == 0 and got in (exp_preserved, exp_normalized),
             f"mod={mod} rc={rc} expected_one_of={[exp_preserved, exp_normalized]} got={got} out={out!r} err={err!r}")
         # missing file/arg -> exit 2, stderr message
-        mod, rc, _, out, err = run_cli(project_dir, [str(td / "nope-missing.txt")])
+        mod, rc, _, out, err = run_cli(project_dir, [f"{td.name}/nope-missing.txt"])
         add("hidden.missing_file_exit2", rc == 2 and bool((err or "").strip() or (out or "").strip()),
             f"rc={rc} stderr={err!r} out={out!r}")
         mod, rc, _, out, err = run_cli(project_dir, [])
@@ -170,9 +177,16 @@ def verify(db_path, project_key, project_dir):
         checks["db.inspect_error"] = False
         details["db.inspect_error"] = str(e)
 
-    # sandbox honest status (NOT claimed met)
+    # The verifier applies BANGKAH_SANDBOX_CMD to every hidden-test execution
+    # (enforce_sandbox fails closed when required). It still does not claim host
+    # isolation on its own: FS/network confinement is evidenced separately by
+    # the runner's canaries plus the operator's --external-sandbox record.
     checks["sandbox.fs_network_isolation_NFR_SEC_09_10"] = False
-    details["sandbox.fs_network_isolation_NFR_SEC_09_10"] = "NOT MET: only env filter/exec allowlist/shell=False/timeout/cwd. FS+network isolation requires VM/container or implementation; run pilot in disposable VM/container and record external sandbox."
+    details["sandbox.fs_network_isolation_NFR_SEC_09_10"] = (
+        "EXTERNALLY EVIDENCED: hidden tests honor BANGKAH_SANDBOX_CMD and fail closed when "
+        "BANGKAH_SANDBOX_REQUIRED=1; host FS/network confinement is proven by sandbox canaries "
+        "and the runner's --external-sandbox evidence, not asserted by this verifier."
+    )
 
     ok = all(v for k, v in checks.items() if k != "sandbox.fs_network_isolation_NFR_SEC_09_10") and checks.get("hidden.all_pass") and checks.get("db.tasks_completed_with_evidence")
     # note: overall pass for the *verifiable* criteria; sandbox remains an explicit unmet/externally-evidenced item

@@ -16,9 +16,11 @@ hidden verifier cases.
 """
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -34,9 +36,17 @@ A tiny command-line word/line/character counter.
 ## Usage
 
 ```
-python -m wordcount.cli README.md
-python -m wordcount.cli --text "hello world"
+python -m wordcount README.md
+python -m wordcount -
 ```
+
+`-` reads UTF-8 text from stdin. Success prints:
+
+```
+lines=<n> words=<n> characters=<n> <name>
+```
+
+Exit code 0 on success, 2 for a missing argument or unreadable file.
 
 ## Tests
 
@@ -57,6 +67,13 @@ def count_text(text: str) -> dict:
     words = len(text.split())
     return {"lines": lines, "words": words, "characters": len(text)}
 ''',
+    "wordcount/__main__.py": '''"""Run the wordcount CLI with `python -m wordcount`."""
+from .cli import main
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+''',
     "wordcount/cli.py": '''"""Command-line entry point for wordcount."""
 from __future__ import annotations
 
@@ -68,30 +85,44 @@ from .core import count_text
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="wordcount")
-    parser.add_argument("path", nargs="?", help="file to count (default: stdin)")
-    parser.add_argument("--text", help="count this literal string instead")
+    parser.add_argument("path", nargs="?", help="file to count, or - for stdin")
     args = parser.parse_args(argv)
 
-    if args.text is not None:
-        text = args.text
-    elif args.path:
-        with open(args.path, "r", encoding="utf-8") as handle:
-            text = handle.read()
-    else:
+    if args.path is None:
+        parser.error("the following arguments are required: path")
+
+    name = args.path
+    if args.path == "-":
         text = sys.stdin.read()
+    else:
+        try:
+            with open(args.path, "r", encoding="utf-8") as handle:
+                text = handle.read()
+        except OSError as error:
+            print(f"wordcount: {error}", file=sys.stderr)
+            return 2
 
     result = count_text(text)
-    print(f"lines={result['lines']} words={result['words']} characters={result['characters']}")
+    print(
+        f"lines={result['lines']} words={result['words']} "
+        f"characters={result['characters']} {name}"
+    )
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
 ''',
-    "tests/test_core.py": '''"""Tests for wordcount.core."""
+    "tests/test_core.py": '''"""Tests for wordcount.core and the CLI."""
+import subprocess
+import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 from wordcount.core import count_text
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class CountTextTests(unittest.TestCase):
@@ -105,6 +136,43 @@ class CountTextTests(unittest.TestCase):
         result = count_text("one two\\nthree\\n")
         self.assertEqual(result["lines"], 2)
         self.assertEqual(result["words"], 3)
+
+    def test_utf8_characters_not_bytes(self):
+        self.assertEqual(count_text("halo café\\n")["characters"], 10)
+
+
+class CliTests(unittest.TestCase):
+    def run_cli(self, args, stdin_text=None):
+        return subprocess.run(
+            [sys.executable, "-m", "wordcount", *args],
+            cwd=ROOT,
+            input=stdin_text,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_normal_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "normal.txt"
+            path.write_text("hello world\\nsecond line\\n", encoding="utf-8")
+            result = self.run_cli([str(path)])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("lines=2 words=4 characters=24", result.stdout)
+
+    def test_stdin(self):
+        result = self.run_cli(["-"], stdin_text="alpha beta\\ngamma\\n")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("lines=2 words=3 characters=17", result.stdout)
+
+    def test_missing_file_exits_2(self):
+        result = self.run_cli(["does-not-exist.txt"])
+        self.assertEqual(result.returncode, 2)
+        self.assertTrue(result.stderr.strip())
+
+    def test_missing_argument_exits_2(self):
+        result = self.run_cli([])
+        self.assertEqual(result.returncode, 2)
+        self.assertTrue(result.stderr.strip())
 
 
 if __name__ == "__main__":
@@ -142,8 +210,8 @@ def safe_project_path(root, relative_path):
     return target
 
 
-def run_sandboxed(project_dir, args, timeout=120):
-    """Run *args* inside *project_dir* without a shell and with an allowlist.
+def run_sandboxed_split(project_dir, args, timeout=120, stdin_text=None):
+    """Run *args* inside *project_dir* and return (returncode, stdout, stderr).
 
     Uses a minimal allowlisted environment (safe_subprocess_env) so backend
     secrets (API keys, SMTP/deploy tokens) are not inherited by agent commands.
@@ -158,7 +226,8 @@ def run_sandboxed(project_dir, args, timeout=120):
     if not args:
         raise ValueError("Empty command.")
     executable = Path(args[0]).name.lower()
-    if executable not in ALLOWED_EXECUTABLES:
+    is_versioned_python = re.fullmatch(r"python\d+(?:\.\d+)*(?:\.exe)?", executable) is not None
+    if executable not in ALLOWED_EXECUTABLES and not is_versioned_python:
         raise ValueError(f"Executable not allowed: {executable}")
     if any(Path(arg).name.lower() in FORBIDDEN_ARGS for arg in args):
         raise ValueError("Dangerous argument rejected.")
@@ -203,9 +272,17 @@ def run_sandboxed(project_dir, args, timeout=120):
 
     completed = subprocess.run(
         run_args, cwd=project_dir, capture_output=True, text=True, timeout=timeout,
-        shell=False, env=env,
+        shell=False, env=env, input=stdin_text,
     )
-    return completed.returncode, (completed.stdout or "") + (completed.stderr or "")
+    return completed.returncode, completed.stdout or "", completed.stderr or ""
+
+
+def run_sandboxed(project_dir, args, timeout=120, stdin_text=None):
+    """Run *args* in the sandbox and return (returncode, combined output)."""
+    code, stdout, stderr = run_sandboxed_split(
+        project_dir, args, timeout=timeout, stdin_text=stdin_text,
+    )
+    return code, (stdout or "") + (stderr or "")
 
 
 class AgentWorker:
@@ -236,49 +313,607 @@ class DeterministicWorker(AgentWorker):
         return {"mode": self.mode, "honest": "integration_fixture_not_real_milestone1"}
 
 
-class CrewAIAgentWorker(AgentWorker):
-    """Runs a real CrewAI/cloud-model agent to implement wordcount from the spec.
+TEST_SCAFFOLD = r'''"""Behavior tests for wordcount (public spec cases)."""
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
 
-    Requires ``crewai`` and a configured model/provider in the environment used by
-    ``AICodingFactory``. Never injects hidden verifier content. Fails loudly when
-    dependencies/config are unavailable so callers cannot mistake it for success.
+from wordcount.core import count_text
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class CountTextTests(unittest.TestCase):
+    def test_empty(self):
+        self.assertEqual(count_text(""), {"lines": 0, "words": 0, "characters": 0})
+
+    def test_single_line_no_newline(self):
+        self.assertEqual(count_text("hello world"), {"lines": 1, "words": 2, "characters": 11})
+
+    def test_trailing_newline(self):
+        self.assertEqual(count_text("one two\nthree\n"), {"lines": 2, "words": 3, "characters": 14})
+
+    def test_no_trailing_newline(self):
+        self.assertEqual(count_text("a b\nc"), {"lines": 2, "words": 3, "characters": 5})
+
+    def test_lone_newline(self):
+        self.assertEqual(count_text("\n"), {"lines": 1, "words": 0, "characters": 1})
+
+    def test_repeated_whitespace(self):
+        self.assertEqual(count_text("  a\t\tb \n  c  \n"), {"lines": 2, "words": 3, "characters": 14})
+
+    def test_utf8_characters_not_bytes(self):
+        self.assertEqual(count_text("halo café\n"), {"lines": 1, "words": 2, "characters": 10})
+
+
+class CliTests(unittest.TestCase):
+    def run_cli(self, args, stdin_text=None):
+        return subprocess.run(
+            [sys.executable, "-m", "wordcount", *args],
+            cwd=ROOT,
+            input=stdin_text,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_normal_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "normal.txt"
+            path.write_text("hello world\nsecond line\n", encoding="utf-8")
+            result = self.run_cli([str(path)])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("lines=2 words=4 characters=24", result.stdout)
+
+    def test_stdin(self):
+        result = self.run_cli(["-"], stdin_text="alpha beta\ngamma\n")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("lines=2 words=3 characters=17", result.stdout)
+
+    def test_missing_file_exit_2(self):
+        result = self.run_cli(["does-not-exist.txt"])
+        self.assertEqual(result.returncode, 2)
+        self.assertTrue(result.stderr.strip())
+
+    def test_missing_argument_exit_2(self):
+        result = self.run_cli([])
+        self.assertEqual(result.returncode, 2)
+        self.assertTrue(result.stderr.strip())
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+
+
+class CrewAIAgentWorker(AgentWorker):
+    """Focused CrewAI implementation worker for the wordcount pilot.
+
+    Design note: earlier trials asked small local models to call the project
+    file tools directly; they frequently stopped after one or two files. This
+    worker keeps CrewAI as the real agent runtime but makes persistence
+    deterministic: one CrewAI task per file returns complete file content, the
+    worker validates it and writes it through ``safe_project_path``. It then
+    runs the public test command in the configured sandbox and feeds real
+    failures back to the model for repair rounds. The independent hidden
+    verifier is never shown to any agent.
+
+    Acceptance is decided by executed public tests plus an independent Owner
+    verifier; the lead review is recorded as advisory evidence, not as a gate.
     """
 
     mode = "crewai_real"
 
-    def __init__(self, callback=None):
-        self.callback = callback or (lambda msg: None)
+    GENERATION_ORDER = [
+        "wordcount/__init__.py",
+        "wordcount/core.py",
+        "wordcount/cli.py",
+        "wordcount/__main__.py",
+        "README.md",
+        "tests/test_wordcount.py",
+    ]
 
+    FILE_RETRIES = 3
+    DEFAULT_REPAIR_ROUNDS = 4
+    REQUIRED_TOKENS = {
+        "wordcount/core.py": ("def count_text",),
+        "wordcount/cli.py": ("def main",),
+        "tests/test_wordcount.py": ("unittest",),
+    }
+
+    def __init__(self, callback=None, max_repair_rounds=None):
+        self.callback = callback or (lambda msg: None)
+        if max_repair_rounds is None:
+            try:
+                from config import MAX_REPAIR_ROUNDS as configured_rounds
+                max_repair_rounds = configured_rounds
+            except Exception:
+                max_repair_rounds = self.DEFAULT_REPAIR_ROUNDS
+        self.max_repair_rounds = max(1, int(max_repair_rounds))
+        self.project_dir = None
+        self.spec_text = ""
+        self.spec_name = ""
+        self._tests_source = "agent"
+        self._used_test_scaffold = False
+
+    # -- small helpers -----------------------------------------------------
+    def _log(self, message: str) -> None:
+        try:
+            self.callback(str(message))
+        except Exception:
+            pass
+
+    @staticmethod
+    def _expected_counts(text: str) -> dict:
+        return {
+            "lines": text.count("\n") + (1 if text and not text.endswith("\n") else 0),
+            "words": len(text.split()),
+            "characters": len(text),
+        }
+
+    @staticmethod
+    def _parse_counts(output: str):
+        match = re.search(
+            r"lines\s*[:=]\s*(\d+).*?words\s*[:=]\s*(\d+).*?(?:characters|chars)\s*[:=]\s*(\d+)",
+            output or "", re.I | re.S,
+        )
+        if not match:
+            return None
+        return {
+            "lines": int(match.group(1)),
+            "words": int(match.group(2)),
+            "characters": int(match.group(3)),
+        }
+
+    @staticmethod
+    def _clean_content(raw: str, markdown: bool = False) -> str:
+        text = str(raw or "").strip()
+        # Some local models wrap file content in XML-ish tags despite instructions.
+        text = re.sub(r"^\s*<file[^>]*>\s*", "", text, flags=re.I)
+        text = re.split(r"\s*</file>\s*", text, maxsplit=1, flags=re.I)[0].strip()
+        if markdown:
+            if text.startswith("```") and text.endswith("```") and text.count("```") == 2:
+                text = re.sub(r"^```[a-zA-Z0-9_+\-]*\s*\n", "", text)
+                text = re.sub(r"\n```$", "", text)
+            return text.rstrip() + "\n"
+        blocks = re.findall(r"```[a-zA-Z0-9_+\-]*\s*\n(.*?)```", text, re.S)
+        if blocks:
+            text = max(blocks, key=len)
+        else:
+            lines = text.splitlines()
+            start = None
+            for index, line in enumerate(lines):
+                stripped = line.lstrip()
+                if stripped.startswith(("import ", "from ", "def ", "class ", '"""', "'''", "#!")):
+                    start = index
+                    break
+            if start is not None and start > 0:
+                text = "\n".join(lines[start:])
+        return text.strip("\n").rstrip() + "\n"
+
+    def _validate_content(self, relative: str, content: str):
+        if not content.strip():
+            return "file content is empty"
+        if relative.endswith(".py"):
+            try:
+                ast.parse(content)
+            except SyntaxError as error:
+                return f"SyntaxError: {error}"
+            for token in self.REQUIRED_TOKENS.get(relative, ()):
+                if token not in content:
+                    return f"missing required token {token!r}"
+        return None
+
+    def _read(self, relative: str) -> str:
+        path = safe_project_path(self.project_dir, relative)
+        if not path.is_file():
+            return ""
+        return path.read_text(encoding="utf-8", errors="replace")
+
+    def _spec_block(self) -> str:
+        return (
+            f"BEHAVIOR SPEC ({self.spec_name}) - the single source of truth:\n"
+            f"{self.spec_text}\n"
+        )
+
+    # -- prompts -----------------------------------------------------------
+    def _prompt_for(self, relative: str) -> str:
+        spec = self._spec_block()
+        header = (
+            "You are writing exactly one file for a small Python project. "
+            f"Return ONLY the complete content of `{relative}`. "
+            "No markdown fences, no explanations, no surrounding prose.\n\n"
+        )
+        if relative == "wordcount/core.py":
+            return header + spec + (
+                "\nThe file must define this public API:\n"
+                "    def count_text(text: str) -> dict:\n"
+                "        ...\n"
+                "It returns a dict with integer keys \"lines\", \"words\", \"characters\".\n"
+                "Follow the spec's counting rules exactly, including empty text, text without a\n"
+                "trailing newline, tabs/repeated whitespace, and Unicode characters (count\n"
+                "characters, not bytes). Use only the Python standard library. No file I/O.\n"
+            )
+        if relative == "wordcount/__init__.py":
+            return header + "Return a short module docstring for the `wordcount` package.\n"
+        if relative == "wordcount/cli.py":
+            core = self._read("wordcount/core.py")
+            return header + spec + (
+                f"\nCurrent `wordcount/core.py`:\n```python\n{core}\n```\n\n"
+                "The CLI must work as `python -m wordcount <path|->` together with\n"
+                "`wordcount/__main__.py`.\n"
+                "Requirements:\n"
+                "- argparse positional `path`; a missing argument exits 2 and prints an error to stderr.\n"
+                "  Do NOT use parser.print_help() or print usage/help to stdout for this case; the\n"
+                "  error text must be on stderr (e.g. parser.error('the following arguments are required: path')).\n"
+                "- `-` reads UTF-8 text from stdin; otherwise read the given file as UTF-8 text.\n"
+                "- A missing/unreadable file prints a human-readable error to stderr and exits 2.\n"
+                "- On success print exactly: lines=<n> words=<n> characters=<n> <name>\n"
+                "  where <name> is the path argument or `-`.\n"
+                "- Provide `def main(argv=None) -> int` and the `if __name__ == \"__main__\"` guard.\n"
+                "- Standard library only. Do not import anything outside `wordcount.core`.\n"
+            )
+        if relative == "wordcount/__main__.py":
+            return header + (
+                "Its complete content must run the CLI when executing `python -m wordcount`:\n"
+                "import `main` from `.cli` and raise `SystemExit(main())`.\n"
+            )
+        if relative == "README.md":
+            return header + (
+                "Write a concise README.md with:\n"
+                "- what the tool does;\n"
+                "- usage: `python -m wordcount <path>` and `python -m wordcount -` for stdin;\n"
+                "- output format `lines=<n> words=<n> characters=<n> <name>`;\n"
+                "- test command `python -m unittest discover -s tests -v`;\n"
+                "- exit codes 0 (success) and 2 (missing argument or unreadable file).\n"
+            )
+        if relative == "tests/test_wordcount.py":
+            core = self._read("wordcount/core.py")
+            cli = self._read("wordcount/cli.py")
+            return header + spec + (
+                f"\nCurrent `wordcount/core.py`:\n```python\n{core}\n```\n\n"
+                f"Current `wordcount/cli.py`:\n```python\n{cli}\n```\n\n"
+                "Use Python's standard-library `unittest` only (no pytest).\n"
+                "Import `from wordcount.core import count_text`.\n"
+                "The command `python -m unittest discover -s tests -v` must run from the project root.\n"
+                "Cover at least these exact expectations (full dict equality):\n"
+                "- count_text(\"\") == {\"lines\": 0, \"words\": 0, \"characters\": 0}\n"
+                "- count_text(\"hello world\") == {\"lines\": 1, \"words\": 2, \"characters\": 11}\n"
+                "- count_text(\"one two\\nthree\\n\") == {\"lines\": 2, \"words\": 3, \"characters\": 14}\n"
+                "- count_text(\"a b\\nc\") == {\"lines\": 2, \"words\": 3, \"characters\": 5}\n"
+                "- count_text(\"\\n\") == {\"lines\": 1, \"words\": 0, \"characters\": 1}\n"
+                "- count_text(\"halo café\\n\") == {\"lines\": 1, \"words\": 2, \"characters\": 10}\n"
+                "- count_text(\"  a\\t\\tb \\n  c  \\n\") == {\"lines\": 2, \"words\": 3, \"characters\": 14}\n"
+                "Also add CLI tests with subprocess using sys.executable and `-m wordcount`,\n"
+                "cwd set to the project root. Do NOT use unittest.mock or patch.\n"
+                "- normal file \"hello world\\nsecond line\\n\": exit 0 and output starts with\n"
+                "  `lines=2 words=4 characters=24`\n"
+                "- stdin: args [\"-\"] with `input=\"alpha beta\\ngamma\\n\"`: exit 0\n"
+                "- missing file \"does-not-exist.txt\": exit 2 and non-empty stderr\n"
+                "- no argument: exit 2 and non-empty stderr\n"
+                "For stdin use subprocess.run(..., input=...); never patch sys.stdin.\n"
+                "Use tempfile.TemporaryDirectory for fixture files. Keep the file deterministic.\n"
+            )
+        return header
+
+    # -- CrewAI execution --------------------------------------------------
+    def _run_task(self, role, goal, backstory, description, expected_output, model):
+        from crewai import Agent, Crew, Process, Task
+        agent = Agent(
+            role=role,
+            goal=goal,
+            backstory=backstory,
+            llm=model,
+            allow_delegation=False,
+            verbose=False,
+        )
+        task = Task(description=description, expected_output=expected_output, agent=agent)
+        crew = Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=False)
+        return str(crew.kickoff())
+
+    def _generate(self, relative: str, model_role: str = "backend") -> str:
+        from config import make_llm, model_for
+        target = safe_project_path(self.project_dir, relative)
+        prompt = self._prompt_for(relative)
+        last_error = ""
+        for attempt in range(1, self.FILE_RETRIES + 1):
+            description = prompt
+            if last_error:
+                description += (
+                    "\n\nTHE PREVIOUS ATTEMPT WAS REJECTED: "
+                    f"{last_error}\nReturn the complete corrected file content only.\n"
+                )
+            raw = self._run_task(
+                role="Python CLI Implementer" if model_role == "backend" else "QA Engineer",
+                goal="Produce complete, correct file content for a small Python CLI project.",
+                backstory=(
+                    "You are a senior Python engineer who writes small, dependency-free, "
+                    "spec-faithful code. You always return the complete file content."
+                ),
+                description=description,
+                expected_output=f"complete content of {relative}",
+                model=make_llm(model_for(model_role), temperature=0.1),
+            )
+            content = self._clean_content(raw, markdown=relative.endswith(".md"))
+            error = self._validate_content(relative, content)
+            if error is None:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content, encoding="utf-8")
+                self._log(f"[MILESTONE1] wrote {relative} ({len(content)} chars)")
+                return content
+            last_error = error
+            self._log(f"[MILESTONE1] rejected {relative} attempt {attempt}: {error}")
+        raise RuntimeError(f"model could not produce a valid {relative}: {last_error}")
+
+    def _repair(self, relative: str, failure: str) -> None:
+        from config import make_llm, model_for
+        current = self._read(relative)
+        prompt = self._prompt_for(relative) + (
+            f"\n\nCURRENT CONTENT OF {relative} (replace it completely):\n"
+            f"{current}\n\n"
+            "REAL FAILURE OUTPUT FROM THE PUBLIC TEST/PROBE RUN:\n"
+            f"{failure[-4000:]}\n\n"
+            "Diagnose the root cause and return ONLY the complete corrected file content. "
+            "Follow the behavior spec exactly. No markdown fences, no commentary.\n"
+        )
+        model_role = "qa" if relative.startswith("tests/") else "backend"
+        raw = self._run_task(
+            role="Python CLI Implementer" if model_role == "backend" else "QA Engineer",
+            goal="Repair one file so the public behavior tests pass.",
+            backstory=(
+                "You are a senior Python engineer. You read real failure output, "
+                "fix the root cause, and return the complete corrected file."
+            ),
+            description=prompt,
+            expected_output=f"complete corrected content of {relative}",
+            model=make_llm(model_for(model_role), temperature=0.1),
+        )
+        content = self._clean_content(raw, markdown=relative.endswith(".md"))
+        error = self._validate_content(relative, content)
+        if error:
+            raise RuntimeError(f"repair for {relative} produced invalid content: {error}")
+        target = safe_project_path(self.project_dir, relative)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        self._log(f"[MILESTONE1] repaired {relative}")
+
+    def _write_test_scaffold(self) -> None:
+        """Install a deterministic public-spec test file after bad agent tests.
+
+        This is QA scaffolding, not implementation: the wordcount source is
+        still generated by the CrewAI implementer. The scaffold is derived only
+        from the agent-facing behavior spec and contains no hidden verifier case.
+        """
+        target = safe_project_path(self.project_dir, "tests/test_wordcount.py")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(TEST_SCAFFOLD, encoding="utf-8")
+        self._log("[MILESTONE1] wrote tests/test_wordcount.py (public-spec scaffold)")
+
+    @staticmethod
+    def _choose_repair_target(failure: str) -> str:
+        text = (failure or "").lower()
+        cli_markers = (
+            "missing_arg", "missing argument", "missing_argument", "missing_file",
+            "missing file", "stdin", "usage:", "stderr", "wordcount/cli.py",
+            "test_missing", "test_stdin", "test_normal_file", "exit 2",
+            "modulenotfound", "importerror",
+        )
+        if any(marker in text for marker in cli_markers):
+            return "wordcount/cli.py"
+        if "tests/test_wordcount.py" in text and "assertionerror" not in text:
+            return "tests/test_wordcount.py"
+        return "wordcount/core.py"
+
+    def _run_public_tests(self):
+        try:
+            return run_sandboxed(
+                self.project_dir,
+                [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"],
+                timeout=180,
+            )
+        except Exception as error:
+            return -1, f"public test execution error: {type(error).__name__}: {error}"
+
+    # -- public spec probe (NOT the hidden verifier) -----------------------
+    def _probe_spec(self):
+        project_dir = self.project_dir
+        fixture_dir = safe_project_path(project_dir, ".selfcheck")
+        fixture_dir.mkdir(parents=True, exist_ok=True)
+        failures = []
+
+        def write_fixture(name, text):
+            path = safe_project_path(project_dir, f".selfcheck/{name}")
+            with path.open("w", encoding="utf-8", newline="") as handle:
+                handle.write(text)
+            return f".selfcheck/{name}"
+
+        def run_cli(args, stdin_text=None, timeout=60, split=False):
+            command = [sys.executable, "-m", "wordcount", *args]
+            try:
+                if split:
+                    code, stdout, stderr = run_sandboxed_split(
+                        project_dir, command, timeout=timeout, stdin_text=stdin_text,
+                    )
+                    return code, (stdout or "") + (stderr or ""), stdout or "", stderr or ""
+                code, output = run_sandboxed(
+                    project_dir, command, timeout=timeout, stdin_text=stdin_text,
+                )
+                return code, output, "", ""
+            except Exception as error:
+                message = f"probe execution error: {type(error).__name__}: {error}"
+                return -1, message, "", message
+
+        def check_file(name, text):
+            relative = write_fixture(name, text)
+            code, output, _, _ = run_cli([relative])
+            expected = self._expected_counts(text)
+            got = self._parse_counts(output)
+            if code != 0 or got != expected:
+                failures.append(
+                    f"spec_probe.{name}: rc={code} expected={expected} got={got} "
+                    f"output={output[-800:]!r}"
+                )
+
+        check_file("normal.txt", "alpha beta\nsecond line\n")
+        check_file("empty.txt", "")
+        check_file("no_trailing_newline.txt", "red green\nblue")
+        check_file("lone_newline.txt", "\n")
+        check_file("repeated_whitespace.txt", "\t x  \n y\t\tz\n")
+        check_file("utf8.txt", "café 日本\n")
+
+        crlf = "left right\r\nup down\r\n"
+        relative = write_fixture("crlf.txt", crlf)
+        code, output, _, _ = run_cli([relative])
+        got = self._parse_counts(output)
+        allowed = {
+            tuple(self._expected_counts(crlf).values()),
+            tuple(self._expected_counts(crlf.replace("\r\n", "\n")).values()),
+        }
+        if code != 0 or got is None or tuple(got.values()) not in allowed:
+            failures.append(
+                f"spec_probe.crlf: rc={code} got={got} allowed={allowed} "
+                f"output={output[-800:]!r}"
+            )
+
+        stdin_text = "one two\nthree\n"
+        code, output, _, _ = run_cli(["-"], stdin_text=stdin_text)
+        got = self._parse_counts(output)
+        expected = self._expected_counts(stdin_text)
+        if code != 0 or got != expected:
+            failures.append(
+                f"spec_probe.stdin: rc={code} expected={expected} got={got} "
+                f"output={output[-800:]!r}"
+            )
+
+        code, output, _, stderr = run_cli([".selfcheck/does-not-exist.txt"], split=True)
+        if code != 2 or not stderr.strip():
+            failures.append(
+                f"spec_probe.missing_file: rc={code} stderr={stderr[-800:]!r} "
+                f"output={output[-800:]!r}"
+            )
+
+        code, output, _, stderr = run_cli([], split=True)
+        if code != 2 or not stderr.strip():
+            failures.append(
+                f"spec_probe.missing_arg: rc={code} stderr={stderr[-800:]!r} "
+                f"output={output[-800:]!r}"
+            )
+
+        if failures:
+            return False, "\n".join(failures)
+        shutil.rmtree(fixture_dir, ignore_errors=True)
+        return True, ""
+
+    def _lead_review(self) -> str:
+        from config import make_llm, model_for
+        files = "\n\n".join(
+            f"--- {relative} ---\n{self._read(relative)}"
+            for relative in self.GENERATION_ORDER
+        )
+        description = (
+            "Review the delivered wordcount project against the behavior spec. "
+            "The public tests and the spec probe have already passed.\n\n"
+            f"{self._spec_block()}\n"
+            f"DELIVERED FILES:\n{files}\n\n"
+            "Reply with a short review. Use `STATUS: PASS` if the files match the spec, "
+            "otherwise `STATUS: FAIL` and list concrete issues."
+        )
+        return self._run_task(
+            role="Lead Manager / Reviewer",
+            goal="Independently review the delivered wordcount project.",
+            backstory="You are the accountable lead. You review real file content before approving.",
+            description=description,
+            expected_output="short review with STATUS: PASS or STATUS: FAIL",
+            model=make_llm(model_for("lead"), temperature=0.1),
+        )
+
+    # -- AgentWorker boundary ----------------------------------------------
     def produce(self, project_dir: Path, owner_command: str, spec_path: Path) -> dict:
         try:
             import crewai  # noqa: F401
         except Exception as exc:
             raise RuntimeError(f"real AgentWorker requires crewai: {exc}") from exc
-        spec_text = spec_path.read_text(encoding="utf-8")
-        try:
-            from main import AICodingFactory
-        except Exception as exc:
-            raise RuntimeError(f"real AgentWorker requires AICodingFactory/main: {exc}") from exc
+        self.project_dir = Path(project_dir).resolve()
+        self.project_dir.mkdir(parents=True, exist_ok=True)
+        self.spec_text = Path(spec_path).read_text(encoding="utf-8")
+        self.spec_name = Path(spec_path).name
 
-        factory = AICodingFactory(self.callback)
-        constrained = (
-            f"{owner_command}\n\n"
-            "Implement ONLY the Milestone 1 `wordcount` pilot in this project directory. "
-            "Follow this behavior spec exactly; do not look for hidden tests or verifiers.\n\n"
-            f"SPEC ({spec_path.name}):\n{spec_text}\n\n"
-            "Deliverables: wordcount package (core.py count_text, cli/__main__), README.md, "
-            "tests/test_wordcount.py (normal, empty, stdin -, missing file/arg exit 2), "
-            "artifacts/test-output.txt from running the tests."
-        )
-        if not hasattr(factory, "execute"):
-            raise RuntimeError("AICodingFactory.execute not available for real AgentWorker")
-        result = factory.execute(
-            constrained,
-            project_name_hint=project_dir.name,
-            project_dir=project_dir,
-            workspace_root=project_dir.parent,
-        )
-        return {"mode": self.mode, "honest": "real_crewai_attempt", "project_dir": str(project_dir), "result": str(result)[:4000]}
+        self._log(f"[MILESTONE1] focused CrewAI worker generating wordcount in {self.project_dir}")
+        for relative in self.GENERATION_ORDER:
+            model_role = "qa" if relative.startswith("tests/") else "backend"
+            self._generate(relative, model_role=model_role)
+
+        failure = ""
+        passed = False
+        rounds_used = 0
+        for round_no in range(self.max_repair_rounds + 1):
+            rounds_used = round_no
+            # The public spec probe is authoritative for implementation behavior.
+            # Model-written tests must never drive the implementation away from
+            # the spec: if the probe passes but the tests fail, fix the tests.
+            probe_ok, probe_detail = self._probe_spec()
+            if not probe_ok:
+                failure = probe_detail
+                self._log(f"[MILESTONE1] spec probe failed: {probe_detail[-1200:]}")
+                if round_no == self.max_repair_rounds:
+                    break
+                target = self._choose_repair_target(probe_detail)
+                self._log(f"[MILESTONE1] repair round {round_no + 1}/{self.max_repair_rounds}: {target}")
+                self._repair(target, probe_detail)
+                continue
+
+            code, output = self._run_public_tests()
+            if code == 0:
+                passed = True
+                break
+            failure = output
+            self._log(f"[MILESTONE1] public tests failed while spec probe passed: {output[-1200:]}")
+            if not self._used_test_scaffold:
+                self._log(
+                    "[MILESTONE1] agent-written tests failed validation; "
+                    "installing the public-spec test scaffold"
+                )
+                self._write_test_scaffold()
+                self._tests_source = "worker_spec_scaffold_after_agent_tests_failed"
+                self._used_test_scaffold = True
+                continue
+            # The scaffold is derived from the behavior spec, so a failure now
+            # means the implementation is wrong. Repair that, never the scaffold.
+            self._log("[MILESTONE1] public-spec test scaffold failed; repairing implementation")
+            if round_no == self.max_repair_rounds:
+                break
+            target = self._choose_repair_target(output)
+            if target == "tests/test_wordcount.py":
+                target = "wordcount/cli.py"
+            self._log(f"[MILESTONE1] repair round {round_no + 1}/{self.max_repair_rounds}: {target}")
+            try:
+                self._repair(target, output)
+            except Exception as error:
+                failure = f"repair failed: {type(error).__name__}: {error}"
+                self._log(f"[MILESTONE1] {failure}")
+                break
+
+        if not passed:
+            raise RuntimeError(
+                "wordcount did not pass the public test/probe gate after "
+                f"{rounds_used} repair rounds: {failure[-4000:]}"
+            )
+
+        lead_review = self._lead_review()
+        self._log(f"[MILESTONE1] lead review: {lead_review[:300]}")
+        return {
+            "mode": self.mode,
+            "honest": "real_crewai_attempt",
+            "project_dir": str(self.project_dir),
+            "agents": ["backend", "qa", "lead"],
+            "files": list(self.GENERATION_ORDER),
+            "tests_source": self._tests_source,
+            "repair_rounds": rounds_used,
+            "public_tests_passed": True,
+            "public_spec_probe_passed": True,
+            "lead_review": lead_review[:2000],
+        }
 
 
 class BusinessCycle:
@@ -636,11 +1271,27 @@ QA: {'PASS' if test_result['exit_code'] == 0 else 'FAIL'} · Manager review: {'P
             # With BANGKAH_SANDBOX_REQUIRED=1 and no wrapper, execution fails closed
             # before executable policy is the deciding factor; that's still a block.
             executable_blocked = True
-        # HONEST: path/executable guards only. NFR-SEC-09/10 (filesystem confinement
-        # and network egress restriction) are NOT implemented. Do not mark met until
-        # OS/container/VM isolation is enforced and evidenced.
         checks["sandbox_path_and_exec_guards_only_PARTIAL"] = traversal_blocked and executable_blocked
-        checks["sandbox_fs_network_isolation_NFR_SEC_09_10"] = False
+
+        # NFR-SEC-09/10 is only claimed when an operator wrapper is configured
+        # AND its canaries prove filesystem confinement and network isolation.
+        # In-process path/exec guards alone remain partial. The independent
+        # verifier cannot inspect host-level wrappers; tools/run_milestone1.py
+        # records the operator's external-sandbox evidence separately.
+        isolated = False
+        try:
+            from .sandbox_exec import ensure_sandbox_canaries, sandbox_status
+            status = sandbox_status()
+            canary = ensure_sandbox_canaries(project_dir)
+            isolated = bool(
+                status.get("configured")
+                and canary.get("ok")
+                and canary.get("fs_isolated")
+                and canary.get("network_isolated")
+            )
+        except Exception:
+            isolated = False
+        checks["sandbox_fs_network_isolation_NFR_SEC_09_10"] = isolated
 
     def _checks_evidence_gate(self, checks, tasks, project_dir, test_result, qa_report):
         qa_task = tasks[3]
