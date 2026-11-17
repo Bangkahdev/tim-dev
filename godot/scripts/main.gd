@@ -1,4 +1,4 @@
-﻿extends Node3D
+extends Node3D
 class_name StubMain
 
 const PLAYER_SCRIPT = preload("res://scripts/player.gd")
@@ -94,6 +94,12 @@ var _local_meeting_speaker_elapsed: float = 0.0
 var _local_meeting_attendees: Array[String] = []
 var _local_meeting_speaker_index: int = -1
 var _town_shift_on_duty: bool = true
+var _sun_light: DirectionalLight3D = null
+var _fill_light: DirectionalLight3D = null
+var _sky_material: ProceduralSkyMaterial = null
+var _world_environment: WorldEnvironment = null
+var _day_cycle_time: float = -1.0
+var _day_cycle_speed: float = 0.0
 
 var _api_label: Label
 var _location_label: Label
@@ -147,6 +153,7 @@ func _process(delta: float) -> void:
 		_request_status()
 	_update_local_meeting(delta)
 	_update_free_seat_swivel(delta)
+	_update_day_night_cycle(delta)
 	if _save_elapsed >= 5.0:
 		_save_elapsed = 0.0
 		_save_player_if_needed()
@@ -166,6 +173,7 @@ func _build_environment() -> void:
 	sky_material.sun_curve = 0.15
 	var sky := Sky.new()
 	sky.sky_material = sky_material
+	_sky_material = sky_material
 	environment.background_mode = Environment.BG_SKY
 	environment.sky = sky
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
@@ -214,11 +222,13 @@ func _build_environment() -> void:
 	environment.ssr_depth_tolerance = 0.2
 
 	world_environment.environment = environment
+	_world_environment = world_environment
 	add_child(world_environment)
 
 	# Sun — cascaded shadows. Bias/pancake tuned to stop shadow acne/flicker
 	# (blend_splits off: seam blending can shimmer with a moving camera).
 	var sun := DirectionalLight3D.new()
+	_sun_light = sun
 	sun.name = "AfternoonSun"
 	sun.rotation_degrees = Vector3(-38, -35, 0)
 	sun.light_color = Color(1.0, 0.94, 0.80)
@@ -240,6 +250,7 @@ func _build_environment() -> void:
 
 	# Fill light — cool ambient bounce from sky.
 	var fill := DirectionalLight3D.new()
+	_fill_light = fill
 	fill.name = "FillLight"
 	fill.rotation_degrees = Vector3(-25, 145, 0)
 	fill.light_color = Color(0.70, 0.80, 0.92)
@@ -450,8 +461,16 @@ func _build_interaction_points() -> void:
 			_station_interactable(desk_id, str(station["title"]) + " Workstation",
 				str(station["workstation_id"]), str(station["account"]),
 				station["position"]))
+	# Destinasi landmark kota (Town District)
+	_interactables.append_array([
+		{"id":"town_mansion", "label":"Mansion Owner", "position":Vector3(132.0,0.0,8.0), "prompt":"E · Kunjungi Kediaman Pribadi Owner"},
+		{"id":"town_market", "label":"Pasar Tradisional", "position":Vector3(126.0,0.0,134.0), "prompt":"E · Kunjungi Pasar Tradisional Kota"},
+		{"id":"town_mall", "label":"Kopdes Merah Putih Mall", "position":Vector3(180.0,0.0,105.0), "prompt":"E · Kunjungi Pusat Komersial Kopdes Mall"},
+		{"id":"town_kopdes", "label":"Kopdes Unit Layanan", "position":Vector3(136.0,0.0,145.0), "prompt":"E · Kunjungi Layanan Cepat Koperasi Desa"},
+	])
 	_append_free_seat_interactables()
 	_append_door_interactables()
+	_append_vehicle_interactables()
 
 # Kursi dan sofa yang dibangun office_environment.gd didaftarkan sebagai titik
 # interaksi "duduk". Kursi kantor yang punya komputer dipetakan ke workstation
@@ -516,6 +535,26 @@ func _append_door_interactables() -> void:
 			"prompt": "Buka/tutup pintu " + door_label.to_lower(),
 			"kind": "door",
 			"door_index": door_index,
+		})
+
+# Registrasi kendaraan drivable (visual) yang dapat dikendarai pemain keliling HQ & Kota.
+func _append_vehicle_interactables() -> void:
+	var office_world = get_node_or_null("BangkahHeadquarters")
+	if not is_instance_valid(office_world) or not ("vehicles" in office_world):
+		return
+	for car in office_world.vehicles:
+		var car_node = car.get("node", null)
+		if not is_instance_valid(car_node):
+			continue
+		var car_id := str(car.get("id", "car"))
+		var car_label := str(car.get("label", "Mobil"))
+		_interactables.append({
+			"id": car_id,
+			"label": car_label,
+			"position": car.get("position", Vector3.ZERO),
+			"prompt": "E · Masuk & Kemudikan " + car_label,
+			"kind": "vehicle",
+			"node": car_node,
 		})
 
 # Interaction entry for a backend workstation. Station seat/camera/target
@@ -1056,6 +1095,8 @@ func _room_from_position(position: Vector3) -> String:
 	return best_room if best_distance < 10.5 else "corridor"
 
 func _update_interaction_prompt() -> void:
+	if not is_instance_valid(_prompt_label) or not is_instance_valid(_location_label):
+		return
 	if not is_instance_valid(player):
 		_prompt_label.visible = false
 		if is_instance_valid(_prompt_panel): _prompt_panel.visible = false
@@ -1064,6 +1105,12 @@ func _update_interaction_prompt() -> void:
 	if _desktop_active:
 		_prompt_label.visible = false
 		_prompt_panel.visible = false
+		return
+	# Saat berada di dalam kendaraan, tampilkan instruksi keluar.
+	if player.has_method("is_in_vehicle") and player.is_in_vehicle():
+		_prompt_label.text = "E · KELUAR DARI KENDARAAN"
+		_prompt_label.visible = true
+		_prompt_panel.visible = true
 		return
 	# Saat duduk di kursi bebas, tampilkan instruksi berdiri.
 	if player.is_seated:
@@ -1087,7 +1134,7 @@ func _update_interaction_prompt() -> void:
 	var prompt_text := str(target.get("prompt", "INTERACT"))
 	var target_id := str(target.get("id", ""))
 	if target_id == "coffee" and _coffee_carried:
-		prompt_text = "E · Kamu sudah membawa kopi — taruh di meja"
+		prompt_text = "E · Minum kopi sekarang (boost stamina) atau bawa ke meja"
 	elif (target_id in ["coffee_lounge_table", "coffee_pantry_bar"]) and not _coffee_carried:
 		prompt_text = "E · Belum ada kopi — ambil dulu di coffee station"
 	if str(target.get("kind", "")) == "door":
@@ -1110,14 +1157,16 @@ func _nearest_target() -> Dictionary:
 	var eye_position: Vector3 = player.global_position + Vector3(0, 1.55, 0)
 	var view_forward: Vector3 = player.get_view_forward()
 	for item in _interactables:
-		# Kursi & pintu pakai jangkauan lebih besar + kerucut lebih longgar:
-		# pemain bisa jadi berdiri agak menyamping dari objeknya.
+		# Kursi, pintu, dan kendaraan pakai jangkauan lebih besar + kerucut lebih longgar:
 		var item_kind := str(item.get("kind", ""))
 		var is_seat := item_kind in ["office", "meeting", "sofa"]
 		var is_door := item_kind == "door"
-		var reach_cap := 3.4 if is_door else (2.9 if is_seat else nearest_distance)
-		var cone_min := -0.45 if (is_seat or is_door) else 0.48
+		var is_veh := item_kind == "vehicle"
+		var reach_cap := 4.2 if is_veh else (3.4 if is_door else (2.9 if is_seat else nearest_distance))
+		var cone_min := -0.60 if (is_seat or is_door or is_veh) else 0.48
 		var target_position: Vector3 = item.position + Vector3(0, 0.85, 0)
+		if is_veh and is_instance_valid(item.get("node", null)):
+			target_position = (item.node as Node3D).global_position + Vector3(0, 0.85, 0)
 		var to_target := target_position - eye_position
 		var distance := to_target.length()
 		if distance < reach_cap and distance > 0.01 and view_forward.dot(to_target.normalized()) > cone_min:
@@ -1141,15 +1190,26 @@ func _nearest_target() -> Dictionary:
 	return nearest
 
 func _on_player_interact() -> void:
+	# Keluar dari kendaraan saat sedang menyetir
+	if is_instance_valid(player) and player.has_method("is_in_vehicle") and player.is_in_vehicle():
+		player.exit_vehicle()
+		_show_toast("Keluar dari kendaraan. Mobil terparkir.")
+		return
 	# Duduk bebas di kursi: tekan E lagi untuk berdiri, mouse memutar kursi.
 	if is_instance_valid(player) and player.is_seated and not _desktop_active:
 		_leave_free_seat()
 		return
 	var target := _nearest_target()
 	if target.is_empty():
-		_show_toast("Tidak ada objek dalam jangkauan. Dekati workstation atau karyawan.")
+		_show_toast("Tidak ada objek dalam jangkauan. Dekati workstation, kendaraan, atau karyawan.")
 		return
 	var target_id := str(target.get("id", ""))
+	if str(target.get("kind", "")) == "vehicle":
+		var vnode = target.get("node", null)
+		if is_instance_valid(vnode) and is_instance_valid(player):
+			player.enter_vehicle(vnode)
+			_show_toast("Mengemudi %s: [W/S] Gas & Rem · [A/D] Belok · [V] Kamera · [E] Keluar" % str(target.get("label", "Mobil")))
+		return
 	if str(target.get("kind", "")) in ["office", "meeting", "sofa"]:
 		var workstation = target.get("workstation", null)
 		if workstation is Dictionary and not (workstation as Dictionary).is_empty():
@@ -1188,6 +1248,18 @@ func _on_player_interact() -> void:
 		return
 	if target_id == "workstation":
 		_enter_workstation(target)
+		return
+	if target_id == "town_mansion":
+		_show_toast("Mansion Owner Bangkah — Kawasan kediaman pribadi dan perencanaan strategi.")
+		return
+	elif target_id == "town_market":
+		_show_toast("Pasar Tradisional — Sentra kuliner, produk lokal, dan denyut harian masyarakat.")
+		return
+	elif target_id == "town_mall":
+		_show_toast("Kopdes Merah Putih Mall — Pusat perbelanjaan, tenant UMKM terpadu, dan etalase inovasi.")
+		return
+	elif target_id == "town_kopdes":
+		_show_toast("Koperasi Desa Bangkah — Titik layanan kemitraan dan logistik komunitas desa.")
 		return
 	var info := _interaction_info(target_id)
 	# Only send interaction IDs understood by the currently existing backend.
@@ -1345,9 +1417,28 @@ func _build_coffee_cup() -> Node3D:
 	cup.add_child(handle)
 	return cup
 
+func _drink_coffee() -> void:
+	if not _coffee_carried:
+		return
+	if is_instance_valid(_coffee_cup):
+		_coffee_cup.queue_free()
+	_coffee_cup = null
+	_coffee_carried = false
+	if is_instance_valid(player):
+		player.activity = "drinking_coffee"
+		player.sprint_speed = 8.6
+		var t := get_tree().create_timer(25.0)
+		t.timeout.connect(func():
+			if is_instance_valid(player):
+				player.sprint_speed = 6.8
+				if player.activity == "drinking_coffee":
+					player.activity = "idle"
+		)
+	_show_toast("Menikmati kopi hangat Bangkah! Stamina bertambah, sprint lebih kencang.")
+
 func _take_coffee() -> void:
 	if _coffee_carried:
-		_show_toast("Kamu sudah membawa kopi. Taruh di meja lounge atau bar pantry (E).")
+		_drink_coffee()
 		return
 	if not is_instance_valid(player):
 		return
@@ -1357,7 +1448,7 @@ func _take_coffee() -> void:
 	_coffee_cup.rotation = Vector3.ZERO
 	_coffee_carried = true
 	player.activity = "carrying_coffee"
-	_show_toast("Kopi panas diambil dari coffee station. Bawa ke meja lounge atau bar pantry.")
+	_show_toast("Kopi panas diambil dari coffee station. Bawa ke meja atau tekan E lagi untuk meminumnya.")
 
 func _place_coffee(target: Dictionary) -> void:
 	if not _coffee_carried:
@@ -1796,3 +1887,52 @@ func _configure_employee_home(npc) -> void:
 		npc.activity_text = "Di rumah · istirahat"
 		if "_labels" in npc and npc._labels.has("status_label") and is_instance_valid(npc._labels.status_label):
 			npc._labels.status_label.text = "DI RUMAH"
+
+## WLD-07: Simulasi Dinamis Jam Kerja, Siklus Hari/Malam & Pencahayaan Langit
+func _update_day_night_cycle(delta: float) -> void:
+	if not is_instance_valid(_sun_light) or not is_instance_valid(_sky_material):
+		return
+	var time_dict := Time.get_time_dict_from_system()
+	var current_hour: float = float(time_dict.get("hour", 12)) + float(time_dict.get("minute", 0)) / 60.0 + float(time_dict.get("second", 0)) / 3600.0
+	if _day_cycle_speed > 0.0:
+		if _day_cycle_time < 0.0:
+			_day_cycle_time = current_hour
+		_day_cycle_time = fmod(_day_cycle_time + (delta * _day_cycle_speed) / 60.0, 24.0)
+		current_hour = _day_cycle_time
+	elif _day_cycle_time >= 0.0:
+		current_hour = _day_cycle_time
+
+	var is_day: bool = current_hour >= 5.5 and current_hour < 18.5
+	if is_day:
+		var elevation: float = sin(clampf((current_hour - 5.5) / 13.0, 0.0, 1.0) * PI) * 55.0 + 5.0
+		var azimuth: float = lerpf(-75.0, 75.0, clampf((current_hour - 6.0) / 12.0, 0.0, 1.0))
+		_sun_light.rotation_degrees = Vector3(-elevation, azimuth, 0.0)
+		_sun_light.visible = true
+		if current_hour < 7.5:
+			var t := (current_hour - 5.5) / 2.0
+			_sun_light.light_color = Color(1.0, 0.78, 0.55).lerp(Color(1.0, 0.94, 0.80), t)
+			_sun_light.light_energy = lerpf(0.5, 1.35, t)
+			_sky_material.sky_top_color = Color(0.12, 0.18, 0.32).lerp(Color(0.24, 0.38, 0.52), t)
+			_sky_material.sky_horizon_color = Color(0.92, 0.55, 0.35).lerp(Color(0.74, 0.80, 0.72), t)
+		elif current_hour > 16.5:
+			var t := (current_hour - 16.5) / 2.0
+			_sun_light.light_color = Color(1.0, 0.94, 0.80).lerp(Color(1.0, 0.58, 0.35), t)
+			_sun_light.light_energy = lerpf(1.35, 0.45, t)
+			_sky_material.sky_top_color = Color(0.24, 0.38, 0.52).lerp(Color(0.15, 0.18, 0.32), t)
+			_sky_material.sky_horizon_color = Color(0.74, 0.80, 0.72).lerp(Color(0.90, 0.48, 0.28), t)
+		else:
+			_sun_light.light_color = Color(1.0, 0.96, 0.86)
+			_sun_light.light_energy = 1.35
+			_sky_material.sky_top_color = Color(0.24, 0.38, 0.52)
+			_sky_material.sky_horizon_color = Color(0.74, 0.80, 0.72)
+		if is_instance_valid(_fill_light):
+			_fill_light.light_energy = 0.35
+	else:
+		_sun_light.rotation_degrees = Vector3(-35.0, 180.0, 0.0)
+		_sun_light.light_color = Color(0.40, 0.55, 0.85)
+		_sun_light.light_energy = 0.18
+		_sky_material.sky_top_color = Color(0.04, 0.06, 0.12)
+		_sky_material.sky_horizon_color = Color(0.08, 0.12, 0.20)
+		if is_instance_valid(_fill_light):
+			_fill_light.light_energy = 0.08
+

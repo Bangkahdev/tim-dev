@@ -693,7 +693,7 @@ func _submit_terminal(command: String) -> void:
 		var head := str(parts[0]).to_lower()
 		match head:
 			"help":
-				_append_terminal("Perintah lokal: help, whoami, pwd, ls, date, echo <teks>, clear\n")
+				_append_terminal("Perintah lokal: help, whoami, pwd, ls, date, status, sysinfo, echo <teks>, clear\n")
 			"whoami":
 				_append_terminal("guest (mode lokal)\n")
 			"pwd":
@@ -702,6 +702,10 @@ func _submit_terminal(command: String) -> void:
 				_append_terminal("Projects  Documents  README.txt\n")
 			"date":
 				_append_terminal(Time.get_datetime_string_from_system() + "\n")
+			"status":
+				_append_terminal("Workstation: %s | Mode: Standalone Desktop Simulator | Jam: %s\n" % [_workstation_id, Time.get_time_string_from_system().left(5)])
+			"sysinfo":
+				_append_terminal("Bangkah OS v1.0 Desktop MVP · Native Godot 4 Client · Local Sandbox Filesystem\n")
 			"echo":
 				_append_terminal((str(parts[1]) if parts.size() > 1 else "") + "\n")
 			"clear":
