@@ -67,7 +67,7 @@ APP_PERMISSIONS = {
     "employee": ["files", "terminal", "company"],
 }
 
-BUILTIN_COMMANDS = ["pwd", "whoami", "date", "ls", "cat", "head", "tail", "wc", "grep", "find", "help"]
+BUILTIN_COMMANDS = ["pwd", "whoami", "date", "ls", "cat", "head", "tail", "wc", "grep", "find", "help", "status", "sysinfo"]
 TEXT_EXTENSIONS = {".md", ".txt", ".json", ".csv", ".log", ".yaml", ".yml", ".ini", ".py", ".gd"}
 MAX_FILE_BYTES = 64 * 1024
 MAX_OUTPUT_CHARS = 16_000
@@ -827,6 +827,27 @@ class DesktopOperations:
                         lines.append("[daftar dipotong]")
                         break
                 return self._ok("\n".join(lines))
+            if name == "status":
+                from .office_store import STORE
+                snap = STORE.snapshot()
+                tasks_cnt = len(snap.get("tasks", []))
+                emps = ", ".join(e["id"] for e in snap.get("employees", []))
+                return self._ok(
+                    f"Workstation: {workstation_id}\n"
+                    f"Account: {account_id}\n"
+                    f"Time: {_now()}\n"
+                    f"Tasks: {tasks_cnt} total\n"
+                    f"Roster: {emps}"
+                )
+            if name == "sysinfo":
+                import sys as _sys
+                return self._ok(
+                    f"OS: Bangkah OS v1.0 (Sandbox Runtime)\n"
+                    f"Platform: {_sys.platform}\n"
+                    f"Python: {_sys.version.split()[0]}\n"
+                    f"Workspace: {workdir.name}\n"
+                    f"Domain: {DOMAIN.domain_name}"
+                )
             return self._error(f"{name}: perintah belum didukung")
         except DesktopError:
             raise
