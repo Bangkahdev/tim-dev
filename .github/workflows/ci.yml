@@ -44,6 +44,8 @@ jobs:
             tests/test_workstations.py \
             tests/test_business_cycle.py \
             tests/test_verify_milestone1_whitebox.py \
+            tests/test_external_sinks.py \
+            tests/test_verify_milestone2.py \
             ../it/lan/tests/test_lan_gateway.py \
             --ignore=workspace
 

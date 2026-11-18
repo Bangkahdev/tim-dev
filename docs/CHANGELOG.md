@@ -1,5 +1,15 @@
 # Changelog
 
+## Milestone 2 — external actions end-to-end
+
+- Replaced the in-process simulated Milestone 2 runner with a real HTTP acceptance run: fresh `office_server.py` subprocesses, fresh SQLite databases, and the unchanged `core.action_adapters` SMTP/HTTPS paths.
+- Added local test providers in `backend/tools/external_sinks.py`: STARTTLS/AUTH PLAIN SMTP sink, HTTPS deployment webhook sink, throwaway OpenSSL CA/server certificate, and a drop-after-DATA mode for uncertain outcomes. Sink logs are JSONL; deployment stores only a SHA-256 of the bearer header.
+- Added `backend/tools/verify_milestone2.py`, an independent verifier that reads both databases and sink logs directly, recomputes every approval hash, proves the immutability trigger, checks delivery/idempotency/backoff/reconciliation/requeue behavior, and scans artifacts for configured secrets.
+- Added `backend/tools/check_milestone2_state.py`, a fresh-process persistence probe after backend restart.
+- Acceptance covers approval-only no-send, explicit execute, duplicate idempotency, reject with no outbox/delivery, manual expense, unknown → reconcile, exhaustion → requeue, non-HTTPS deployment refusal, audit evidence, and three consecutive clean cycles.
+- Added `backend/tests/test_external_sinks.py` and `backend/tests/test_verify_milestone2.py`; full suite now 207 passed.
+- Documented the contract and results in `docs/MILESTONE-2-PLAYBOOK.md` and `docs/MILESTONE-2-EVIDENCE.md`.
+
 ## Authentication & RBAC security hardening
 
 - Removed the anonymous-Owner fallback. Every `/api/*` route except `POST /api/auth/login` now requires a verified session; missing, invalid, expired, revoked and disabled-account sessions return 401.
