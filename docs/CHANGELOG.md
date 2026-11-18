@@ -1,5 +1,13 @@
 # Changelog
 
+## Sandbox canary hardening
+
+- `enforce_sandbox` now runs the cached filesystem/network canaries whenever `BANGKAH_SANDBOX_REQUIRED=1`, so execution paths that use only this function cannot bypass the isolation check.
+- Fixed four `[-500]` indexing bugs in `run_sandbox_canaries`: short non-JSON wrapper output now yields a clean failed-canary result instead of `IndexError`.
+- The network canary now runs the same probe outside the sandbox as a control. If the host cannot reach the target, the result is inconclusive and fails closed; a blocked inner probe is no longer accepted without a reachable control.
+- Documented that the wrapper is operator-controlled and can fabricate canary JSON, so canaries are supporting evidence. NFR-SEC-09/10 still requires recorded manual probes (outside-file read fails; outbound network fails) from inside the real container/VM.
+- Expanded `backend/tests/test_sandbox_exec.py` to 20 tests covering control-probe semantics, inconclusive networks, short non-JSON output, caching, and `enforce_sandbox` fail-closed behavior.
+
 ## Milestone 2 — external actions end-to-end
 
 - Replaced the in-process simulated Milestone 2 runner with a real HTTP acceptance run: fresh `office_server.py` subprocesses, fresh SQLite databases, and the unchanged `core.action_adapters` SMTP/HTTPS paths.
