@@ -41,6 +41,7 @@ jobs:
             tests/test_auth_security.py \
             tests/test_company_operations.py \
             tests/test_safe_env.py \
+            tests/test_sandbox_exec.py \
             tests/test_workstations.py \
             tests/test_business_cycle.py \
             tests/test_verify_milestone1_whitebox.py \

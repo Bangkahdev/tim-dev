@@ -98,7 +98,9 @@ def main(argv=None) -> int:
         if not sandbox_preflight.get("ok"):
             print(f"ERROR: sandbox canaries did not prove FS+network isolation: {sandbox_preflight}", file=sys.stderr)
             return 2
-        print(f"Sandbox preflight: FS isolated={sandbox_preflight.get('fs_isolated')} network isolated={sandbox_preflight.get('network_isolated')}")
+        print(f"Sandbox preflight: FS isolated={sandbox_preflight.get('fs_isolated')} "
+              f"network isolated={sandbox_preflight.get('network_isolated')} "
+              f"network control reachable={sandbox_preflight.get('network_control_reachable')}")
 
     required = max(1, args.cycles)
     consecutive = 0

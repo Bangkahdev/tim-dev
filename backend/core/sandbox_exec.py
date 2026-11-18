@@ -106,7 +106,9 @@ def enforce_sandbox(argv: Sequence[str], project_dir: str | Path, source: dict |
     """Return argv wrapped by configured sandbox, or raise when required+missing.
 
     Callers MUST use this (not best-effort wrap_argv) for execution paths that
-    must honor BANGKAH_SANDBOX_REQUIRED.
+    must honor BANGKAH_SANDBOX_REQUIRED. When required mode is active this also
+    runs the cached isolation canaries, so a caller cannot bypass the canary
+    check by using this function alone.
     """
     argv = list(argv)
     status = sandbox_status(source)
@@ -117,6 +119,10 @@ def enforce_sandbox(argv: Sequence[str], project_dir: str | Path, source: dict |
         return argv
     if not status["active"]:
         return argv
+    if status["required"]:
+        # Fail closed: required mode must not execute anything without
+        # independent evidence that the wrapper isolates filesystem and network.
+        ensure_sandbox_canaries(project_dir, source=source)
     project_dir = str(Path(project_dir).resolve())
     prefix = [p.replace(PROJECT_DIR_TOKEN, project_dir) for p in status["wrapper_argv"]]
     return prefix + argv
@@ -152,6 +158,25 @@ def _default_canary_runner(argv: list[str], project_dir: Path, timeout: int) -> 
     return subprocess.run(argv, cwd=project_dir, capture_output=True, text=True, timeout=timeout, shell=False)
 
 
+def _canary_payload(completed: subprocess.CompletedProcess) -> dict:
+    """Parse the last canary JSON line without failing on short non-JSON output."""
+    stdout = completed.stdout or ""
+    stderr = completed.stderr or ""
+    if not stdout.strip():
+        return {"raw": "", "stderr": stderr[-500:]}
+    try:
+        value = json.loads(stdout.strip().splitlines()[-1])
+    except Exception:
+        return {"raw": stdout[-500:], "stderr": stderr[-500:]}
+    if isinstance(value, dict):
+        return value
+    return {"raw": stdout[-500:], "stderr": stderr[-500:]}
+
+
+def _canary_ran(payload: dict) -> bool:
+    return isinstance(payload, dict) and payload.get("ok") is True and "leaked" in payload
+
+
 def run_sandbox_canaries(
     project_dir: str | Path,
     source: dict | None = None,
@@ -162,8 +187,14 @@ def run_sandbox_canaries(
 
     A required/validated sandbox must BLOCK both canaries:
     - filesystem: reading a sentinel file outside project_dir must fail
-    - network: outbound TCP connect must fail
+    - network: outbound TCP connect must fail inside the sandbox while the same
+      probe succeeds outside the sandbox. If the control probe cannot reach the
+      network, the result is inconclusive and treated as not isolated.
     If either canary leaks, required mode must be rejected.
+
+    The wrapper is operator-controlled, so a wrapper that fabricates canary JSON
+    can defeat these checks. Canaries are supporting evidence, not standalone
+    proof of NFR-SEC-09/10.
     """
     project_dir = Path(project_dir).resolve()
     project_dir.mkdir(parents=True, exist_ok=True)
@@ -175,6 +206,7 @@ def run_sandbox_canaries(
         "status_error": status.get("error"),
         "fs_isolated": None,
         "network_isolated": None,
+        "network_control_reachable": None,
         "ok": False,
         "details": {},
     }
@@ -195,27 +227,43 @@ def run_sandbox_canaries(
     try:
         fs_argv = wrap_argv(["python", "-c", FS_CANARY_SCRIPT, str(sentinel_path)], project_dir, source)
         fs = run(fs_argv, project_dir, 30)
-        fs_payload = {}
-        try:
-            fs_payload = json.loads((fs.stdout or "").strip().splitlines()[-1]) if (fs.stdout or "").strip() else {}
-        except Exception:
-            fs_payload = {"raw": (fs.stdout or "")[-500], "stderr": (fs.stderr or "")[-500]}
+        fs_payload = _canary_payload(fs)
         leaked_fs = bool(fs_payload.get("leaked")) if isinstance(fs_payload, dict) else False
-        fs_ran = isinstance(fs_payload, dict) and fs_payload.get("ok") is True and "leaked" in fs_payload
-        result["fs_isolated"] = bool(fs_ran and fs_payload.get("leaked") is False)
+        fs_ran = _canary_ran(fs_payload)
+        result["fs_isolated"] = bool(fs_ran and leaked_fs is False)
         result["details"]["filesystem"] = {"exit_code": fs.returncode, "payload": fs_payload, "ran": fs_ran}
 
         net_argv = wrap_argv(["python", "-c", NET_CANARY_SCRIPT], project_dir, source)
         net = run(net_argv, project_dir, 30)
-        net_payload = {}
-        try:
-            net_payload = json.loads((net.stdout or "").strip().splitlines()[-1]) if (net.stdout or "").strip() else {}
-        except Exception:
-            net_payload = {"raw": (net.stdout or "")[-500], "stderr": (net.stderr or "")[-500]}
+        net_payload = _canary_payload(net)
         leaked_net = bool(net_payload.get("leaked")) if isinstance(net_payload, dict) else False
-        net_ran = isinstance(net_payload, dict) and net_payload.get("ok") is True and "leaked" in net_payload
-        result["network_isolated"] = bool(net_ran and net_payload.get("leaked") is False)
-        result["details"]["network"] = {"exit_code": net.returncode, "payload": net_payload, "ran": net_ran}
+        net_ran = _canary_ran(net_payload)
+
+        # Control probe: the same network check outside the sandbox. Without a
+        # successful control, a blocked sandbox probe could simply mean the host
+        # itself is offline, which proves nothing about wrapper isolation.
+        control = run(["python", "-c", NET_CANARY_SCRIPT], project_dir, 30)
+        control_payload = _canary_payload(control)
+        control_ran = _canary_ran(control_payload)
+        control_reachable = bool(control_ran and control_payload.get("leaked") is True)
+        result["network_control_reachable"] = control_reachable
+        result["details"]["network_control"] = {
+            "exit_code": control.returncode,
+            "payload": control_payload,
+            "ran": control_ran,
+            "reachable": control_reachable,
+        }
+
+        network_isolated = bool(net_ran and leaked_net is False and control_reachable)
+        result["network_isolated"] = network_isolated
+        network_details = {"exit_code": net.returncode, "payload": net_payload, "ran": net_ran}
+        if net_ran and leaked_net is False and not control_reachable:
+            network_details["inconclusive"] = True
+            network_details["inconclusive_reason"] = (
+                "control probe outside the sandbox could not reach 1.1.1.1:53; "
+                "sandbox network isolation cannot be concluded"
+            )
+        result["details"]["network"] = network_details
     finally:
         if cleanup_sentinel:
             try:
