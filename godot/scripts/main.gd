@@ -766,6 +766,7 @@ func _build_ui() -> void:
 	_company_ui.demo_action_requested.connect(_show_toast)
 	_company_ui.connect_backend_requested.connect(_on_company_connect_requested)
 	_company_ui.company_action_requested.connect(_on_company_action_requested)
+	_company_ui.disconnect_backend_requested.connect(_on_company_disconnect_requested)
 	_company_ui.set_connection_state(_connection_online)
 
 	_workstation_sys = WORKSTATION_SYSTEM_SCRIPT.new()
@@ -1760,6 +1761,11 @@ func _on_company_connect_requested(url: String, token: String) -> void:
 	if is_instance_valid(_company_ui):
 		_company_ui.set_server_url(url)
 	_connect_backend()
+
+func _on_company_disconnect_requested() -> void:
+	_api_token = ""
+	_set_connection(false)
+	_show_toast("Sesi Owner ditutup.")
 
 func _on_player_ui_requested(page_id: String) -> void:
 	if is_instance_valid(_company_ui):
