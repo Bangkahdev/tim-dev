@@ -125,6 +125,8 @@ Every API call requires a company session created with `POST /api/auth/login`; t
 - `docs/API-REFERENCE.md` — API routes, request fields and response behavior.
 - `docs/WORKSTATION-AND-DESKTOP.md` — workstation slice, Bangkah OS apps, sandbox terminal and audit design.
 - `docs/OPERATIONS-AND-SECURITY.md` — setup, secrets, networking and external action safety.
+- `docs/MILESTONE-2-PLAYBOOK.md` — approval → outbox → local email/deployment sink acceptance contract.
+- `docs/MILESTONE-2-EVIDENCE.md` — executed Milestone 2 evidence and results.
 - `docs/FINAL-ACCEPTANCE.md` — delivered scope, automated test evidence and manual runtime acceptance checklist.
 - `docs/SRS-V1.3-TRACEABILITY.md` — requirement coverage and gaps.
 - `docs/BACKEND-INTEGRATION.md` — Godot / Python boundaries and data flow.
