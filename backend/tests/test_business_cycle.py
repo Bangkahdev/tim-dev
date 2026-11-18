@@ -1,6 +1,8 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from core.business_cycle import BusinessCycle, check_rbac_and_approval, record_pipeline_result
 from core.company_operations import CompanyOperations
@@ -14,11 +16,15 @@ class BusinessCycleTests(unittest.TestCase):
         self.workspace = self.root / "projects"
 
     def test_full_cycle_produces_evidence_and_persists(self):
-        result = BusinessCycle(self.ops, workspace_root=self.workspace).run(
-            "Build a small Python CLI utility that counts lines, words and characters, "
-            "with tests and a README",
-            "pilot-test",
-        )
+        # This is a no-operator-sandbox integration test: the in-process guards
+        # alone must not claim NFR-SEC-09/10. A developer .env may configure a
+        # real wrapper, so disable it explicitly for this assertion.
+        with patch.dict(os.environ, {"BANGKAH_SANDBOX_REQUIRED": "", "BANGKAH_SANDBOX_CMD": ""}):
+            result = BusinessCycle(self.ops, workspace_root=self.workspace).run(
+                "Build a small Python CLI utility that counts lines, words and characters, "
+                "with tests and a README",
+                "pilot-test",
+            )
         self.assertEqual(result["test_exit_code"], 0)
         self.assertEqual(result["owner_decision"], "approved")
         checks = result["checks"]
