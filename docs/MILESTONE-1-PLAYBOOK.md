@@ -68,6 +68,8 @@ Use the agent-facing spec as the single source of truth: **[`docs/specs/wordcoun
   `export BANGKAH_SANDBOX_CMD='docker run --rm --network none -v {project_dir}:/work -w /work <image>'`
   The image must contain Python and `pytest`. Before trusting a run, execute manual probes from inside the wrapper and keep the transcript: reading a host file outside `/work` must fail, and `curl`/outbound TCP must fail.
 - **Canary limits (point 4):** the wrapper is operator-controlled, so a wrapper that fabricates `{"ok": true, "leaked": false}` can pass the canary without providing any isolation. Canaries are supporting evidence, **not standalone proof**. NFR-SEC-09/10 evidence must include recorded manual probes from inside the real container/VM (outside-file read fails; outbound network fails), stored with the run logs.
+- **Validated local run (2026-11-19):** a real CrewAI + Ollama `qwen2.5-coder:7b` run inside bubblewrap passed 3/3 consecutive cycles in three attempts. The exact environment, command, per-attempt Paper/PrintJob IDs, test-suite result, and evidence paths are recorded in [`MILESTONE-1-EVIDENCE.md`](MILESTONE-1-EVIDENCE.md). The independent verifier reports its own `verify.sandbox.fs_network_isolation_NFR_SEC_09_10` key as `False` by design because it cannot inspect the host wrapper; the runner records the operator's `--external-sandbox` evidence plus preflight canaries and manual probes.
+- **Docker host note:** if `docker.service` fails with `iptables ... nat-PREROUTING: CHAIN_ADD failed`, fix the host firewall/NAT setup (or use bubblewrap) before claiming the Docker wrapper path. Do not silently fall back to no sandbox.
 
 ## Running the acceptance set (reproducible)
 

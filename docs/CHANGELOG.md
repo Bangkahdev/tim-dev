@@ -1,5 +1,28 @@
 # Changelog
 
+## Milestone 1 — real-agent acceptance re-run (2026-11-19)
+
+- Re-ran Milestone 1 with the **real CrewAI worker** (`crewai` 1.15.34) against a
+  real local Ollama model (`qwen2.5-coder:7b`): **3/3 consecutive passes**, three
+  attempts total, no repair loop. Every attempt had a fresh project directory and
+  fresh isolated DB; the independent verifier passed 11/11 hidden cases and the
+  fresh-process restart probe passed.
+- The agent's own `tests/test_wordcount.py` passed in all three attempts
+  (`tests_source=None`, `repair_rounds=None`); the public-spec scaffold was not
+  needed.
+- Sandbox evidence used bubblewrap 0.13.1 because the host Docker daemon fails to
+  start on an iptables/NAT host issue. Preflight canaries and recorded manual
+  probes prove outside-project reads fail, outbound TCP/DNS fails, and the
+  outside-sandbox network control succeeds.
+- Re-ran the full backend suite with the developer `.env` sandbox active:
+  **214 passed in 105.39s**.
+- Fixed `tests/test_business_cycle.py` to disable a developer `.env` sandbox for
+  its “in-process guards alone must not claim NFR-SEC-09/10” assertion; without
+  this the test saw the active real wrapper and failed.
+- Documented `BANGKAH_SANDBOX_REQUIRED`/`BANGKAH_SANDBOX_CMD` (Docker and
+  bubblewrap examples) in `backend/.env.example` and recorded the full run in
+  `docs/MILESTONE-1-EVIDENCE.md`.
+
 ## Sandbox canary hardening
 
 - `enforce_sandbox` now runs the cached filesystem/network canaries whenever `BANGKAH_SANDBOX_REQUIRED=1`, so execution paths that use only this function cannot bypass the isolation check.

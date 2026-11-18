@@ -1,24 +1,51 @@
 # Milestone 1 Evidence — Real Agent, Three Consecutive Passes
 
-**Date:** 2026-11-08
-**Status:** **PASS for the machine-verifiable acceptance set.** This is not a cloud-model run and does not include the manual Godot visual check (see “Not claimed”).
+## Latest acceptance run — 2026-11-19
 
-## Environment
+**Status: PASS for the machine-verifiable acceptance set.** This is a real CrewAI
+agent run against a real local model (Ollama), executed inside a real
+filesystem/network sandbox (bubblewrap). It is not a cloud-model run and does not
+include the manual Godot visual check (see “Not claimed”).
 
-- Linux host without Docker/Podman; sandbox provided by **bubblewrap 0.13.1**.
+### Environment
+
+- Linux host `bangkah`; Docker is installed but the daemon could not start
+  because the host iptables/nftables NAT chain is broken
+  (`nat-PREROUTING`/`docker-bridges` missing). Sandbox was therefore provided by
+  **bubblewrap 0.13.1**, which the playbook explicitly accepts as an equivalent
+  OS sandbox.
 - **Python 3.12.16** (uv-managed interpreter).
-- Local Ollama model **`qwen2.5-coder:7b`** for the implementer, QA, and advisory lead roles.
-- Cloud API keys in `backend/.env` were empty, so no cloud model was used. The local Ollama run is the explicitly documented equivalent for this environment.
-- Sandbox wrapper: `bwrap --unshare-net --die-with-parent` with the project directory as the only writable bind at `/work`, read-only system/runtime mounts, and a tmpfs `/tmp`.
-- Preflight canaries: **filesystem isolated = true** (outside sentinel unreadable), **network isolated = true** (outbound TCP blocked).
+- **CrewAI 1.15.34** (real package from `backend/.pylibs`) and **Ollama
+  `qwen2.5-coder:7b`** for the implementer, QA, and advisory lead roles.
+- Cloud API keys in `backend/.env` are empty; this is the documented local-model
+  equivalent for this environment. No cloud tokens were consumed.
+- Sandbox wrapper: `/usr/bin/bwrap --unshare-net --die-with-parent` with only the
+  project directory writable at `/work`, read-only system/runtime mounts, and a
+  tmpfs `/tmp`.
+- Preflight canaries: **filesystem isolated = true**, **network isolated =
+  true**, **outside-sandbox control probe reachable = true**.
+- Manual isolation probes (recorded):
+  `backend/workspace/projects/sandbox-manual-evidence-20261119-033948.txt`.
+  Outside project read fails, outbound TCP/DNS fails, project read succeeds, and
+  the same TCP control succeeds outside the sandbox.
 
-## Command
+### Command
 
 Run from `backend/`:
 
 ```bash
 export BANGKAH_SANDBOX_REQUIRED=1
-export BANGKAH_SANDBOX_CMD='/usr/bin/bwrap --unshare-net --die-with-parent --ro-bind /usr /usr --ro-bind /home/atha/.local/share/uv/python /home/atha/.local/share/uv/python --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 --ro-bind /etc /etc --proc /proc --dev /dev --tmpfs /tmp --bind {project_dir} /work --chdir /work --setenv PATH /usr/bin:/bin --setenv HOME /tmp --setenv PYTHONDONTWRITEBYTECODE 1'
+export BANGKAH_SANDBOX_CMD='/usr/bin/bwrap --unshare-net --die-with-parent \
+  --ro-bind /usr /usr \
+  --ro-bind /home/atha/.local/share/uv/python /home/atha/.local/share/uv/python \
+  --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 \
+  --ro-bind /etc /etc --proc /proc --dev /dev --tmpfs /tmp \
+  --bind {project_dir} /work --chdir /work \
+  --setenv PATH /usr/bin:/bin --setenv HOME /tmp \
+  --setenv PYTHONDONTWRITEBYTECODE 1'
+export MODEL_MANAGER=ollama/qwen2.5-coder:7b
+export MODEL_CODER=ollama/qwen2.5-coder:7b
+export MODEL_SPECIALIST=ollama/qwen2.5-coder:7b
 export MODEL_BACKEND=ollama/qwen2.5-coder:7b
 export MODEL_QA=ollama/qwen2.5-coder:7b
 export MODEL_LEAD=ollama/qwen2.5-coder:7b
@@ -26,14 +53,17 @@ export PYTHONPATH=.pylibs:.
 PY=/home/atha/.local/share/uv/python/cpython-3.12-linux-x86_64-gnu/bin/python3.12
 
 "$PY" tools/run_milestone1.py \
-  --cycles 3 --isolated-db \
-  --workspace /tmp/opencode/m1-acceptance-20261108 \
-  --max-attempts 12 \
-  --external-sandbox 'bwrap --unshare-net --die-with-parent, project-only bind at /work; preflight canaries prove FS sentinel unreadable and outbound network blocked' \
-  --worker real
+  --cycles 3 --isolated-db --max-attempts 12 \
+  --worker real \
+  --external-sandbox 'bwrap 0.13.1: --unshare-net, project-only bind at /work, ro system/runtime mounts, tmpfs /tmp; manual probes: backend/workspace/projects/sandbox-manual-evidence-20261119-033948.txt; Docker daemon unavailable on host (iptables nat-PREROUTING failure)'
 ```
 
-## Result
+The `BANGKAH_SANDBOX_*` variables are exported explicitly because
+`tools/run_milestone1.py` checks `sandbox_required()` before the CrewAI worker
+imports `config.py` (which is what loads `.env`). `.env` also contains the same
+values for normal backend operation.
+
+### Result
 
 `summary.json`:
 
@@ -50,46 +80,94 @@ PY=/home/atha/.local/share/uv/python/cpython-3.12-linux-x86_64-gnu/bin/python3.1
 ```
 
 Every attempt used a fresh project directory and a fresh isolated SQLite DB.
+No repair loop was needed: **3 attempts total**, all three passed on the first
+try.
 
 | # | Project key | Hidden tests | Verifier overall | Fresh-process restart | Sandbox canary | Paper | PrintJob | `tests_source` | Repair rounds |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | `milestone1-wordcount-20261108-133602-a1-r1` | 11/11 | PASS | PASS | FS+net PASS | `PAP-BE7C0C99A7CE` | `PRN-882B69AB2BDC` | `worker_spec_scaffold_after_agent_tests_failed` | 1 |
-| 2 | `milestone1-wordcount-20261108-133602-a2-r2` | 11/11 | PASS | PASS | FS+net PASS | `PAP-265364325754` | `PRN-6280160B99A0` | `worker_spec_scaffold_after_agent_tests_failed` | 1 |
-| 3 | `milestone1-wordcount-20261108-133602-a3-r3` | 11/11 | PASS | PASS | FS+net PASS | `PAP-AB5E48710D40` | `PRN-3E957ED2133A` | `worker_spec_scaffold_after_agent_tests_failed` | 1 |
+| 1 | `milestone1-wordcount-20261119-034217-a1-r1` | 11/11 | PASS | PASS | FS+net PASS | `PAP-5731D880F7E5` | `PRN-CB6B75236850` | `None` (agent tests passed) | `None` |
+| 2 | `milestone1-wordcount-20261119-034217-a2-r2` | 11/11 | PASS | PASS | FS+net PASS | `PAP-5E9583817A8F` | `PRN-05CB4AB0174A` | `None` (agent tests passed) | `None` |
+| 3 | `milestone1-wordcount-20261119-034217-a3-r3` | 11/11 | PASS | PASS | FS+net PASS | `PAP-353900131A5C` | `PRN-C5063D06620E` | `None` (agent tests passed) | `None` |
 
 Each attempt passed:
 
-- `verify.hidden.all_pass` — normal file, empty file, stdin `-`, no trailing newline, single line without newline, lone `"\n"`, repeated whitespace/tabs, CRLF, missing file exit 2, missing argument exit 2, UTF-8 character (not byte) count.
-- `verify.OVERALL_VERIFIABLE` — DB tasks/evidence, final-report Paper, completed PrintJob, delivered event, audited owner decision, and required artifacts.
-- `restart.fresh_process_persistence` — a **new Python process** (`tools/check_persisted_state.py`) reopened the run DB after Paper delivery and found 5 completed tasks with 5 evidence rows, the Paper, the PrintJob, the delivery event, and the owner decision.
-- `sandbox_fs_network_isolation_NFR_SEC_09_10` — active wrapper plus canaries proving both filesystem confinement and blocked egress.
-- `restart_after_delivery_preserves_state`, `restart_keeps_evidence_paper_printjob_decision`, `duplicate_delivery_is_idempotent`, `task_evidence_persisted`, `all_decisions_in_audit`, and the RBAC/approval static checks.
+- `verify.hidden.all_pass` — normal file, empty file, stdin `-`, no trailing
+  newline, single line without newline, lone `"\n"`, repeated whitespace/tabs,
+  CRLF, missing file exit 2, missing argument exit 2, UTF-8 character (not byte)
+  count.
+- `verify.OVERALL_VERIFIABLE` — DB tasks/evidence, final-report Paper, completed
+  PrintJob, delivered event, audited owner decision, and required artifacts.
+- `restart.fresh_process_persistence` — a **new Python process**
+  (`tools/check_persisted_state.py`) reopened the run DB after Paper delivery and
+  found the completed tasks/evidence, Paper, PrintJob, delivery event, and owner
+  decision.
+- `sandbox.fs_network_isolation_NFR_SEC_09_10` — active wrapper plus canaries
+  proving both filesystem confinement and blocked egress.
+- RBAC/approval static checks: employee cannot reach owner routes, approval is
+  hash-bound, payload is immutable, approval is single-use.
 
-### Tests source (honest note)
+**Honest note on `verify.sandbox.fs_network_isolation_NFR_SEC_09_10`:** the
+independent verifier deliberately reports this key as `False` because it cannot
+inspect the host-level wrapper. The runner records the operator evidence from
+`--external-sandbox` plus the mandatory preflight canaries and manual probes.
+This is the documented, honest split; it is not a hidden failure.
 
-All three implementations (`wordcount/__init__.py`, `core.py`, `cli.py`, `__main__.py`) were generated by the CrewAI implementer. In every attempt the agent-written `tests/test_wordcount.py` failed validation, so the worker installed the deterministic **public-spec test scaffold** and recorded `tests_source=worker_spec_scaffold_after_agent_tests_failed` with `repair_rounds=1`. The scaffold is QA fallback material derived only from the agent-facing behavior spec; it contains no hidden verifier case. The independent hidden verifier then passed 11/11.
+### Test suite
 
-### Advisory lead review
+`backend/workspace/pytest-full-20261119-034311.log`:
 
-The local lead model returned `STATUS: FAIL` in all three advisory reviews. Its claims were factually contradicted by the delivered files and by executed tests, for example: it called `wordcount/__init__.py` empty although the file is 72 bytes; it said `core.py`/`cli.py` do not handle empty input although the empty-file hidden case passes; and it called `__main__.py` unnecessary although `python -m wordcount` requires it. Per the agreed design, the lead review is **recorded as advisory, not a gate**; executed public tests plus the independent Owner verifier decide acceptance. The advisory text is preserved in each run DB’s `agent_output` event.
+```text
+214 passed in 105.39s (0:01:45)
+```
 
-## Test suite
+This includes the sandbox fail-closed tests, the new control-probe semantics, the
+verifier whitebox mutants, the Milestone 2 acceptance verifier tests, and the
+business-cycle integration test fixed to disable a developer `.env` sandbox for
+its “in-process guards alone” assertion.
 
-Backend suite on the final code: **188 passed** (`PYTHONPATH=.pylibs:. python3.12 -m pytest -q`), including verifier whitebox mutants, worker orchestration, runner accounting, sandbox fail-closed tests, and RAG exclusion tests.
+### Evidence locations
 
-## Evidence locations
+- Acceptance root:
+  `backend/workspace/projects/milestone1-logs-20261119-034217/`
+  - `summary.json`
+  - per-attempt `*.json` and `*.db`
+  - `static.db`, `prints/`, `_sandbox_preflight/`
+- Generated project dirs:
+  `backend/workspace/projects/milestone1-wordcount-20261119-034217-a1-r1/`,
+  `...-a2-r2/`, `...-a3-r3/`
+- Console log:
+  `backend/workspace/projects/milestone1-console-20261119-034217.log`
+- Manual isolation probe transcript:
+  `backend/workspace/projects/sandbox-manual-evidence-20261119-033948.txt`
+- Full test log:
+  `backend/workspace/pytest-full-20261119-034311.log`
 
-- Acceptance root: `backend/workspace/projects/evidence-20261108/acceptance/`
-  - `milestone1-logs-20261108-133602/summary.json`
-  - per-attempt `*.json`, per-attempt `*.db`, generated project dirs, `prints/`, and preflight canary output.
-- Single real-agent pass (one-cycle rehearsal): `backend/workspace/projects/evidence-20261108/single-real-pass/`
-- Exploratory runs including failures: `backend/workspace/projects/evidence-20261108/exploratory-failures-and-pass/`
-- Deterministic integration baseline (explicitly **not** a Milestone 1 pass): `backend/workspace/projects/evidence-20261108/deterministic-baseline/`
-- Console logs: `backend/workspace/projects/evidence-20261108/m1-acceptance-console.log`, `m1-real-cycle1-console.log`
-- Archived old deterministic workspaces: `backend/workspace/archives/old-milestone1-workspaces-*.tar.gz`
+## Previous acceptance run — 2026-11-08
+
+The earlier run used the same local Ollama/CrewAI path and bubblewrap. It passed
+3/3 consecutive cycles with `qwen2.5-coder:7b`, but the agent-written test file
+was rejected in every attempt, so the worker installed the deterministic
+public-spec test scaffold (`tests_source=worker_spec_scaffold_after_agent_tests_failed`,
+`repair_rounds=1`). The 2026-11-19 run above is stronger: the agent's own tests
+passed and no scaffold or repair round was needed.
+
+Historical evidence is under
+`backend/workspace/projects/evidence-20261108/` (acceptance, single-pass, and
+exploratory runs) and `backend/workspace/archives/` (old deterministic
+workspaces). The advisory lead review in that run returned `STATUS: FAIL`; it was
+factually contradicted by the delivered files and executed tests and remains
+advisory by design, not an acceptance gate.
 
 ## Not claimed
 
-- **Cloud-model execution:** no cloud keys were configured; this evidence is a local Ollama/CrewAI run.
-- **Manual Godot check:** character status, tray, and Paper matching backend records remain `MANUAL_REQUIRED`. The automated runner records this as manual and does not claim it.
-- **Godot visual polish:** the uncommitted office/city visual changes are outside Milestone 1 scope.
+- **Cloud-model execution:** no cloud keys were configured; this evidence is a
+  local Ollama/CrewAI run. The local model is the explicitly documented
+  equivalent for this environment.
+- **Docker execution:** the Docker daemon is unavailable on this host because of
+  an iptables/nftables NAT initialization failure. The sandbox evidence is from
+  bubblewrap, not Docker.
+- **Manual Godot check:** character status, tray, and Paper matching backend
+  records remain `MANUAL_REQUIRED`. The automated runner records this as manual
+  and does not claim it.
+- **Godot visual polish:** the uncommitted office/city visual changes are outside
+  Milestone 1 scope.
