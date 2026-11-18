@@ -4,6 +4,7 @@ signal panel_visibility_changed(is_visible: bool)
 signal employee_chat_requested(employee_id: String)
 signal demo_action_requested(message: String)
 signal connect_backend_requested(url: String, token: String)
+signal disconnect_backend_requested()
 signal company_action_requested(action: String, payload: Dictionary)
 
 # Refined palette
@@ -42,6 +43,12 @@ var overlay_root: Control
 var toast_label: Label
 var backend_url_input: LineEdit
 var api_token_input: LineEdit
+var auth_username_input: LineEdit
+var auth_password_input: LineEdit
+var _auth_http: HTTPRequest
+var _auth_action: String = ""
+var _auth_pending_url: String = ""
+var _active_session_token: String = ""
 var toast_timer: Timer
 var scroll_container: ScrollContainer
 var header_tray_button: Button
@@ -62,6 +69,10 @@ const PAGE_ORDER := ["overview", "projects", "team", "documents", "meetings", "s
 func _ready() -> void:
 	layer = 20
 	_build_interface()
+	_auth_http = HTTPRequest.new()
+	_auth_http.timeout = 20.0
+	_auth_http.request_completed.connect(_on_auth_completed)
+	add_child(_auth_http)
 	toast_timer = Timer.new()
 	toast_timer.one_shot = true
 	toast_timer.wait_time = 2.8
@@ -418,6 +429,9 @@ func set_company_snapshot(data: Dictionary) -> void:
 	if not is_open:
 		return
 	if _ui_busy():
+		return
+	# Never rebuild the settings form while the Owner may be typing credentials.
+	if active_page == "settings":
 		return
 	var signature := JSON.stringify(company_snapshot)
 	if signature == last_snapshot_signature:
@@ -983,21 +997,35 @@ func _short_timestamp(value: String) -> String:
 
 func _render_settings() -> void:
 	_page_intro("Konfigurasi koneksi, sesi Owner, dan preferensi antarmuka.")
-	_add_notice(content_box, "KEAMANAN KONEKSI", "API lokal default hanya terikat ke loopback. Untuk server remote, aktifkan BANGKAH_API_TOKEN dan gunakan HTTPS melalui reverse proxy. Token yang dimasukkan di sini hanya disimpan dalam memori sesi game.", AMBER)
-	var card := _section_card(content_box, "KONEKSI BACKEND", "Konfigurasi server AI Office")
+	_add_notice(content_box, "KEAMANAN KONEKSI", "Gunakan login sesi Owner (/api/auth/login). Token sesi hanya disimpan di memori game dan dipakai untuk setiap permintaan /api/*. Untuk akses remote, tempatkan backend di belakang reverse proxy HTTPS. Token statis legacy hanya untuk loopback pengembangan.", AMBER)
+	var card := _section_card(content_box, "KONEKSI BACKEND", "Login sesi Owner ke AI Office")
 	card.add_child(_label("Alamat backend", 11, MUTED))
 	backend_url_input = LineEdit.new()
 	backend_url_input.text = current_server_url
 	backend_url_input.custom_minimum_size.y = 40
 	card.add_child(backend_url_input)
-	card.add_child(_label("API token (opsional untuk loopback)", 11, MUTED))
+	card.add_child(_label("Akun Owner", 11, MUTED))
+	auth_username_input = LineEdit.new()
+	auth_username_input.text = "owner"
+	auth_username_input.placeholder_text = "username"
+	auth_username_input.custom_minimum_size.y = 40
+	card.add_child(auth_username_input)
+	card.add_child(_label("Kata sandi Owner", 11, MUTED))
+	auth_password_input = LineEdit.new()
+	auth_password_input.secret = true
+	auth_password_input.placeholder_text = "kata sandi akun Owner"
+	auth_password_input.custom_minimum_size.y = 40
+	auth_password_input.text_submitted.connect(func(_text): _request_backend_connection())
+	card.add_child(auth_password_input)
+	card.add_child(_button("MASUK & SAMBUNG", Callable(self, "_request_backend_connection"), "primary"))
+	card.add_child(_button("LOGOUT SESI", Callable(self, "_request_logout"), "secondary"))
+	card.add_child(_label("Token statis legacy (opsional, hanya loopback)", 11, MUTED))
 	api_token_input = LineEdit.new()
-	api_token_input.placeholder_text = "Bearer token dari konfigurasi backend"
+	api_token_input.placeholder_text = "Bearer token legacy dari konfigurasi backend"
 	api_token_input.secret = true
 	api_token_input.custom_minimum_size.y = 40
 	card.add_child(api_token_input)
-	card.add_child(_button("SAMBUNG KE BACKEND", Callable(self, "_request_backend_connection"), "primary"))
-	card.add_child(_label("Token tidak ditulis ke file konfigurasi dan hilang ketika game ditutup.", 11, MUTED))
+	card.add_child(_label("Login sesi memakai /api/auth/login. Token tidak ditulis ke file konfigurasi dan hilang ketika game ditutup. Isi token statis hanya bila BANGKAH_LEGACY_TOKEN_ROLE diaktifkan untuk loopback.", 11, MUTED))
 	_style_form(card)
 	var preferences := _section_card(content_box, "ANTARMUKA", "Preferensi Owner")
 	_add_task_line(preferences, "Bahasa", "Indonesia", "DEFAULT", ACCENT)
@@ -1482,14 +1510,91 @@ func set_server_url(url: String) -> void:
 		backend_url_input.text = current_server_url
 
 func _request_backend_connection() -> void:
-	if not is_instance_valid(backend_url_input):
+	if not is_instance_valid(backend_url_input) or not is_instance_valid(_auth_http):
+		return
+	if not _auth_action.is_empty():
 		return
 	var url := backend_url_input.text.strip_edges().trim_suffix("/")
 	if not (url.begins_with("http://") or url.begins_with("https://")):
 		_demo_action("Alamat backend harus diawali http:// atau https://.")
 		return
-	current_server_url = url
-	connect_backend_requested.emit(url, api_token_input.text.strip_edges() if is_instance_valid(api_token_input) else "")
+	var username := auth_username_input.text.strip_edges() if is_instance_valid(auth_username_input) else "owner"
+	var password := auth_password_input.text if is_instance_valid(auth_password_input) else ""
+	var static_token := api_token_input.text.strip_edges() if is_instance_valid(api_token_input) else ""
+	if password.is_empty() and not static_token.is_empty():
+		# Explicit legacy-token path. Requires BANGKAH_LEGACY_TOKEN_ROLE on the
+		# backend and is intended only for loopback development.
+		current_server_url = url
+		connect_backend_requested.emit(url, static_token)
+		_demo_action("Menghubungkan dengan token legacy loopback.")
+		return
+	if password.is_empty():
+		_demo_action("Isi kata sandi Owner untuk login sesi.")
+		return
+	_auth_action = "login"
+	_auth_pending_url = url
+	var payload := JSON.stringify({"username": username, "password": password})
+	var error := _auth_http.request(
+		url + "/api/auth/login",
+		PackedStringArray(["Content-Type: application/json"]),
+		HTTPClient.METHOD_POST,
+		payload
+	)
+	if error != OK:
+		_auth_action = ""
+		_demo_action("Tidak bisa menghubungi backend untuk login.")
+		return
+	_demo_action("Memeriksa kredensial Owner...")
+
+func _request_logout() -> void:
+	if not is_instance_valid(_auth_http) or not _auth_action.is_empty():
+		return
+	if _active_session_token.is_empty():
+		disconnect_backend_requested.emit()
+		_demo_action("Tidak ada sesi Owner yang aktif.")
+		return
+	_auth_action = "logout"
+	var error := _auth_http.request(
+		current_server_url + "/api/auth/logout",
+		PackedStringArray(["Content-Type: application/json", "Authorization: Bearer " + _active_session_token]),
+		HTTPClient.METHOD_POST,
+		"{}"
+	)
+	if error != OK:
+		_auth_action = ""
+		_active_session_token = ""
+		disconnect_backend_requested.emit()
+		_demo_action("Sesi lokal ditutup (backend tidak terjangkau).")
+
+func _on_auth_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	var action := _auth_action
+	_auth_action = ""
+	var data: Variant = JSON.parse_string(body.get_string_from_utf8())
+	if action == "login":
+		if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
+			var message := "Login gagal."
+			if data is Dictionary:
+				var error_value: Variant = data.get("error", {})
+				if error_value is Dictionary:
+					message = str(error_value.get("message", message))
+			_demo_action(message)
+			return
+		var session: Variant = data.get("session", {}) if data is Dictionary else {}
+		var token := str(session.get("token", "")) if session is Dictionary else ""
+		if token.is_empty():
+			_demo_action("Backend tidak mengembalikan token sesi.")
+			return
+		_active_session_token = token
+		current_server_url = _auth_pending_url
+		if is_instance_valid(backend_url_input):
+			backend_url_input.text = current_server_url
+		connect_backend_requested.emit(current_server_url, token)
+		_demo_action("Sesi Owner aktif.")
+		return
+	if action == "logout":
+		_active_session_token = ""
+		disconnect_backend_requested.emit()
+		_demo_action("Sesi Owner ditutup.")
 
 func _demo_action(message: String) -> void:
 	demo_action_requested.emit(message)
