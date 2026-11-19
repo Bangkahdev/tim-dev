@@ -1,5 +1,37 @@
 # Changelog
 
+## Milestone 3 — legacy static token removed from default .env (2026-11-19)
+
+- Removed `BANGKAH_LEGACY_TOKEN_ROLE=owner` from the local `backend/.env`
+  (file is gitignored and not committed; only `.env.example` is tracked).
+  Session Owner login is now the default; the static bearer token remains an
+  explicit loopback-only legacy path behind `BANGKAH_LEGACY_TOKEN_ROLE` for
+  developers who opt in.
+- Re-verified after removal: `check_godot_auth.py` AUTH-CHECK: PASS
+  (wrong password rejected, valid login -> `/api/auth/me` 200, logout ->
+  old token 401 / session revoked).
+
+## Milestone 3 — Godot Owner session login/logout (2026-11-19)
+
+- Added real session login/logout to the Godot company UI:
+  `godot/scripts/company_ui.gd` settings panel now drives Owner login via
+  `POST /api/auth/login`, holds the session token in memory, and emits it to
+  `connect_backend_requested`. A new LOGOUT SESI button calls
+  `POST /api/auth/logout` and emits `disconnect_backend_requested`, clearing
+  the API token and marking the connection offline.
+- `godot/scripts/main.gd`: wired `disconnect_backend_requested` to clear
+  `_api_token` and set the connection offline.
+- New headless acceptance check `godot/scripts/auth_login_check.gd` and harness
+  `backend/tools/check_godot_auth.py`: wrong password rejected (no session),
+  valid login → `/api/auth/me` 200, logout → old token 401 (session revoked).
+- `BANGKAH_LEGACY_TOKEN_ROLE=owner` stays optional in the developer `.env`;
+  session login is the default and does not require it.
+- `auth_login_check.gd`: AUTH-CHECK: PASS; `check_godot_auth.py`:
+  GODOT-AUTH-CHECK: PASS; backend suite 214 passed;
+  `workstation_ui_check.gd` and `feature_v11_check.gd`: failures=0.
+- PR #39 `feat(godot): Owner session login/logout (Milestone 3)`; documented in
+  `docs/MILESTONE-3-PLAYBOOK.md` and `docs/MILESTONE-3-EVIDENCE.md`.
+
 ## Milestone 1 — real-agent acceptance re-run (2026-11-19)
 
 - Re-ran Milestone 1 with the **real CrewAI worker** (`crewai` 1.15.34) against a
