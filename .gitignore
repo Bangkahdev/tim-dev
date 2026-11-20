@@ -35,6 +35,13 @@ it/ftp/certs/
 it/ftp/.pylibs/
 it/r2/.cache/
 
+# Local leftovers and patch scratch space
+*.bak
+*.orig
+*.rej
+*.tmp
+_envpatch_tmp/
+
 # OS/editor
 .DS_Store
 Thumbs.db
