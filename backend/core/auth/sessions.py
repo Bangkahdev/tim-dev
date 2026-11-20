@@ -2,7 +2,6 @@ import hashlib
 import os
 import re
 import secrets
-import threading
 import time
 from datetime import datetime, timezone
 
@@ -20,8 +19,6 @@ GLOBAL_MAX_FAILURES = 30
 GLOBAL_WINDOW_SECONDS = 10 * 60
 GLOBAL_LOCK_SECONDS = 15 * 60
 
-_ATTEMPTS: dict[str, tuple[int, float, float]] = {}
-_ATTEMPTS_LOCK = threading.Lock()
 _FAKE_HASH = None
 
 
@@ -99,6 +96,12 @@ def _init():
                 revoked INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(username, revoked);
+            CREATE TABLE IF NOT EXISTS auth_login_attempts (
+                key TEXT PRIMARY KEY,
+                count INTEGER NOT NULL DEFAULT 0,
+                first_ts REAL NOT NULL,
+                lock_until REAL NOT NULL DEFAULT 0.0
+            );
         """)
         _migrate_auth_sessions(db)
         _ensure_columns(db)
@@ -132,31 +135,51 @@ def _key(kind, *parts):
 
 def clear_login_throttle():
     """Test helper: forget failed-login counters."""
-    with _ATTEMPTS_LOCK:
-        _ATTEMPTS.clear()
+    with LOCK, _db() as db:
+        db.execute("DELETE FROM auth_login_attempts")
 
 
 def _attempt_state(key, now_ts, window):
-    with _ATTEMPTS_LOCK:
-        count, first, lock_until = _ATTEMPTS.get(key, (0, now_ts, 0.0))
+    with LOCK, _db() as db:
+        row = db.execute(
+            "SELECT count, first_ts, lock_until FROM auth_login_attempts WHERE key=?",
+            (key,),
+        ).fetchone()
+        if not row:
+            db.execute(
+                "INSERT INTO auth_login_attempts(key, count, first_ts, lock_until) VALUES(?, 0, ?, 0.0)",
+                (key, now_ts),
+            )
+            return 0, 0.0
+        count, first, lock_until = row["count"], row["first_ts"], row["lock_until"]
         if lock_until and now_ts < lock_until:
             return count, lock_until - now_ts
         if lock_until and now_ts >= lock_until:
             count, first, lock_until = 0, now_ts, 0.0
         if now_ts - first > window:
             count, first, lock_until = 0, now_ts, 0.0
-        _ATTEMPTS[key] = (count, first, lock_until)
+        db.execute(
+            "UPDATE auth_login_attempts SET count=?, first_ts=?, lock_until=? WHERE key=?",
+            (count, first, lock_until, key),
+        )
         return count, 0.0
 
 
 def _record_failure(key, now_ts, window, max_failures, lock_base, lock_max=None):
     lock_max = lock_max or lock_base
-    with _ATTEMPTS_LOCK:
-        count, first, lock_until = _ATTEMPTS.get(key, (0, now_ts, 0.0))
-        if lock_until and now_ts < lock_until:
-            return lock_until - now_ts
-        if now_ts - first > window or (lock_until and now_ts >= lock_until):
-            count, first = 0, now_ts
+    with LOCK, _db() as db:
+        row = db.execute(
+            "SELECT count, first_ts, lock_until FROM auth_login_attempts WHERE key=?",
+            (key,),
+        ).fetchone()
+        if not row:
+            count, first, lock_until = 0, now_ts, 0.0
+        else:
+            count, first, lock_until = row["count"], row["first_ts"], row["lock_until"]
+            if lock_until and now_ts < lock_until:
+                return lock_until - now_ts
+            if now_ts - first > window or (lock_until and now_ts >= lock_until):
+                count, first = 0, now_ts
         count += 1
         lock_until = 0.0
         retry_after = 0.0
@@ -165,13 +188,17 @@ def _record_failure(key, now_ts, window, max_failures, lock_base, lock_max=None)
             duration = min(lock_base * (2 ** over), lock_max)
             lock_until = now_ts + duration
             retry_after = duration
-        _ATTEMPTS[key] = (count, first, lock_until)
+        db.execute(
+            "INSERT INTO auth_login_attempts(key, count, first_ts, lock_until) VALUES(?, ?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET count=excluded.count, first_ts=excluded.first_ts, lock_until=excluded.lock_until",
+            (key, count, first, lock_until),
+        )
         return retry_after
 
 
 def _reset_attempt(key):
-    with _ATTEMPTS_LOCK:
-        _ATTEMPTS.pop(key, None)
+    with LOCK, _db() as db:
+        db.execute("DELETE FROM auth_login_attempts WHERE key=?", (key,))
 
 
 def _fake_hash():

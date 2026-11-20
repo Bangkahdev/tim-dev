@@ -1573,7 +1573,20 @@ func _on_auth_completed(result: int, response_code: int, _headers: PackedStringA
 	if action == "login":
 		if result != HTTPRequest.RESULT_SUCCESS or response_code < 200 or response_code >= 300:
 			var message := "Login gagal."
-			if data is Dictionary:
+			if response_code == 401:
+				message = "Username atau kata sandi salah."
+			elif response_code == 429:
+				var retry_after := 0
+				for h in _headers:
+					if h.begins_with("Retry-After:"):
+						var parts := h.split(":")
+						if parts.size() > 1:
+							retry_after = int(parts[1].strip_edges())
+				if retry_after > 0:
+					message = "Terlalu banyak percobaan login, coba lagi %d detik lagi." % retry_after
+				else:
+					message = "Terlalu banyak percobaan login, coba lagi nanti."
+			elif data is Dictionary:
 				var error_value: Variant = data.get("error", {})
 				if error_value is Dictionary:
 					message = str(error_value.get("message", message))
