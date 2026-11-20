@@ -14,6 +14,7 @@ from urllib.parse import urlparse, parse_qs
 import hmac
 import ipaddress
 import os
+import uuid as _uuid
 
 from config import make_llm, model_for
 from main import AICodingFactory, LOG_DIR, WORKSPACE, check_ollama, create_project_name
@@ -711,32 +712,85 @@ class OfficeHandler(BaseHTTPRequestHandler):
             sid = str(body.get("service_id","")).strip()
             try:
                 self.send_json({"service": INFRA.start(sid, self.actor)})
-            except Exception as e:
-                self.send_json({"error": str(e)}, 400)
+            except ValueError as error:
+                self.send_json({"error": str(error)}, 400)
+            except Exception as error:
+                _cid = str(_uuid.uuid4())
+                print(f"[INFRA SERVICE START ERROR] cid={_cid} {error}", flush=True)
+                self.send_json({"error": "Gagal memulai layanan.", "correlation_id": _cid}, 500)
             return
         if route == "/api/infra/service/stop":
             sid = str(body.get("service_id","")).strip()
-            self.send_json({"service": INFRA.stop(sid, self.actor)})
+            try:
+                self.send_json({"service": INFRA.stop(sid, self.actor)})
+            except ValueError as error:
+                self.send_json({"error": str(error)}, 400)
+            except Exception as error:
+                _cid = str(_uuid.uuid4())
+                print(f"[INFRA SERVICE STOP ERROR] cid={_cid} {error}", flush=True)
+                self.send_json({"error": "Gagal menghentikan layanan.", "correlation_id": _cid}, 500)
             return
         if route == "/api/ftp/provision":
             u = str(body.get("username","")).strip()
-            self.send_json({"path": FTP.provision_home(u)})
+            try:
+                self.send_json({"path": FTP.provision_home(u)})
+            except ValueError as error:
+                self.send_json({"error": str(error)}, 400)
+            except Exception as error:
+                _cid = str(_uuid.uuid4())
+                print(f"[FTP PROVISION ERROR] cid={_cid} {error}", flush=True)
+                self.send_json({"error": "Gagal menyediakan direktori FTP.", "correlation_id": _cid}, 500)
             return
         if route == "/api/mail/provision":
             u = str(body.get("username","")).strip()
-            self.send_json({"email": MAIL.provision_mailbox(u)})
+            try:
+                self.send_json({"email": MAIL.provision_mailbox(u)})
+            except ValueError as error:
+                self.send_json({"error": str(error)}, 400)
+            except Exception as error:
+                _cid = str(_uuid.uuid4())
+                print(f"[MAIL PROVISION ERROR] cid={_cid} {error}", flush=True)
+                self.send_json({"error": "Gagal menyediakan kotak surel.", "correlation_id": _cid}, 500)
             return
         if route == "/api/network/subnet":
-            self.send_json({"subnet": NETWORK.create_subnet(str(body.get("id","")), str(body.get("network_id","bangkah-net")), str(body.get("name","")), str(body.get("cidr","")), body.get("gateway"), body.get("dns"))}, 201)
+            try:
+                self.send_json({"subnet": NETWORK.create_subnet(str(body.get("id","")), str(body.get("network_id","bangkah-net")), str(body.get("name","")), str(body.get("cidr","")), body.get("gateway"), body.get("dns"))}, 201)
+            except ValueError as error:
+                self.send_json({"error": str(error)}, 400)
+            except Exception as error:
+                _cid = str(_uuid.uuid4())
+                print(f"[NETWORK SUBNET ERROR] cid={_cid} {error}", flush=True)
+                self.send_json({"error": "Gagal membuat subnet.", "correlation_id": _cid}, 500)
             return
         if route == "/api/network/scope":
-            self.send_json({"scope": NETWORK.create_scope(str(body.get("id","")), str(body.get("subnet_id","")), str(body.get("name","")), str(body.get("pool_start","")), str(body.get("pool_end","")), int(body.get("lease_seconds",86400)))}, 201)
+            try:
+                self.send_json({"scope": NETWORK.create_scope(str(body.get("id","")), str(body.get("subnet_id","")), str(body.get("name","")), str(body.get("pool_start","")), str(body.get("pool_end","")), int(body.get("lease_seconds",86400)))}, 201)
+            except ValueError as error:
+                self.send_json({"error": str(error)}, 400)
+            except Exception as error:
+                _cid = str(_uuid.uuid4())
+                print(f"[NETWORK SCOPE ERROR] cid={_cid} {error}", flush=True)
+                self.send_json({"error": "Gagal membuat cakupan jaringan.", "correlation_id": _cid}, 500)
             return
         if route == "/api/network/lease":
-            self.send_json({"lease": NETWORK.allocate_lease(str(body.get("scope_id","")), str(body.get("hostname","")), str(body.get("mac","")), str(body.get("ip","")))}, 201)
+            try:
+                self.send_json({"lease": NETWORK.allocate_lease(str(body.get("scope_id","")), str(body.get("hostname","")), str(body.get("mac","")), str(body.get("ip","")))}, 201)
+            except ValueError as error:
+                self.send_json({"error": str(error)}, 400)
+            except Exception as error:
+                _cid = str(_uuid.uuid4())
+                print(f"[NETWORK LEASE ERROR] cid={_cid} {error}", flush=True)
+                self.send_json({"error": "Gagal mengalokasikan sewa jaringan.", "correlation_id": _cid}, 500)
             return
         if route == "/api/network/vpn/peer":
-            self.send_json({"peer": NETWORK.create_vpn_peer(str(body.get("id","")), str(body.get("username","")), str(body.get("device","")), str(body.get("allowed_ips","")))}, 201)
+            try:
+                self.send_json({"peer": NETWORK.create_vpn_peer(str(body.get("id","")), str(body.get("username","")), str(body.get("device","")), str(body.get("allowed_ips","")))}, 201)
+            except ValueError as error:
+                self.send_json({"error": str(error)}, 400)
+            except Exception as error:
+                _cid = str(_uuid.uuid4())
+                print(f"[NETWORK VPN PEER ERROR] cid={_cid} {error}", flush=True)
+                self.send_json({"error": "Gagal membuat peer VPN.", "correlation_id": _cid}, 500)
             return
 
         # Persisted company workflows. All external side effects are separated
@@ -912,8 +966,9 @@ class OfficeHandler(BaseHTTPRequestHandler):
                 STORE.record_interaction(channel_id, None, reply, (current or {}).get("room_id"), "owner_chat", 60)
                 self.send_json({"success": True, **result})
             except Exception as error:
-                print(f"[ROOM CHAT ERROR] {error}", flush=True)
-                self.send_json({"error": f"Pesan gagal diproses: {error}"}, 503)
+                _cid = str(_uuid.uuid4())
+                print(f"[ROOM CHAT ERROR] cid={_cid} {error}", flush=True)
+                self.send_json({"error": "Pesan gagal diproses.", "correlation_id": _cid}, 503)
             return
         if route == "/api/office/action":
             action = str(body.get("action", "")).strip()
@@ -1007,8 +1062,9 @@ class OfficeHandler(BaseHTTPRequestHandler):
             record_activity("lead", "idle", "Menganalisis instruksi, mengambil konteks RAG, dan mengorkestrasi tool kantor.")
             self.send_json(result)
         except Exception as error:
-            print(f"[ORCHESTRATOR ERROR] {error}", flush=True)
-            self.send_json({"error": f"Arman belum dapat menjalankan instruksi: {error}"}, 503)
+            _cid = str(_uuid.uuid4())
+            print(f"[ORCHESTRATOR ERROR] cid={_cid} {error}", flush=True)
+            self.send_json({"error": "Lead Manager belum dapat menjalankan instruksi.", "correlation_id": _cid}, 503)
         finally:
             CHAT_LOCK.release()
 
@@ -1030,8 +1086,9 @@ class OfficeHandler(BaseHTTPRequestHandler):
             STORE.record_interaction(employee_id, None, reply, (current or {}).get("room_id"), "owner_chat", 60)
             self.send_json(result)
         except Exception as error:
-            print(f"[EMPLOYEE CHAT ERROR] {error}", flush=True)
-            self.send_json({"error": f"{employee['name']} belum dapat memproses pesan: {error}"}, 503)
+            _cid = str(_uuid.uuid4())
+            print(f"[EMPLOYEE CHAT ERROR] cid={_cid} {error}", flush=True)
+            self.send_json({"error": f"{employee['name']} belum dapat memproses pesan.", "correlation_id": _cid}, 503)
         finally:
             with EMPLOYEE_CHAT_STATE_LOCK:
                 EMPLOYEE_CHAT_ACTIVE.pop(employee_id, None)

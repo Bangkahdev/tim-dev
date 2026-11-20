@@ -55,6 +55,9 @@ func _initialize() -> void:
 	if _messages.is_empty():
 		_finish("FAIL wrong password produced no user-visible error")
 		return
+	if not _last_message().contains("Username atau kata sandi salah"):
+		_finish("FAIL 401 message not specific: " + _last_message())
+		return
 
 	_ui.auth_password_input.text = password
 	_ui._request_backend_connection()
@@ -84,6 +87,18 @@ func _initialize() -> void:
 		_finish("FAIL old session token still accepted after logout (HTTP %d)" % revoked_code)
 		return
 
+	# Five more failures lock the throwaway account; the sixth must show the
+	# distinct 429 message instead of the generic 401 text.
+	for i in range(6):
+		_ui.auth_password_input.text = password + "-throttle"
+		_ui._request_backend_connection()
+		var throttle_deadline := Time.get_ticks_msec() + 20000
+		while not _ui._auth_action.is_empty() and Time.get_ticks_msec() < throttle_deadline:
+			await create_timer(0.1).timeout
+	if not _last_message().contains("Terlalu banyak percobaan"):
+		_finish("FAIL 429 throttle message not shown: " + _last_message())
+		return
+
 	_finish("PASS")
 
 
@@ -98,6 +113,10 @@ func _on_disconnect() -> void:
 
 func _on_message(message: String) -> void:
 	_messages.append(str(message))
+
+
+func _last_message() -> String:
+	return _messages[_messages.size() - 1] if not _messages.is_empty() else ""
 
 
 func _request_code(request_url: String, token: String) -> int:
