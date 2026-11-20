@@ -444,8 +444,8 @@ func _build_interaction_points() -> void:
 		{"id":"lift_l1", "label":"Lift (Lantai 1)", "position":Vector3(15.3,0.0,8.7), "prompt":"E · Naik/Turun Lift (samping tangga naik/turun)", "lift_floor":"L1"},
 		{"id":"lift_l2", "label":"Lift (Lantai 2)", "position":Vector3(15.3,6.2,8.7), "prompt":"E · Pilih lantai Lift (samping tangga)", "lift_floor":"L2"},
 		{"id":"lift_l3", "label":"Lift (Lantai 3)", "position":Vector3(15.3,12.4,8.7), "prompt":"E · Naik/Turun Lift (samping tangga)", "lift_floor":"L3"},
-		{"id":"stair_up_l1", "label":"Tangga Naik (ke L2)", "position":Vector3(13.6,0.0,14.7), "prompt":"E · Naik via Tangga Naik → Lantai 2", "to_floor":"L2", "to_pos":"stair"},
-		{"id":"stair_up_l2", "label":"Tangga Naik (ke L3)", "position":Vector3(13.6,6.2,14.7), "prompt":"E · Naik via Tangga Naik → Lantai 3", "to_floor":"L3", "to_pos":"stair"},
+		{"id":"stair_up_l1", "label":"Tangga Naik (ke L2)", "position":Vector3(13.6,0.0,16.4), "prompt":"E · Naik via Tangga Naik → Lantai 2", "to_floor":"L2", "to_pos":"stair"},
+		{"id":"stair_up_l2", "label":"Tangga Naik (ke L3)", "position":Vector3(13.6,6.2,16.4), "prompt":"E · Naik via Tangga Naik → Lantai 3", "to_floor":"L3", "to_pos":"stair"},
 		{"id":"stair_down_l2", "label":"Tangga Turun (ke L1)", "position":Vector3(10.6,6.2,6.6), "prompt":"E · Turun via Tangga Turun → Lantai 1", "to_floor":"L1", "to_pos":"stair"},
 		{"id":"stair_down_l3", "label":"Tangga Turun (ke L2)", "position":Vector3(10.6,12.4,6.6), "prompt":"E · Turun via Tangga Turun → Lantai 2", "to_floor":"L2", "to_pos":"stair"},
 	]
@@ -1241,8 +1241,9 @@ func _on_player_interact() -> void:
 		var destf := str(target.get("to_floor","L1"))
 		var ys2 := {"L1":0.06,"L2":6.26,"L3":12.46}
 		var sxp := 13.6 if str(target_id).begins_with("stair_up") else 10.6
+		var szp := 6.3 if str(target_id).begins_with("stair_up") else 16.3
 		if is_instance_valid(player):
-			player.global_position = Vector3(sxp, float(ys2.get(destf,0.06)), 14.1)
+			player.global_position = Vector3(sxp, float(ys2.get(destf,0.06)), szp)
 			if player.has_method("exit_seat"): player.exit_seat()
 		_show_toast(("Tangga Naik → " if str(target_id).begins_with("stair_up") else "Tangga Turun → ") + ({"L1":"Lantai 1","L2":"Lantai 2","L3":"Lantai 3"}.get(destf,destf)))
 		return
